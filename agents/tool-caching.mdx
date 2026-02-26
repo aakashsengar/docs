@@ -1,0 +1,114 @@
+---
+title: Tool Caching
+description: Cache tool execution results to avoid redundant API calls and speed up agent runs.
+---
+
+# Tool Caching
+
+RadarOS supports **result caching** for tools. When a tool is called with the same arguments within the TTL window, the cached result is returned instantly — no re-execution.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get current weather for a city",
+  parameters: z.object({
+    city: z.string().describe("City name"),
+  }),
+  execute: async ({ city }) => {
+    const res = await fetch(`https://api.weather.com/${city}`);
+    return await res.text();
+  },
+  cache: { ttl: 60_000 }, // Cache for 1 minute
+});
+
+const agent = new Agent({
+  name: "WeatherBot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool],
+});
+```
+
+If the agent calls `getWeather("Mumbai")` twice within 60 seconds, the second call returns the cached result without hitting the API.
+
+---
+
+## Configuration
+
+Add a `cache` property to any tool definition:
+
+<ParamField path="cache.ttl" type="number" required>
+  Time-to-live in milliseconds. Cached results expire after this duration. Example: `60_000` for 1 minute, `300_000` for 5 minutes.
+</ParamField>
+
+---
+
+## How It Works
+
+1. When a tool is called, the `ToolExecutor` generates a **cache key** from the tool name and a stable serialization of the arguments.
+2. If a valid (non-expired) cache entry exists for that key, the result is returned immediately.
+3. If no cache entry exists, the tool executes normally and the result is stored with an expiry timestamp.
+
+```
+Tool Call → Cache Lookup
+  ├─ HIT  → Return cached result (skip execution)
+  └─ MISS → Execute tool → Store result → Return
+```
+
+---
+
+## Cache Key Strategy
+
+Cache keys are generated as `toolName:stableStringify(args)` — arguments are sorted by key to ensure consistent hashing regardless of property order.
+
+```typescript
+// These produce the same cache key:
+getWeather({ city: "Mumbai", unit: "celsius" })
+getWeather({ unit: "celsius", city: "Mumbai" })
+```
+
+---
+
+## Clearing the Cache
+
+The `ToolExecutor` exposes a `clearCache()` method for programmatic cache invalidation. This is useful in testing or when you know external data has changed.
+
+---
+
+## When to Use
+
+<CardGroup cols={2}>
+  <Card title="Good Candidates" icon="check">
+    - External API calls (weather, exchange rates)
+    - Database lookups with stable results
+    - Expensive computations
+    - Rate-limited APIs
+  </Card>
+  <Card title="Poor Candidates" icon="xmark">
+    - Tools with side effects (send email, write file)
+    - Real-time data that changes every second
+    - Tools where arguments include timestamps
+  </Card>
+</CardGroup>
+
+---
+
+## ToolCacheConfig Type
+
+```typescript
+interface ToolCacheConfig {
+  ttl: number; // milliseconds
+}
+```
+
+---
+
+## Logging
+
+When `logLevel` is `"info"` or higher, cached tool results are prefixed with `[cached]` in the logs, making it easy to verify caching behavior during development.

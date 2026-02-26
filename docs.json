@@ -26,10 +26,13 @@
             "pages": [
               "agents/overview",
               "agents/tools",
+              "agents/tool-caching",
               "agents/memory",
+              "agents/user-memory",
               "agents/sessions",
               "agents/structured-output",
               "agents/multimodal",
+              "agents/reasoning",
               "agents/hooks-and-guardrails",
               "agents/logging"
             ]
