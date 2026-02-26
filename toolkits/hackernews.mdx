@@ -1,0 +1,50 @@
+---
+title: Hacker News
+description: Fetch top stories and user details from Hacker News — no API key required.
+---
+
+# Hacker News
+
+Fetch top stories and look up user details from [Hacker News](https://news.ycombinator.com). Uses the public HN Firebase API — no API key required.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, HackerNewsToolkit } from "@radaros/core";
+
+const hn = new HackerNewsToolkit();
+
+const agent = new Agent({
+  name: "hn-reader",
+  model: openai("gpt-4o"),
+  instructions: "Use Hacker News tools to find top stories and user info.",
+  tools: [...hn.getTools()],
+});
+
+const result = await agent.run(
+  "Summarize the top 3 stories on Hacker News with user details."
+);
+```
+
+---
+
+## Config
+
+<ParamField body="enableGetTopStories" type="boolean" default="true">
+  Enable the `hackernews_top_stories` tool.
+</ParamField>
+
+<ParamField body="enableGetUserDetails" type="boolean" default="true">
+  Enable the `hackernews_user` tool.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `hackernews_top_stories` | Fetch top stories from HN. Returns title, URL, score, author, and comment count. Accepts `numStories` (default 10, max 30). |
+| `hackernews_user` | Look up a HN user by username. Returns karma, creation date, about, and submission count. |

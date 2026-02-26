@@ -1,0 +1,93 @@
+---
+title: Gmail
+description: Send, search, and read emails via the Gmail API.
+---
+
+# Gmail
+
+Send, search, and read emails via the [Gmail API](https://developers.google.com/gmail/api). Uses Google's OAuth2 authentication.
+
+---
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install googleapis">
+
+```bash
+npm install googleapis
+```
+  </Step>
+  <Step title="Create OAuth2 Credentials">
+    Go to [Google Cloud Console](https://console.cloud.google.com), enable the Gmail API, and create OAuth2 credentials. Download `credentials.json`.
+  </Step>
+  <Step title="Generate Token">
+    Run the Google OAuth flow to generate `token.json`. See the [Gmail API quickstart](https://developers.google.com/gmail/api/quickstart/nodejs).
+  </Step>
+  <Step title="Set Environment Variables">
+
+```bash
+export GMAIL_CREDENTIALS_PATH=./credentials.json
+export GMAIL_TOKEN_PATH=./token.json
+```
+  </Step>
+</Steps>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GmailToolkit } from "@radaros/core";
+
+const gmail = new GmailToolkit();
+
+const agent = new Agent({
+  name: "email-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You can search, read, and send emails via Gmail.",
+  tools: [...gmail.getTools()],
+});
+
+const result = await agent.run("Search for my 3 most recent unread emails.");
+```
+
+---
+
+## Config
+
+<ParamField body="credentialsPath" type="string">
+  Path to OAuth2 credentials JSON. Falls back to `GMAIL_CREDENTIALS_PATH` env var.
+</ParamField>
+
+<ParamField body="tokenPath" type="string">
+  Path to saved token JSON. Falls back to `GMAIL_TOKEN_PATH` env var.
+</ParamField>
+
+<ParamField body="authClient" type="OAuth2Client">
+  Pre-authenticated OAuth2 client (if you handle auth yourself).
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `gmail_send` | Send an email. Parameters: `to`, `subject`, `body`. |
+| `gmail_search` | Search emails. Parameters: `query` (Gmail search syntax), `maxResults`. |
+| `gmail_read` | Read full email content by message ID. |
+
+---
+
+## Search Query Examples
+
+The `gmail_search` tool accepts Gmail search syntax:
+
+| Query | Description |
+|-------|-------------|
+| `is:unread` | All unread emails |
+| `from:john@example.com` | Emails from a specific sender |
+| `subject:meeting` | Emails with "meeting" in subject |
+| `has:attachment` | Emails with attachments |
+| `newer_than:2d` | Emails from the last 2 days |

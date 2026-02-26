@@ -1,0 +1,82 @@
+---
+title: Web Search
+description: AI-optimized web search using Tavily or SerpAPI backends.
+---
+
+# Web Search
+
+Search the web using AI-optimized search providers. Supports [Tavily](https://tavily.com) and [SerpAPI](https://serpapi.com) backends.
+
+<Info>
+For a zero-config option that doesn't require an API key, use the [DuckDuckGo toolkit](/toolkits/duckduckgo) instead.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, WebSearchToolkit } from "@radaros/core";
+
+const search = new WebSearchToolkit({
+  provider: "tavily",
+  // Uses TAVILY_API_KEY env var
+});
+
+const agent = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  instructions: "Search the web and provide sourced answers.",
+  tools: [...search.getTools()],
+});
+
+const result = await agent.run("Latest developments in AI agents 2026");
+```
+
+---
+
+## Config
+
+<ParamField body="provider" type="'tavily' | 'serpapi'" required>
+  Search provider to use.
+</ParamField>
+
+<ParamField body="apiKey" type="string">
+  API key. Falls back to `TAVILY_API_KEY` or `SERPAPI_API_KEY` env var.
+</ParamField>
+
+<ParamField body="maxResults" type="number" default="5">
+  Default maximum results per search.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web. Returns titles, URLs, and snippets. Tavily also returns an AI-generated answer. |
+
+---
+
+## Providers
+
+### Tavily
+
+Best for AI agents — returns an AI-generated answer alongside search results.
+
+```bash
+export TAVILY_API_KEY="tvly-..."
+```
+
+Get a free API key at [tavily.com](https://tavily.com).
+
+### SerpAPI
+
+Google search results via API.
+
+```bash
+export SERPAPI_API_KEY="..."
+```
+
+Sign up at [serpapi.com](https://serpapi.com).

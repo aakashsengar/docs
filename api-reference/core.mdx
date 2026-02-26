@@ -601,3 +601,27 @@ const agentCard = remote.getAgentCard();
 | `headers` | `Record<string, string>` | Custom headers for auth. |
 | `name` | `string` | Override discovered name. |
 | `timeoutMs` | `number` | Request timeout (default 60000). |
+
+---
+
+## Toolkits
+
+Pre-built tool collections. Each returns `ToolDef[]` via `getTools()`.
+
+```typescript
+import {
+  DuckDuckGoToolkit,
+  HackerNewsToolkit,
+  WebSearchToolkit,
+  GmailToolkit,
+  WhatsAppToolkit,
+} from "@radaros/core";
+```
+
+| Toolkit | Config | Tools | API Key Required |
+|---------|--------|-------|------------------|
+| `DuckDuckGoToolkit` | `{ enableSearch?, enableNews?, maxResults? }` | `duckduckgo_search`, `duckduckgo_news` | No |
+| `HackerNewsToolkit` | `{ enableGetTopStories?, enableGetUserDetails? }` | `hackernews_top_stories`, `hackernews_user` | No |
+| `WebSearchToolkit` | `{ provider, apiKey?, maxResults? }` | `web_search` | Yes (Tavily/SerpAPI) |
+| `GmailToolkit` | `{ credentialsPath?, tokenPath?, authClient? }` | `gmail_send`, `gmail_search`, `gmail_read` | Yes (OAuth2) |
+| `WhatsAppToolkit` | `{ accessToken?, phoneNumberId?, version?, recipientWaid? }` | `whatsapp_send_text`, `whatsapp_send_template` | Yes (Meta) |
