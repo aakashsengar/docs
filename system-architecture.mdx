@@ -1,9 +1,9 @@
 ---
-title: Architecture
-description: RadarOS architecture overview: monorepo structure, package responsibilities, layered design, and data flow.
+title: System Architecture
+description: RadarOS architecture overview.
 ---
 
-# Architecture
+# System Architecture
 
 This page describes the RadarOS architecture: how packages are organized, how layers interact, and how data flows through the system.
 
@@ -23,47 +23,25 @@ RadarOS is organized as a monorepo with three primary packages. Each package has
 | **@radaros/transport** | Express REST API, Socket.IO WebSocket gateway, A2A server |
 | **@radaros/queue** | BullMQ background job processing |
 
-<CardGroup cols={3}>
-  <Card title="@radaros/core" icon="box">
-    The heart of RadarOS. Provides Agent, Team, Workflow, Memory, UserMemory, SessionManager, KnowledgeBase, MCPToolProvider, A2ARemoteAgent, Logger, and EventBus. Supports reasoning, tool caching, and cross-session personalization. Model-agnostic via provider adapters.
-  </Card>
-  <Card title="@radaros/transport" icon="globe">
-    Expose agents over HTTP, WebSockets, and A2A protocol. Use createAgentRouter for Express, createAgentGateway for Socket.IO, or createA2AServer for A2A interop.
-  </Card>
-  <Card title="@radaros/queue" icon="clock">
-    BullMQ-based job queue for async agent runs. Offload long-running tasks to workers without blocking the main process.
-  </Card>
-</CardGroup>
-
 ---
 
 ## Layered Architecture
 
-RadarOS is built in layers. Higher layers depend on lower ones; infrastructure is pluggable.
+RadarOS is built in layers. Higher layers depend on lower ones and infrastructure is pluggable.
 
-<Steps>
-  <Step title="SDK Layer">
-    Agent, Team, Workflow — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
-  </Step>
-  <Step title="Engine Layer">
-    LLM Loop, Tool Executor, Session Manager, User Memory — Core execution logic. Handles the agent loop (with automatic retry on transient failures), tool invocation (with optional caching), session state, token-based history trimming, reasoning/extended thinking, and cross-session user personalization.
-  </Step>
-  <Step title="Model Abstraction">
-    ModelProvider interface and adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: openai(), anthropic(), google(), ollama().
-  </Step>
-  <Step title="Protocol Integration">
-    MCP Client (consume external tools via Model Context Protocol), A2A Client (call remote agents via Agent-to-Agent protocol) — Connect to the broader AI ecosystem.
-  </Step>
-  <Step title="Infrastructure">
-    Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, Embeddings — Pluggable persistence and retrieval.
-  </Step>
-  <Step title="Transport (Optional)">
-    Express, Socket.IO, A2A Server — Expose agents via REST, WebSocket, or A2A protocol. Only loaded when @radaros/transport is used.
-  </Step>
-  <Step title="Queue (Optional)">
-    BullMQ workers — Background job processing. Only loaded when @radaros/queue is used.
-  </Step>
-</Steps>
+1. **SDK Layer** — Agent, Team, Workflow. The primary API surface for defining behavior, orchestrating agents, and running workflows.
+
+2. **Engine Layer** — LLM Loop, Tool Executor, Session Manager, User Memory. Core execution logic with automatic retry on transient failures, tool caching, token-based history trimming, reasoning, and cross-session personalization.
+
+3. **Model Abstraction** — ModelProvider interface and adapters. Abstracts over OpenAI, Anthropic, Google, Vertex AI, and Ollama via factory functions.
+
+4. **Protocol Integration** — MCP Client for consuming external tools, A2A Client for calling remote agents.
+
+5. **Infrastructure** — Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, and Embeddings. All pluggable.
+
+6. **Transport (Optional)** — Express, Socket.IO, and A2A Server. Expose agents via REST, WebSocket, or A2A protocol.
+
+7. **Queue (Optional)** — BullMQ workers for background job processing.
 
 ---
 
@@ -78,11 +56,9 @@ Agent.run() / Agent.stream()
     |
 buildMessages (history + system instructions)
     |
-LLM Loop
+LLM Loop (with retry)
     |
 ModelProvider (OpenAI / Anthropic / Google / Ollama)
-    |
-API Request
     |
 Response (text / tool calls)
     |
@@ -100,35 +76,17 @@ UserMemory.extractAndStore() (async, non-blocking)
 Output to caller
 ```
 
-<Accordion title="Detailed Flow">
-  1. User Input — A string or multi-modal content (text, images, files).
-  2. Agent — Receives input, loads session history from SessionManager.
-  3. buildMessages — Constructs the message array: system prompt, session history (auto-trimmed if maxContextTokens is set), current user message.
-  4. LLM Loop — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors), receives response.
-  5. ModelProvider — Translates to the provider API format (OpenAI, Anthropic, etc.).
-  6. Response — Either text or tool calls.
-  7. Tool Executor — If tool calls, executes tools, appends results, and loops back to the model.
-  8. SessionManager.save — Persists the new turn to storage.
-  9. Output — Returns or streams the final response to the caller.
-</Accordion>
+### Detailed Flow
 
----
-
-## Key API Parameters
-
-When calling `Agent.run()` or `createAgentRouter()`, these parameters are commonly used:
-
-<ParamField path="input" type="string | Message[]" required>
-  User message or array of messages to send to the agent.
-</ParamField>
-
-<ParamField path="sessionId" type="string">
-  Optional session ID for conversation continuity. Omitted for stateless runs.
-</ParamField>
-
-<ParamField path="options" type="object">
-  Optional overrides for model, memory, or tools for this run.
-</ParamField>
+1. **User Input** — A string or multi-modal content (text, images, files).
+2. **Agent** — Receives input, loads session history from SessionManager.
+3. **buildMessages** — Constructs the message array: system prompt, session history (auto-trimmed if maxContextTokens is set), current user message.
+4. **LLM Loop** — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors).
+5. **ModelProvider** — Translates to the provider API format.
+6. **Response** — Either text or tool calls.
+7. **Tool Executor** — If tool calls, executes tools, appends results, and loops back to the model.
+8. **SessionManager.save** — Persists the new turn to storage.
+9. **Output** — Returns or streams the final response to the caller.
 
 ---
 
@@ -151,23 +109,9 @@ RadarOS is designed for minimal overhead. Key optimizations include:
 
 ## Core Design Principles
 
-<CardGroup cols={2}>
-  <Card title="Zero Meta-Framework Dependency" icon="package">
-    No Next.js, Remix, or framework-specific runtime. Use RadarOS with any Node.js server or headless.
-  </Card>
-  <Card title="Optional Peer Dependencies" icon="puzzle">
-    Providers (openai, anthropic, etc.) are peer dependencies. Lazy-loaded so you only bundle what you use.
-  </Card>
-  <Card title="Event-Driven" icon="broadcast">
-    EventBus emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
-  </Card>
-  <Card title="Pluggable Everything" icon="sliders">
-    Storage, models, vector stores, and transport are all swappable. Configure once, change later without rewriting logic.
-  </Card>
-  <Card title="Open Protocol Support" icon="network-wired">
-    MCP for tool integration and A2A for agent interoperability. Connect to the broader AI ecosystem without vendor lock-in.
-  </Card>
-  <Card title="Production Resilient" icon="shield">
-    Automatic retry with exponential backoff, token-based context trimming, and non-blocking background operations ensure reliability at scale.
-  </Card>
-</CardGroup>
+- **Zero Meta-Framework Dependency** — No Next.js, Remix, or framework-specific runtime. Use RadarOS with any Node.js server or headless.
+- **Optional Peer Dependencies** — Providers (openai, anthropic, etc.) are peer dependencies. Lazy-loaded so you only bundle what you use.
+- **Event-Driven** — EventBus emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
+- **Pluggable Everything** — Storage, models, vector stores, and transport are all swappable. Configure once, change later without rewriting logic.
+- **Open Protocol Support** — MCP for tool integration and A2A for agent interoperability. Connect to the broader AI ecosystem without vendor lock-in.
+- **Production Resilient** — Automatic retry with exponential backoff, token-based context trimming, and non-blocking background operations ensure reliability at scale.
