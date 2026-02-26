@@ -1,0 +1,118 @@
+---
+title: Performance
+description: RadarOS performance benchmarks, optimizations, and comparison with LangChain and Agno.
+---
+
+# Performance
+
+RadarOS is built for minimal overhead — fewer tokens, faster responses, lower cost. This page covers the key optimizations and benchmark results.
+
+---
+
+## Benchmark Results
+
+All benchmarks use `gpt-4o-mini`, identical prompts, and 5 runs per scenario. RadarOS and LangChain run on Node.js; Agno runs on Python.
+
+### Simple Completion
+
+| Metric | RadarOS | LangChain | Agno |
+|--------|---------|-----------|------|
+| Startup (ms) | **151** | 269 | 2712 |
+| Avg Response (ms) | **718** | 742 | 2390 |
+| Avg Prompt Tokens | **28** | **28** | **28** |
+| Avg Cost / Run | **$0.000008** | **$0.000008** | **$0.000008** |
+
+### Tool Calling
+
+| Metric | RadarOS | LangChain | Agno |
+|--------|---------|-----------|------|
+| Avg Response (ms) | 1884 | **1758** | 2824 |
+| Avg Prompt Tokens | 167 | **101** | 173 |
+| Avg Cost / Run | $0.000042 | **$0.000024** | $0.000043 |
+
+### Multi-turn Memory
+
+| Metric | RadarOS | LangChain | Agno |
+|--------|---------|-----------|------|
+| Avg Response (ms) | **2328** | 3129 | 6197 |
+| Avg Prompt Tokens | 184 | 181 | **94** |
+| Avg Cost / Run | $0.000044 | **$0.000042** | $0.000054 |
+
+### Summary
+
+| Scenario | Fastest | Fewest Tokens | Cheapest |
+|----------|---------|---------------|----------|
+| Simple Completion | **RadarOS** | Tied | Tied |
+| Tool Calling | LangChain | LangChain | LangChain |
+| Multi-turn Memory | **RadarOS** | Agno | LangChain |
+
+RadarOS is the fastest for simple completions and multi-turn conversations. Token usage is on par with LangChain for multi-turn scenarios.
+
+---
+
+## Optimizations
+
+### Tool Schema Caching
+
+Tool definitions (Zod-to-JSON Schema conversion) are computed once at agent construction and cached. They are not re-converted on every LLM roundtrip.
+
+```typescript
+const agent = new Agent({
+  name: "bot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool, searchTool],
+});
+```
+
+### Automatic Retry
+
+Transient LLM API failures are automatically retried with exponential backoff + jitter. Retryable errors include HTTP 429, 5xx, and network errors.
+
+```typescript
+const agent = new Agent({
+  name: "reliable-bot",
+  model: openai("gpt-4o"),
+  retry: {
+    maxRetries: 5,
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+  },
+});
+```
+
+Default: 3 retries, 500ms initial delay, 10s max delay.
+
+### Token-Based History Trimming
+
+Set `maxContextTokens` to automatically trim conversation history (oldest messages first) to fit within a token budget:
+
+```typescript
+const agent = new Agent({
+  name: "bot",
+  model: openai("gpt-4o"),
+  maxContextTokens: 8000,
+});
+```
+
+### Non-Blocking User Memory
+
+When `userMemory` is configured, fact extraction runs asynchronously in the background after the response is returned. This eliminates 500-1000ms+ of latency per request.
+
+### Smart Context Deduplication
+
+When `userMemory.asTool()` is registered in the agent's tools, user facts are **not** also injected into the system prompt. The agent retrieves facts on demand via the tool, saving tokens.
+
+### Streaming Usage Tracking
+
+Token usage (`promptTokens`, `completionTokens`, `totalTokens`, `reasoningTokens`) is accurately tracked in both `run()` and `stream()` modes. Stream usage is accumulated from provider `finish` chunks.
+
+---
+
+## Methodology
+
+- All benchmarks use `gpt-4o-mini` with identical prompts
+- Each scenario runs 5 times; results are averaged
+- Startup time measures framework import + agent initialization
+- Cost uses gpt-4o-mini pricing: $0.15/1M input, $0.6/1M output
+- Network latency to OpenAI is shared across all frameworks
+- Full benchmark scripts are in `benchmarks/` in the repository

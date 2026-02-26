@@ -46,7 +46,7 @@ RadarOS is built in layers. Higher layers depend on lower ones; infrastructure i
     **Agent**, **Team**, **Workflow** — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
   </Step>
   <Step title="Engine Layer">
-    **LLM Loop**, **Tool Executor**, **Session Manager**, **User Memory** — Core execution logic. Handles the agent loop, tool invocation (with optional caching), session state, reasoning/extended thinking, and cross-session user personalization.
+    **LLM Loop**, **Tool Executor**, **Session Manager**, **User Memory** — Core execution logic. Handles the agent loop (with automatic retry on transient failures), tool invocation (with optional caching), session state, token-based history trimming, reasoning/extended thinking, and cross-session user personalization.
   </Step>
   <Step title="Model Abstraction">
     **ModelProvider** interface + adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: `openai(modelId)`, `anthropic(modelId)`, `google(modelId)`, `ollama(modelId)`.
@@ -71,40 +71,40 @@ RadarOS is built in layers. Higher layers depend on lower ones; infrastructure i
 
 A typical request flows through the system as follows:
 
-```
+```text
 User Input
-    ↓
+    |
 Agent.run() / Agent.stream()
-    ↓
+    |
 buildMessages (history + system instructions)
-    ↓
+    |
 LLM Loop
-    ↓
+    |
 ModelProvider (OpenAI / Anthropic / Google / Ollama)
-    ↓
+    |
 API Request
-    ↓
+    |
 Response (text / tool calls)
-    ↓
+    |
 Tool Executor (if tool calls)
-  ├─ Local tools (with optional caching)
-  ├─ MCP tools (external servers)
-  └─ A2A tools (remote agents)
-    ↓
+  +-- Local tools (with optional caching)
+  +-- MCP tools (external servers)
+  +-- A2A tools (remote agents)
+    |
 Loop until final response
-    ↓
+    |
 SessionManager.save()
-    ↓
-UserMemory.extractAndStore() (if configured)
-    ↓
+    |
+UserMemory.extractAndStore() (async, non-blocking)
+    |
 Output to caller
 ```
 
 <Accordion title="Detailed Flow">
   1. **User Input** — A string or multi-modal content (text, images, files).
   2. **Agent** — Receives input, loads session history from `SessionManager`.
-  3. **buildMessages** — Constructs the message array: system prompt, session history, current user message.
-  4. **LLM Loop** — Sends messages to the model, receives response.
+  3. **buildMessages** — Constructs the message array: system prompt, session history (auto-trimmed if `maxContextTokens` is set), current user message.
+  4. **LLM Loop** — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors), receives response.
   5. **ModelProvider** — Translates to the provider's API format (OpenAI, Anthropic, etc.).
   6. **Response** — Either text or tool calls.
   7. **Tool Executor** — If tool calls, executes tools, appends results, and loops back to the model.
@@ -132,6 +132,23 @@ When calling `Agent.run()` or `createAgentRouter()`, these parameters are common
 
 ---
 
+## Performance Optimizations
+
+RadarOS is designed for minimal overhead. Key optimizations include:
+
+| Optimization | Impact |
+|-------------|--------|
+| **Tool schema caching** | Tool definitions are converted to JSON Schema once at construction, not on every LLM roundtrip. |
+| **Minimal schema serialization** | Uses compact JSON Schema 7 output, stripping metadata like `$schema` that inflate token counts. |
+| **Session read deduplication** | Session data is loaded once per `run()` / `stream()` call and reused for both context and history. |
+| **Non-blocking fact extraction** | `UserMemory.extractAndStore()` runs in the background without blocking the response to the caller. |
+| **Smart context deduplication** | When `userMemory.asTool()` is registered, user facts are not also injected into the system prompt. |
+| **Token-based history trimming** | `maxContextTokens` auto-trims history (oldest first) to prevent context window overflow. |
+| **Automatic retry** | Transient LLM API failures (429, 5xx, network errors) are retried with exponential backoff + jitter. |
+| **Streaming usage tracking** | Token usage is accurately tracked in both `run()` and `stream()` modes. |
+
+---
+
 ## Core Design Principles
 
 <CardGroup cols={2}>
@@ -149,5 +166,8 @@ When calling `Agent.run()` or `createAgentRouter()`, these parameters are common
   </Card>
   <Card title="Open Protocol Support" icon="network-wired">
     MCP for tool integration and A2A for agent interoperability. Connect to the broader AI ecosystem without vendor lock-in.
+  </Card>
+  <Card title="Production Resilient" icon="shield">
+    Automatic retry with exponential backoff, token-based context trimming, and non-blocking background operations ensure reliability at scale.
   </Card>
 </CardGroup>

@@ -100,6 +100,23 @@ The agent automatically calls `memory.addMessages()` after each run and uses `me
 
 ---
 
+## Token-Based History Trimming
+
+By default, history is trimmed by message count (`numHistoryRuns`). For tighter control, set `maxContextTokens` on the agent to automatically trim conversation history to fit within a token budget:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory,
+  maxContextTokens: 4000,
+});
+```
+
+When `maxContextTokens` is set, the agent estimates token counts for the system prompt, current user input, and history messages. History is trimmed from the oldest messages first until the total fits within the budget. This prevents context window overflow, especially with long conversations or multimodal content.
+
+---
+
 ## Using MongoDB for Persistent Memory
 
 For production, use a persistent storage driver like `MongoDBStorage`:

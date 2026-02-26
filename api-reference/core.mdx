@@ -91,6 +91,14 @@ new Agent(config: AgentConfig)
   Log verbosity: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
 </ParamField>
 
+<ParamField body="retry" type="Partial<RetryConfig>">
+  Retry configuration for transient LLM API failures (429, 5xx, network errors). See [RetryConfig](#retryconfig).
+</ParamField>
+
+<ParamField body="maxContextTokens" type="number">
+  Maximum context window tokens. History is auto-trimmed (oldest first) to fit within this limit.
+</ParamField>
+
 ### Methods
 
 #### `run(input, opts?)`
@@ -219,6 +227,36 @@ interface ReasoningConfig {
   budgetTokens?: number;               // Anthropic, Google, Vertex AI
 }
 ```
+
+---
+
+## Retry
+
+### RetryConfig
+
+```typescript
+interface RetryConfig {
+  maxRetries: number;       // default: 3
+  initialDelayMs: number;   // default: 500
+  maxDelayMs: number;       // default: 10000
+  retryableErrors?: (error: unknown) => boolean;
+}
+```
+
+Retryable errors are automatically detected: HTTP 429 (rate limit), 5xx (server errors), and network errors (`ECONNRESET`, `ETIMEDOUT`).
+
+### withRetry
+
+```typescript
+import { withRetry } from "@radaros/core";
+
+const result = await withRetry(
+  () => someApiCall(),
+  { maxRetries: 5, initialDelayMs: 1000 }
+);
+```
+
+Standalone retry utility with exponential backoff + jitter. Used internally by the LLM loop, also exported for custom use.
 
 ---
 

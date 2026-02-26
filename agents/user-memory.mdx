@@ -60,7 +60,7 @@ Storage is automatically initialized by both `UserMemory` and `Agent` — no nee
     The user talks to the agent via `agent.run()` or `agent.stream()`.
   </Step>
   <Step title="Facts are auto-extracted">
-    After each run, the agent uses a lightweight LLM call to extract personal facts from the conversation (e.g., "Lives in Mumbai", "Prefers concise answers").
+    After each run, the agent fires a non-blocking LLM call to extract personal facts from the conversation (e.g., "Lives in Mumbai", "Prefers concise answers"). This happens in the background and does not add latency to the response.
   </Step>
   <Step title="Facts are stored">
     Extracted facts are deduplicated and persisted in the storage driver under the `memory:user` namespace, keyed by `userId`.
@@ -144,6 +144,10 @@ await agent.run("What do you know about me?", { userId: "user-42" });
 ```
 
 The tool reads `ctx.userId` from the run context automatically — no manual wiring needed.
+
+<Note>
+**Smart deduplication:** When `asTool()` is registered in the agent's tools, RadarOS automatically **skips** injecting user facts into the system prompt to avoid duplication. The agent retrieves facts on demand via the tool instead, saving tokens.
+</Note>
 
 ### Options
 

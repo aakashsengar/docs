@@ -88,8 +88,24 @@ Configure an agent by passing an `AgentConfig` object to the `Agent` constructor
   Custom event bus for emitting agent events. Defaults to a new `EventBus` if not provided.
 </ParamField>
 
+<ParamField path="reasoning" type="ReasoningConfig" required={false}>
+  Enable extended thinking / chain-of-thought reasoning. See <a href="/agents/reasoning">Reasoning</a>.
+</ParamField>
+
+<ParamField path="userMemory" type="UserMemory" required={false}>
+  User memory instance for cross-session personalization. See <a href="/agents/user-memory">User Memory</a>.
+</ParamField>
+
 <ParamField path="logLevel" type="string" required={false} default="silent">
   Logging level: `"debug"` | `"info"` | `"warn"` | `"error"` | `"silent"`. Default is `"silent"`.
+</ParamField>
+
+<ParamField path="retry" type="Partial&lt;RetryConfig&gt;" required={false}>
+  Retry configuration for transient LLM API failures (429, 5xx, network errors). Default: 3 retries with exponential backoff.
+</ParamField>
+
+<ParamField path="maxContextTokens" type="number" required={false}>
+  Maximum context window tokens. When set, conversation history is automatically trimmed (oldest messages first) to fit within this limit.
 </ParamField>
 
 ---
@@ -153,8 +169,9 @@ The object returned by `run()`:
 |----------|------|-------------|
 | `text` | `string` | The assistant's text response. |
 | `toolCalls` | `ToolCallResult[]` | Results from any tool calls made during the run. |
-| `usage` | `TokenUsage` | `{ promptTokens, completionTokens, totalTokens }`. |
+| `usage` | `TokenUsage` | `{ promptTokens, completionTokens, totalTokens, reasoningTokens? }`. |
 | `structured` | `unknown` | Parsed structured output when `structuredOutput` schema is set. |
+| `thinking` | `string` | Model's internal reasoning content (when reasoning is enabled). |
 | `durationMs` | `number` | Wall-clock duration of the run in milliseconds. |
 
 ---
