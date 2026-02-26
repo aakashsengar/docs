@@ -130,7 +130,45 @@ The OpenAPI spec includes:
 
 - **Paths** for each agent, team, and workflow
 - **Schemas** for RunRequest, RunOutput, StreamChunk, MultipartRunRequest
+- **Per-agent structured output schemas** — agents with `structuredOutput` get a dedicated response schema (e.g., `RunOutput_analyst`) that includes the full typed `structured` field
 - **Security schemes** for provider-specific API keys (`x-openai-api-key`, `x-google-api-key`, `x-anthropic-api-key`, `x-api-key`)
+
+### Structured Output in Swagger
+
+If an agent has a `structuredOutput` Zod schema, RadarOS automatically converts it to JSON Schema and includes it in the OpenAPI spec. The `structured` field in the response is fully typed — API consumers see the exact shape of the data.
+
+```typescript
+const analyst = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o-mini"),
+  structuredOutput: z.object({
+    summary: z.string(),
+    keyPoints: z.array(z.string()),
+    confidence: z.number().min(0).max(1),
+  }),
+});
+
+const router = createAgentRouter({
+  agents: { analyst },
+  swagger: { enabled: true },
+});
+```
+
+The spec for `POST /agents/analyst/run` will use the `RunOutput_analyst` schema with:
+
+```json
+"structured": {
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "keyPoints": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["summary", "keyPoints", "confidence"]
+}
+```
+
+Agents without `structuredOutput` use the generic `RunOutput` schema where `structured` is untyped.
 
 ---
 
