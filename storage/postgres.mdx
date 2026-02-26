@@ -1,0 +1,139 @@
+---
+title: PostgreSQL Storage
+description: PostgresStorage driver for production persistence. Requires pg. Call initialize() before use.
+---
+
+# PostgreSQL Storage
+
+**PostgresStorage** stores key-value data in PostgreSQL using a `kv_store` table with JSONB values. It requires the `pg` package and is ideal for production deployments, especially when running multiple server instances.
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install pg
+```
+
+```bash pnpm
+pnpm add pg
+```
+
+```bash yarn
+yarn add pg
+```
+
+</CodeGroup>
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Install pg">
+    Add the `pg` package to your project.
+  </Step>
+  <Step title="Create storage instance">
+    Pass a PostgreSQL connection string to the constructor.
+  </Step>
+  <Step title="Call initialize()">
+    Creates the `kv_store` table if it doesn't exist. **Required** before any get/set operations.
+  </Step>
+</Steps>
+
+```typescript
+import { PostgresStorage } from "@radaros/core";
+
+const storage = new PostgresStorage(
+  process.env.DATABASE_URL ?? "postgresql://user:pass@localhost:5432/mydb"
+);
+
+await storage.initialize(); // Required!
+
+await storage.set("cache", "key1", { value: 42 });
+const val = await storage.get("cache", "key1");
+```
+
+---
+
+## Constructor
+
+<ParamField path="connectionString" type="string" required>
+  PostgreSQL connection string. Format: `postgresql://user:password@host:port/database`
+</ParamField>
+
+```typescript
+const storage = new PostgresStorage(
+  "postgresql://radaros:secret@localhost:5432/radaros_db"
+);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, Memory, PostgresStorage, openai } from "@radaros/core";
+
+const storage = new PostgresStorage(process.env.DATABASE_URL!);
+await storage.initialize();
+
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: true,
+});
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  storage,
+  memory,
+});
+
+const result = await agent.run("Hello!", { sessionId: "user-789" });
+```
+
+---
+
+## Schema
+
+PostgresStorage creates a table `kv_store`:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `namespace` | TEXT | Namespace |
+| `key` | TEXT | Key within namespace |
+| `value` | JSONB | Stored value (no manual JSON stringify) |
+| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+
+Primary key: `(namespace, key)`.
+
+---
+
+## Multi-Instance Deployments
+
+PostgresStorage is suitable for horizontal scaling. Multiple Node.js processes can share the same PostgreSQL database. Use connection pooling (handled by `pg` internally) for efficient concurrent access.
+
+---
+
+## Environment Variables
+
+```bash
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+```
+
+---
+
+## API Reference
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Creates `kv_store` table. **Must be called** before get/set. |
+| `get<T>(namespace, key)` | Get value. Returns `null` if not found. |
+| `set<T>(namespace, key, value)` | Store value. Uses JSONB for native JSON support. |
+| `delete(namespace, key)` | Remove key. |
+| `list<T>(namespace, prefix?)` | List keys. Prefix uses SQL `LIKE`. |
+| `close()` | Closes the connection pool. |

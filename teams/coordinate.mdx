@@ -1,0 +1,110 @@
+---
+title: Coordinate Mode
+description: Orchestrator picks which member agent handles each task. Example with researcher, writer, and reviewer.
+---
+
+# Coordinate Mode
+
+In **Coordinate** mode, an orchestrator model decides which member agent(s) should handle the user's request. The orchestrator understands each member's role and routes work accordingly.
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="User sends input">
+    The user's message goes to the team.
+  </Step>
+  <Step title="Orchestrator decides">
+    The orchestrator model (using team instructions) picks which member(s) to invoke.
+  </Step>
+  <Step title="Member(s) execute">
+    Selected agent(s) process the task and return results.
+  </Step>
+  <Step title="Response returned">
+    The team returns the combined or selected output.
+  </Step>
+</Steps>
+
+---
+
+## Example: Researcher + Writer + Reviewer
+
+<CodeGroup>
+  <CodeGroup.Item title="coordinate-team.ts">
+```typescript
+import { Team, TeamMode, Agent, openai } from "@radaros/core";
+
+const researcher = new Agent({
+  name: "Researcher",
+  model: openai("gpt-4o-mini"),
+  instructions: "You research topics thoroughly. Provide factual summaries with sources when possible.",
+});
+
+const writer = new Agent({
+  name: "Writer",
+  model: openai("gpt-4o-mini"),
+  instructions: "You write clear, engaging content from research notes. Use a professional tone.",
+});
+
+const reviewer = new Agent({
+  name: "Reviewer",
+  model: openai("gpt-4o-mini"),
+  instructions: "You review content for accuracy, clarity, and tone. Suggest improvements.",
+});
+
+const contentTeam = new Team({
+  name: "Content Pipeline",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [researcher, writer, reviewer],
+  instructions: `
+    You coordinate a content pipeline with three agents:
+    - Researcher: Use for fact-finding and summaries.
+    - Writer: Use for drafting articles, blog posts, and documents.
+    - Reviewer: Use for editing and quality checks.
+    
+    For "write an article about X": first use Researcher, then Writer, then Reviewer.
+    For "summarize X": use Researcher only.
+    For "improve this draft": use Reviewer.
+  `,
+});
+
+const output = await contentTeam.run(
+  "Write a 200-word article about renewable energy trends in 2025."
+);
+console.log(output.text);
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## When to Use Coordinate
+
+<CardGroup cols={2}>
+  <Card title="Multi-step pipelines" icon="diagram-project">
+    Research → Write → Review workflows.
+  </Card>
+  <Card title="Dynamic routing" icon="random">
+    Orchestrator chooses agents based on task complexity and type.
+  </Card>
+  <Card title="Expert delegation" icon="user-tie">
+    Different specialists for different subtasks.
+  </Card>
+  <Card title="Flexible workflows" icon="sliders">
+    Same team handles varied request types.
+  </Card>
+</CardGroup>
+
+---
+
+## Tips
+
+<Accordion title="Clear member descriptions">
+  In team instructions, describe each member's role and when to use them. The orchestrator relies on this to make good routing decisions.
+</Accordion>
+
+<Accordion title="Orchestrator model">
+  Use a capable model (e.g., GPT-4o, Claude Sonnet) for the orchestrator. Members can use smaller models (e.g., GPT-4o-mini) for cost efficiency.
+</Accordion>

@@ -1,0 +1,122 @@
+---
+title: Transport Overview
+description: Transport layer concept—Express REST API and Socket.IO for exposing RadarOS agents, teams, and workflows over HTTP and WebSockets.
+---
+
+# Transport Overview
+
+The RadarOS transport layer exposes agents, teams, and workflows over **HTTP** (Express) and **WebSockets** (Socket.IO). It is optional—install `@radaros/transport` only when you need to serve agents via REST or real-time connections.
+
+---
+
+## Architecture
+
+<CardGroup cols={2}>
+  <Card title="Express Router" icon="server">
+    `createAgentRouter()` returns an Express router with REST endpoints for agents, teams, and workflows.
+  </Card>
+  <Card title="Socket.IO Gateway" icon="bolt">
+    `createAgentGateway()` attaches real-time handlers to a Socket.IO server for streaming agent responses.
+  </Card>
+</CardGroup>
+
+Both can run in the same Node.js process. Mount the router on your Express app and attach the gateway to your Socket.IO instance.
+
+---
+
+## Optional Install
+
+The transport package is separate from the core. Install it when you need HTTP or WebSocket exposure:
+
+<CodeGroup>
+
+```bash npm
+npm install @radaros/transport express socket.io
+```
+
+```bash pnpm
+pnpm add @radaros/transport express socket.io
+```
+
+</CodeGroup>
+
+---
+
+## Quick Start
+
+```typescript
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { createAgentRouter, createAgentGateway } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ agents: { assistant: agent } }));
+
+const httpServer = createServer(app);
+const io = new Server(httpServer);
+createAgentGateway({ io, agents: { assistant: agent } });
+
+httpServer.listen(3000);
+```
+
+---
+
+## REST Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agents/:name/run` | Run agent, return full response |
+| POST | `/agents/:name/stream` | Stream agent via SSE |
+| POST | `/teams/:name/run` | Run team |
+| POST | `/teams/:name/stream` | Stream team via SSE |
+| POST | `/workflows/:name/run` | Run workflow |
+| GET | `/docs` | Swagger UI (if enabled) |
+| GET | `/docs/spec.json` | OpenAPI spec (if enabled) |
+
+---
+
+## Socket.IO Events
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `agent.run` | Client → Server | Trigger agent run with `{ name, input, sessionId?, apiKey? }` |
+| `agent.chunk` | Server → Client | Streamed text chunk |
+| `agent.tool.call` | Server → Client | Tool call started |
+| `agent.tool.done` | Server → Client | Tool call finished |
+| `agent.done` | Server → Client | Run complete with output |
+| `agent.error` | Server → Client | Error occurred |
+
+---
+
+## Features
+
+<Accordion title="File Upload">
+  Enable `fileUpload` in router options to accept multipart form data. Files are converted to multi-modal content parts (images, audio, documents) and passed to agents.
+</Accordion>
+
+<Accordion title="Per-Request API Keys">
+  Clients can pass API keys via headers (`x-openai-api-key`, `x-google-api-key`, `x-anthropic-api-key`, `x-api-key`) or in the request body.
+</Accordion>
+
+<Accordion title="Swagger UI">
+  Enable `swagger.enabled` to serve interactive API docs at `/docs` and the OpenAPI spec at `/docs/spec.json`.
+</Accordion>
+
+---
+
+## Next Steps
+
+- [Express Router](/transport/express) — `createAgentRouter`, endpoints, middleware
+- [Swagger](/transport/swagger) — OpenAPI spec and Swagger UI
+- [File Upload](/transport/file-upload) — Multi-modal inputs via HTTP
+- [Socket.IO Gateway](/transport/socketio) — Real-time streaming
+- [API Keys](/transport/api-keys) — Per-request key overrides

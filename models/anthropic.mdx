@@ -1,0 +1,97 @@
+---
+title: Anthropic
+description: Use Anthropic Claude models (Claude Sonnet, Claude Haiku) with RadarOS. Setup, factory, and config.
+---
+
+# Anthropic
+
+Use Anthropic's Claude models with RadarOS through the unified `ModelProvider` interface. Claude excels at long-context tasks, analysis, and nuanced reasoning.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Install the Anthropic SDK (required by RadarOS for Anthropic support):
+
+```bash
+npm install @anthropic-ai/sdk
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your API key via environment variable:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+Or pass it in config (see below).
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { anthropic } from "@radaros/core";
+
+const model = anthropic("claude-sonnet-4-20250514");
+```
+
+<ParamField path="modelId" type="string" required>
+  The Anthropic model identifier.
+</ParamField>
+
+<ParamField path="config" type="object" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Description |
+|----------|-------------|
+| `claude-sonnet-4-20250514` | Claude Sonnet 4. Strong balance of speed and capability. |
+| `claude-3-5-haiku-20241022` | Claude 3.5 Haiku. Fast, cost-effective. |
+
+<Accordion title="Using a different Claude model">
+  Pass any valid Anthropic model ID to the factory. Check the [Anthropic docs](https://docs.anthropic.com) for the latest model IDs.
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="apiKey" type="string" required={false}>
+  Anthropic API key. If omitted, uses `ANTHROPIC_API_KEY` environment variable.
+</ParamField>
+
+### Example
+
+```typescript
+const model = anthropic("claude-sonnet-4-20250514", {
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, anthropic } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Claude Assistant",
+  model: anthropic("claude-sonnet-4-20250514", {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  }),
+  instructions: "You are a thoughtful, thorough assistant. Think step by step.",
+});
+
+const output = await agent.run("Analyze the pros and cons of microservices.");
+console.log(output.text);
+```

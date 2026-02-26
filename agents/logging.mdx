@@ -1,0 +1,175 @@
+---
+title: Logging
+description: Logger class, LogLevel, AgentConfig logLevel, and formatted agent run output in RadarOS.
+---
+
+# Logging
+
+RadarOS includes a built-in `Logger` with colored terminal output and structured agent run formatting. Control verbosity via `logLevel` in `AgentConfig`.
+
+---
+
+## Logger Class
+
+The `Logger` is used internally by agents. You can also instantiate it directly:
+
+```typescript
+import { Logger } from "@radaros/core";
+
+const logger = new Logger({
+  level: "info",
+  color: true,
+  prefix: "myapp",
+});
+
+logger.info("Agent started");
+logger.debug("Tool call", { toolName: "getWeather", args: { city: "Tokyo" } });
+```
+
+---
+
+## LogLevel
+
+| Level | Order | Use Case |
+|-------|-------|----------|
+| `debug` | 0 | Tool call details, arguments, results |
+| `info` | 1 | Agent start/end, token usage, duration |
+| `warn` | 2 | Warnings |
+| `error` | 3 | Errors |
+| `silent` | 4 | No logging (default for agents) |
+
+---
+
+## Setting logLevel in AgentConfig
+
+Control agent logging with the `logLevel` property:
+
+```typescript
+const agent = new Agent({
+  name: "ToolBot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool],
+  logLevel: "debug",  // "debug" | "info" | "warn" | "error" | "silent"
+});
+```
+
+- **`"debug"`** — Logs tool calls, arguments, and results (verbose).
+- **`"info"`** — Logs agent start, output, token usage, and duration.
+- **`"silent"`** — No logs (default).
+
+---
+
+## What Gets Logged
+
+<Accordion title="Agent start">
+  When a run begins: agent name and input preview.
+</Accordion>
+
+<Accordion title="Tool calls">
+  At `debug` level: tool name and arguments.
+</Accordion>
+
+<Accordion title="Tool results">
+  At `debug` level: tool name and result preview (truncated).
+</Accordion>
+
+<Accordion title="Token usage">
+  At `info` level: prompt tokens, completion tokens, total tokens.
+</Accordion>
+
+<Accordion title="Duration">
+  At `info` level: wall-clock duration (ms or seconds).
+</Accordion>
+
+<Accordion title="Agent end">
+  When a run completes: output preview and summary.
+</Accordion>
+
+---
+
+## LoggerConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `level` | `LogLevel` | `"info"` | Minimum level to log. |
+| `color` | `boolean` | `process.stdout.isTTY !== false` | Enable colored output. Auto-disabled when not a TTY. |
+| `prefix` | `string` | `"radaros"` | Prefix shown in log lines. Agents use their `name` as prefix. |
+
+---
+
+## Colored Terminal Output
+
+The logger uses ANSI escape codes for colored output:
+
+- **Cyan** — Agent name, box borders
+- **Magenta** — Tool names
+- **Green** — Token counts, success indicators
+- **Yellow** — Duration, string values
+- **Gray** — Timestamps, metadata
+- **Red** — Errors
+
+Box-drawing characters (`┌`, `│`, `└`, `─`) create a structured layout for agent runs.
+
+---
+
+## Example Output
+
+With `logLevel: "info"`:
+
+```
+┌─ Agent: ToolBot ───────────────────────────────────────────────────────
+│ Input:   What's the weather in Tokyo? Also, what's 42 * 17?
+│
+│ Output:  Tokyo is 22°C and sunny. 42 * 17 = 714.
+│
+│ Tokens: ↑ 245  ↓ 38  Σ 283
+│ Duration: 1.2s
+└────────────────────────────────────────────────────────────────────────
+```
+
+With `logLevel: "debug"`, additional lines appear for each tool call:
+
+```
+│ ⚡ getWeather
+│   { "city": "Tokyo" }
+│ ✓ getWeather →
+│   Tokyo: 22°C, sunny
+│
+│ ⚡ calculator
+│   { "expression": "42 * 17" }
+│ ✓ calculator →
+│   714
+```
+
+---
+
+## Example: Enabling Logging
+
+<CodeGroup>
+
+```typescript Info level (summaries)
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  logLevel: "info",
+});
+```
+
+```typescript Debug level (tool details)
+const agent = new Agent({
+  name: "ToolBot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool, calculator],
+  logLevel: "debug",
+});
+```
+
+```typescript Silent (no logs)
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  logLevel: "silent",  // or omit — default is "silent"
+});
+```
+
+</CodeGroup>

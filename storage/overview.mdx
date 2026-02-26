@@ -1,0 +1,141 @@
+---
+title: Storage Overview
+description: StorageDriver interface, choosing a driver, and comparison of InMemory, SQLite, PostgreSQL, and MongoDB storage backends in RadarOS.
+---
+
+# Storage Overview
+
+RadarOS uses a **StorageDriver** interface for key-value persistence. Storage drivers power session management, memory, and any component that needs to store state across requests. Choose the right driver based on your deployment environment, scale, and persistence requirements.
+
+---
+
+## StorageDriver Interface
+
+All storage implementations conform to the same interface:
+
+```typescript
+interface StorageDriver {
+  get<T>(namespace: string, key: string): Promise<T | null>;
+  set<T>(namespace: string, key: string, value: T): Promise<void>;
+  delete(namespace: string, key: string): Promise<void>;
+  list<T>(
+    namespace: string,
+    prefix?: string
+  ): Promise<Array<{ key: string; value: T }>>;
+  close(): Promise<void>;
+}
+```
+
+<ParamField path="get" type="(namespace, key) => Promise<T | null>">
+  Retrieves a value by namespace and key. Returns `null` if not found.
+</ParamField>
+
+<ParamField path="set" type="(namespace, key, value) => Promise<void>">
+  Stores a value. Values are JSON-serialized automatically.
+</ParamField>
+
+<ParamField path="delete" type="(namespace, key) => Promise<void>">
+  Removes a key from the namespace.
+</ParamField>
+
+<ParamField path="list" type="(namespace, prefix?) => Promise<Array<{key, value}>>">
+  Lists all keys in a namespace, optionally filtered by prefix.
+</ParamField>
+
+<ParamField path="close" type="() => Promise<void>">
+  Closes connections and releases resources.
+</ParamField>
+
+---
+
+## Choosing a Driver
+
+<CardGroup cols={2}>
+  <Card title="Development & Testing" icon="flask">
+    Use **InMemoryStorage**—no setup, no dependencies. Data is lost on restart.
+  </Card>
+  <Card title="Single-Node Production" icon="server">
+    Use **SqliteStorage** or **PostgresStorage** for durable, file-based or relational persistence.
+  </Card>
+  <Card title="Distributed / Scale" icon="network">
+    Use **PostgresStorage** or **MongoDBStorage** for multi-instance deployments.
+  </Card>
+  <Card title="Document-Oriented" icon="database">
+    Use **MongoDBStorage** if you already run MongoDB or prefer document storage.
+  </Card>
+</CardGroup>
+
+---
+
+## Comparison Table
+
+| Driver | Dependencies | Initialize Required | Persistence | Best For |
+|--------|--------------|---------------------|-------------|----------|
+| **InMemoryStorage** | None | No | No (lost on restart) | Dev, tests, demos |
+| **SqliteStorage** | `better-sqlite3` | No | Yes (file) | Single-node, embedded |
+| **PostgresStorage** | `pg` | Yes | Yes | Production, multi-instance |
+| **MongoDBStorage** | `mongodb` | Yes | Yes | Document stores, scale |
+
+---
+
+## Namespaces
+
+Storage uses **namespaces** to isolate data. RadarOS reserves namespaces such as:
+
+- `memory:short` — Short-term conversation messages
+- `memory:long` — Long-term summaries
+- `session:*` — Session metadata
+
+You can use custom namespaces for your own key-value data.
+
+---
+
+## Quick Example
+
+<CodeGroup>
+
+```typescript In-memory (default)
+import { InMemoryStorage } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+await storage.set("myapp", "config", { theme: "dark" });
+const config = await storage.get("myapp", "config");
+```
+
+```typescript SQLite (persistent)
+import { SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("./data/radaros.db");
+await storage.set("sessions", "user-123", { lastActive: Date.now() });
+```
+
+```typescript PostgreSQL
+import { PostgresStorage } from "@radaros/core";
+
+const storage = new PostgresStorage(process.env.DATABASE_URL!);
+await storage.initialize();
+await storage.set("cache", "key1", { value: 42 });
+```
+
+```typescript MongoDB
+import { MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage(
+  process.env.MONGO_URI!,
+  "myapp",
+  "kv_store"
+);
+await storage.initialize();
+await storage.set("users", "prefs", { notifications: true });
+```
+
+</CodeGroup>
+
+---
+
+## Next Steps
+
+- [In-Memory Storage](/storage/in-memory) — Zero-config, ephemeral storage
+- [SQLite Storage](/storage/sqlite) — File-based persistence with `better-sqlite3`
+- [PostgreSQL Storage](/storage/postgres) — Production-grade relational storage
+- [MongoDB Storage](/storage/mongodb) — Document-based storage for scale

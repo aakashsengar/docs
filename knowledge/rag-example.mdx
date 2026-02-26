@@ -1,0 +1,198 @@
+---
+title: "RAG Example"
+description: "End-to-end Retrieval Augmented Generation walkthrough"
+---
+
+This guide walks through building a complete RAG (Retrieval Augmented Generation) system with RadarOS. The agent will search a knowledge base of documents to answer questions.
+
+## Overview
+
+```
+User Question → Agent → KnowledgeBase Tool → Vector Search → Context → LLM → Answer
+```
+
+<Steps>
+  <Step title="Set up embeddings and vector store">
+    Choose an embedding provider and vector store for your documents.
+  </Step>
+  <Step title="Create a KnowledgeBase">
+    Initialize the KnowledgeBase with your vector store.
+  </Step>
+  <Step title="Add documents">
+    Index your content into the knowledge base.
+  </Step>
+  <Step title="Create an agent with the KB tool">
+    Use `kb.asTool()` to give the agent retrieval capabilities.
+  </Step>
+  <Step title="Query">
+    Ask questions and get grounded answers.
+  </Step>
+</Steps>
+
+## Complete Example
+
+### In-Memory RAG
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(1536);
+
+const kb = new KnowledgeBase({
+  name: "company-docs",
+  vectorStore,
+});
+
+await kb.initialize();
+
+// Add documents
+await kb.addDocuments([
+  {
+    id: "pricing",
+    content: "Our Pro plan costs $49/month and includes unlimited agents, 100k API calls, and priority support.",
+    metadata: { category: "pricing" },
+  },
+  {
+    id: "features",
+    content: "RadarOS supports multi-agent teams, workflows, RAG, and multi-modal inputs including images and audio.",
+    metadata: { category: "features" },
+  },
+  {
+    id: "setup",
+    content: "Install with npm install @radaros/core. Set your OPENAI_API_KEY environment variable to get started.",
+    metadata: { category: "getting-started" },
+  },
+]);
+
+// Create agent with KB as a tool
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a support agent. Use the search tool to find answers from the knowledge base. Always cite sources.",
+  tools: [kb.asTool()],
+  logLevel: "info",
+});
+
+const result = await agent.run("How much does the Pro plan cost?");
+console.log(result.text);
+// "The Pro plan costs $49/month and includes unlimited agents, 100k API calls, and priority support."
+```
+
+### RAG with Qdrant
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  QdrantVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+const vectorStore = new QdrantVectorStore({
+  url: "http://localhost:6334",
+  collectionName: "docs",
+  dimensions: 1536,
+});
+
+const kb = new KnowledgeBase({
+  name: "docs",
+  vectorStore,
+});
+
+await kb.initialize();
+
+// Add documents (only needed once)
+await kb.addDocuments([
+  { id: "doc-1", content: "Your document content here..." },
+  { id: "doc-2", content: "Another document..." },
+]);
+
+const agent = new Agent({
+  name: "rag-agent",
+  model: openai("gpt-4o"),
+  instructions: "Answer questions using the knowledge base.",
+  tools: [kb.asTool({ topK: 3, description: "Search the documentation" })],
+});
+
+const result = await agent.run("What does the documentation say about X?");
+console.log(result.text);
+```
+
+### RAG with MongoDB Atlas
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  MongoDBVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+const vectorStore = new MongoDBVectorStore({
+  uri: "mongodb+srv://user:pass@cluster.mongodb.net",
+  dbName: "myapp",
+  collectionName: "documents",
+  indexName: "vector_index",
+  dimensions: 1536,
+});
+
+const kb = new KnowledgeBase({
+  name: "knowledge",
+  vectorStore,
+});
+
+await kb.initialize();
+
+// Add and query as above
+```
+
+## Customizing the Tool
+
+The `asTool()` method accepts configuration to customize how the knowledge base is exposed to the agent:
+
+```typescript
+kb.asTool({
+  toolName: "search_docs",                   // Custom tool name
+  description: "Search company documentation", // Custom description
+  topK: 5,                                    // Number of results
+  minScore: 0.7,                              // Minimum relevance score
+  formatResults: (results) => {               // Custom result formatting
+    return results
+      .map((r) => `[${r.document.id}] ${r.document.content}`)
+      .join("\n\n");
+  },
+});
+```
+
+<ParamField body="toolName" type="string">
+  Name of the generated tool. Defaults to `search_<collection>`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description shown to the LLM. Auto-generated if not provided.
+</ParamField>
+
+<ParamField body="topK" type="number" default="5">
+  Maximum number of results to return.
+</ParamField>
+
+<ParamField body="minScore" type="number">
+  Minimum similarity score threshold.
+</ParamField>
+
+<ParamField body="formatResults" type="(results: VectorSearchResult[]) => string">
+  Custom function to format search results into a string for the LLM.
+</ParamField>

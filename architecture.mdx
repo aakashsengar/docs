@@ -1,0 +1,142 @@
+---
+title: Architecture
+description: RadarOS architecture overview: monorepo structure, package responsibilities, layered design, and data flow.
+---
+
+# Architecture
+
+This page describes the RadarOS architecture: how packages are organized, how layers interact, and how data flows through the system.
+
+---
+
+## Monorepo Structure
+
+RadarOS is organized as a monorepo with three primary packages. Each package has a focused responsibility and can be used independently or together.
+
+---
+
+## Package Overview
+
+| Package | Purpose |
+|---------|---------|
+| **@radaros/core** | Agents, models, tools, memory, storage, vector stores |
+| **@radaros/transport** | Express REST API, Socket.IO WebSocket gateway |
+| **@radaros/queue** | BullMQ background job processing |
+
+<CardGroup cols={3}>
+  <Card title="@radaros/core" icon="box">
+    The heart of RadarOS. Provides `Agent`, `Team`, `Workflow`, `Memory`, `SessionManager`, `KnowledgeBase`, `Logger`, and `EventBus`. Model-agnostic via provider adapters.
+  </Card>
+  <Card title="@radaros/transport" icon="globe">
+    Expose agents over HTTP and WebSockets. Use `createAgentRouter()` for Express REST or `createAgentGateway()` for Socket.IO real-time connections.
+  </Card>
+  <Card title="@radaros/queue" icon="clock">
+    BullMQ-based job queue for async agent runs. Offload long-running tasks to workers without blocking the main process.
+  </Card>
+</CardGroup>
+
+---
+
+## Layered Architecture
+
+RadarOS is built in layers. Higher layers depend on lower ones; infrastructure is pluggable.
+
+<Steps>
+  <Step title="SDK Layer">
+    **Agent**, **Team**, **Workflow** — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
+  </Step>
+  <Step title="Engine Layer">
+    **LLM Loop**, **Tool Executor**, **Session Manager** — Core execution logic. Handles the agent loop, tool invocation, and session state.
+  </Step>
+  <Step title="Model Abstraction">
+    **ModelProvider** interface + adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: `openai(modelId)`, `anthropic(modelId)`, `google(modelId)`, `ollama(modelId)`.
+  </Step>
+  <Step title="Infrastructure">
+    **Storage** (in-memory, SQLite, PostgreSQL, MongoDB), **Vector Stores**, **Embeddings** — Pluggable persistence and retrieval.
+  </Step>
+  <Step title="Transport (Optional)">
+    **Express**, **Socket.IO** — Expose agents via REST or WebSocket. Only loaded when `@radaros/transport` is used.
+  </Step>
+  <Step title="Queue (Optional)">
+    **BullMQ workers** — Background job processing. Only loaded when `@radaros/queue` is used.
+  </Step>
+</Steps>
+
+---
+
+## Data Flow
+
+A typical request flows through the system as follows:
+
+```
+User Input
+    ↓
+Agent.run() / Agent.stream()
+    ↓
+buildMessages (history + system instructions)
+    ↓
+LLM Loop
+    ↓
+ModelProvider (OpenAI / Anthropic / Google / Ollama)
+    ↓
+API Request
+    ↓
+Response (text / tool calls)
+    ↓
+Tool Executor (if tool calls)
+    ↓
+Loop until final response
+    ↓
+SessionManager.save()
+    ↓
+Output to caller
+```
+
+<Accordion title="Detailed Flow">
+  1. **User Input** — A string or multi-modal content (text, images, files).
+  2. **Agent** — Receives input, loads session history from `SessionManager`.
+  3. **buildMessages** — Constructs the message array: system prompt, session history, current user message.
+  4. **LLM Loop** — Sends messages to the model, receives response.
+  5. **ModelProvider** — Translates to the provider's API format (OpenAI, Anthropic, etc.).
+  6. **Response** — Either text or tool calls.
+  7. **Tool Executor** — If tool calls, executes tools, appends results, and loops back to the model.
+  8. **SessionManager.save()** — Persists the new turn to storage.
+  9. **Output** — Returns or streams the final response to the caller.
+</Accordion>
+
+---
+
+## Key API Parameters
+
+When calling `Agent.run()` or `createAgentRouter()`, these parameters are commonly used:
+
+<ParamField path="input" type="string | Message[]" required>
+  User message or array of messages to send to the agent.
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  Optional session ID for conversation continuity. Omitted for stateless runs.
+</ParamField>
+
+<ParamField path="options" type="object">
+  Optional overrides for model, memory, or tools for this run.
+</ParamField>
+
+---
+
+## Core Design Principles
+
+<CardGroup cols={2}>
+  <Card title="Zero Meta-Framework Dependency" icon="package">
+    No Next.js, Remix, or framework-specific runtime. Use RadarOS with any Node.js server or headless.
+  </Card>
+  <Card title="Optional Peer Dependencies" icon="puzzle">
+    Providers (openai, anthropic, etc.) are peer dependencies. Lazy-loaded so you only bundle what you use.
+  </Card>
+  <Card title="Event-Driven" icon="broadcast">
+    `EventBus` emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
+  </Card>
+  <Card title="Pluggable Everything" icon="sliders">
+    Storage, models, vector stores, and transport are all swappable. Configure once, change later without rewriting logic.
+  </Card>
+</CardGroup>

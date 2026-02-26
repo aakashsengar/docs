@@ -1,0 +1,159 @@
+---
+title: MongoDB Storage
+description: MongoDBStorage driver for document-based persistence. Requires mongodb. Call initialize() before use.
+---
+
+# MongoDB Storage
+
+**MongoDBStorage** stores key-value data in MongoDB collections. It requires the `mongodb` package and is ideal for teams already using MongoDB or for document-oriented workloads at scale.
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install mongodb
+```
+
+```bash pnpm
+pnpm add mongodb
+```
+
+```bash yarn
+yarn add mongodb
+```
+
+</CodeGroup>
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Install mongodb">
+    Add the `mongodb` package to your project.
+  </Step>
+  <Step title="Create storage instance">
+    Pass URI and optional database/collection names.
+  </Step>
+  <Step title="Call initialize()">
+    Connects to MongoDB and creates a unique index on `(namespace, key)`. **Required** before use.
+  </Step>
+</Steps>
+
+```typescript
+import { MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage(
+  process.env.MONGO_URI ?? "mongodb://localhost:27017",
+  "myapp",      // dbName (default: "radaros")
+  "kv_store"    // collectionName (default: "kv_store")
+);
+
+await storage.initialize(); // Required!
+
+await storage.set("users", "prefs-123", { theme: "dark" });
+const prefs = await storage.get("users", "prefs-123");
+```
+
+---
+
+## Constructor
+
+<ParamField path="uri" type="string" required>
+  MongoDB connection URI. Example: `mongodb://localhost:27017` or `mongodb+srv://user:pass@cluster.mongodb.net/`
+</ParamField>
+
+<ParamField path="dbName" type="string" required={false} default="radaros">
+  Database name.
+</ParamField>
+
+<ParamField path="collectionName" type="string" required={false} default="kv_store">
+  Collection name for key-value documents.
+</ParamField>
+
+```typescript
+// Minimal
+const storage = new MongoDBStorage("mongodb://localhost:27017");
+
+// Full
+const storage = new MongoDBStorage(
+  "mongodb+srv://user:pass@cluster.mongodb.net/",
+  "production_db",
+  "agent_data"
+);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, Memory, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage(
+  process.env.MONGO_URI!,
+  "myapp",
+  "agent_data"
+);
+await storage.initialize();
+
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: true,
+});
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  storage,
+  memory,
+});
+
+await agent.run("Remember my preferences.", { sessionId: "user-abc" });
+```
+
+---
+
+## Document Shape
+
+Each stored document has the form:
+
+```json
+{
+  "namespace": "memory:short",
+  "key": "session-123",
+  "value": { "messages": [...] },
+  "updatedAt": "2025-02-26T12:00:00.000Z"
+}
+```
+
+A unique index on `(namespace, key)` ensures fast lookups and prevents duplicates.
+
+---
+
+## Atlas & Replica Sets
+
+MongoDBStorage works with:
+
+- Local MongoDB
+- MongoDB Atlas
+- Replica sets and sharded clusters
+
+Use `mongodb+srv://` for Atlas connection strings.
+
+---
+
+## API Reference
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Connects to MongoDB and creates index. **Must be called** before use. |
+| `get<T>(namespace, key)` | Get value. Returns `null` if not found. |
+| `set<T>(namespace, key, value)` | Store value (upsert). |
+| `delete(namespace, key)` | Remove document. |
+| `list<T>(namespace, prefix?)` | List keys. Prefix uses regex `^prefix`. |
+| `close()` | Closes the MongoDB client connection. |

@@ -1,0 +1,236 @@
+---
+title: "Express"
+description: "Expose agents, teams, and workflows as REST API endpoints"
+---
+
+The `@radaros/transport` package provides `createAgentRouter()` to generate a fully-featured Express router with endpoints for all your agents, teams, and workflows.
+
+## Installation
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @radaros/transport express
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @radaros/transport express
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @radaros/transport express
+    ```
+  </Tab>
+</Tabs>
+
+## Quick Start
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const assistant = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const app = express();
+app.use(express.json());
+
+const router = createAgentRouter({
+  agents: { assistant },
+});
+
+app.use("/api", router);
+app.listen(3000);
+```
+
+This creates the following endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/agents/assistant/run` | Run agent, return JSON response |
+| POST | `/api/agents/assistant/stream` | Stream response via Server-Sent Events |
+
+## RouterOptions
+
+<ParamField body="agents" type="Record<string, Agent>">
+  Map of named agents to expose. Each agent gets `/agents/:name/run` and `/agents/:name/stream` endpoints.
+</ParamField>
+
+<ParamField body="teams" type="Record<string, Team>">
+  Map of named teams. Each gets `/teams/:name/run` and `/teams/:name/stream` endpoints.
+</ParamField>
+
+<ParamField body="workflows" type="Record<string, Workflow>">
+  Map of named workflows. Each gets `/workflows/:name/run` endpoint.
+</ParamField>
+
+<ParamField body="middleware" type="RequestHandler[]">
+  Express middleware applied to all routes (e.g., auth, rate limiting).
+</ParamField>
+
+<ParamField body="swagger" type="SwaggerOptions">
+  Enable Swagger UI. See [Swagger docs](/transport/swagger).
+</ParamField>
+
+<ParamField body="fileUpload" type="boolean | FileUploadOptions">
+  Enable multipart file upload for multi-modal input. See [File Upload docs](/transport/file-upload).
+</ParamField>
+
+## Request Format
+
+### JSON Request
+
+```bash
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -H "Content-Type: application/json" \
+  -d '{"input": "What is TypeScript?"}'
+```
+
+### With Session
+
+```bash
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -H "Content-Type: application/json" \
+  -d '{"input": "What was my last question?", "sessionId": "user-123"}'
+```
+
+### With API Key
+
+```bash
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -H "Content-Type: application/json" \
+  -H "x-openai-api-key: sk-your-key" \
+  -d '{"input": "Hello"}'
+```
+
+## Response Format
+
+### Run Response
+
+```json
+{
+  "text": "TypeScript is a typed superset of JavaScript...",
+  "toolCalls": [],
+  "usage": {
+    "promptTokens": 25,
+    "completionTokens": 150,
+    "totalTokens": 175
+  },
+  "structured": null,
+  "durationMs": 1234
+}
+```
+
+### Stream Response (SSE)
+
+```bash
+curl -X POST http://localhost:3000/api/agents/assistant/stream \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Tell me a joke"}'
+```
+
+```
+data: {"type":"text","text":"Why"}
+data: {"type":"text","text":" did"}
+data: {"type":"text","text":" the"}
+...
+data: {"type":"finish","finishReason":"stop"}
+```
+
+## Full Example with Multiple Agents
+
+```typescript
+import express from "express";
+import { Agent, openai, google, defineTool } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+
+const calculator = defineTool({
+  name: "calculate",
+  description: "Evaluate a math expression",
+  parameters: z.object({ expression: z.string() }),
+  execute: async ({ expression }) => String(eval(expression)),
+});
+
+const assistant = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  tools: [calculator],
+});
+
+const analyst = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "You analyze data and provide insights.",
+  structuredOutput: z.object({
+    summary: z.string(),
+    sentiment: z.enum(["positive", "negative", "neutral"]),
+    confidence: z.number(),
+  }),
+});
+
+const vision = new Agent({
+  name: "vision",
+  model: google("gemini-2.5-flash"),
+  instructions: "You analyze images and describe what you see.",
+});
+
+const app = express();
+app.use(express.json());
+
+const router = createAgentRouter({
+  agents: { assistant, analyst, vision },
+  swagger: {
+    enabled: true,
+    title: "My AI API",
+    description: "Multi-agent API powered by RadarOS",
+  },
+  fileUpload: true,
+});
+
+app.use("/api", router);
+
+app.listen(3000, () => {
+  console.log("API running on http://localhost:3000");
+  console.log("Swagger UI at http://localhost:3000/api/docs");
+});
+```
+
+## Adding Custom Middleware
+
+```typescript
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization;
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  next();
+};
+
+const router = createAgentRouter({
+  agents: { assistant },
+  middleware: [authMiddleware],
+});
+```
+
+## Error Handling
+
+```typescript
+import { errorHandler } from "@radaros/transport";
+
+app.use("/api", router);
+app.use(errorHandler);
+```
+
+The `errorHandler` middleware catches errors and returns structured JSON responses:
+
+```json
+{
+  "error": "Agent \"unknown\" not found"
+}
+```
