@@ -1,0 +1,209 @@
+---
+title: A2A Server
+description: Expose RadarOS agents as A2A-compliant HTTP endpoints for cross-framework interoperability.
+---
+
+# A2A Server
+
+The A2A Server exposes your RadarOS agents as standard A2A endpoints. Any A2A-compatible client — including agents built with LangGraph, CrewAI, AutoGen, or other frameworks — can discover and interact with your agents.
+
+---
+
+## Setup
+
+```typescript
+import express from "express";
+import { Agent, openai, defineTool } from "@radaros/core";
+import { createA2AServer } from "@radaros/transport";
+import { z } from "zod";
+
+const app = express();
+
+const assistant = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const calculator = new Agent({
+  name: "calculator",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a calculator. Use the calculate tool.",
+  tools: [
+    defineTool({
+      name: "calculate",
+      description: "Evaluate a math expression",
+      parameters: z.object({
+        expression: z.string(),
+      }),
+      execute: async (args) => String(eval(args.expression)),
+    }),
+  ],
+});
+
+createA2AServer(app, {
+  agents: { assistant, calculator },
+  basePath: "/",
+  provider: {
+    organization: "MyCompany",
+    url: "https://mycompany.com",
+  },
+});
+
+app.listen(3001, () => {
+  console.log("A2A Server running at http://localhost:3001");
+});
+```
+
+---
+
+## Agent Card
+
+The server automatically generates an [Agent Card](https://google.github.io/A2A/specification/#agent-card) at `/.well-known/agent.json`:
+
+```json
+{
+  "name": "RadarOS Agent Server",
+  "description": "Multi-agent server with 2 agents: assistant, calculator",
+  "url": "/",
+  "version": "1.0.0",
+  "provider": {
+    "organization": "MyCompany",
+    "url": "https://mycompany.com"
+  },
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": true
+  },
+  "skills": [
+    { "id": "assistant", "name": "assistant", "description": "..." },
+    { "id": "calculator", "name": "calculator", "description": "..." }
+  ]
+}
+```
+
+Each agent is listed as a **skill**. The card is auto-generated from agent metadata — no manual configuration needed.
+
+---
+
+## JSON-RPC Methods
+
+The server handles these A2A methods at the `basePath`:
+
+### message/send
+
+Synchronous request/response. Runs the agent and returns the complete result.
+
+```bash
+curl -X POST http://localhost:3001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{ "kind": "text", "text": "Hello!" }],
+        "metadata": { "agentName": "assistant" }
+      }
+    }
+  }'
+```
+
+### message/stream
+
+Server-Sent Events (SSE) streaming. Returns chunks as the agent generates output.
+
+```bash
+curl -X POST http://localhost:3001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/stream",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{ "kind": "text", "text": "Tell me a story" }]
+      }
+    }
+  }'
+```
+
+### tasks/get
+
+Retrieve a task by ID, optionally limiting history length.
+
+```bash
+curl -X POST http://localhost:3001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tasks/get",
+    "params": { "id": "task-uuid-here" }
+  }'
+```
+
+### tasks/cancel
+
+Cancel a running task.
+
+```bash
+curl -X POST http://localhost:3001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tasks/cancel",
+    "params": { "id": "task-uuid-here" }
+  }'
+```
+
+---
+
+## Agent Routing
+
+When multiple agents are registered, the server resolves which agent to use:
+
+1. **Explicit** — Set `metadata.agentName` in the message to target a specific agent
+2. **Name matching** — The server checks if the message text mentions an agent name
+3. **Default** — Falls back to the first registered agent
+
+---
+
+## Task Lifecycle
+
+Each request creates a task that transitions through these states:
+
+```
+submitted → working → completed
+                   → failed
+                   → canceled
+```
+
+The task stores the full message history and any artifacts (tool results).
+
+---
+
+## Configuration
+
+<ParamField body="agents" type="Record<string, Agent>" required>
+  Map of agent name to Agent instance.
+</ParamField>
+
+<ParamField body="basePath" type="string" default="/">
+  Base path for the JSON-RPC endpoint.
+</ParamField>
+
+<ParamField body="provider" type="object">
+  Provider information included in the Agent Card.
+  - `organization` (string) — Organization name
+  - `url` (string) — Organization URL
+</ParamField>
+
+<ParamField body="version" type="string" default="1.0.0">
+  Version string for the Agent Card.
+</ParamField>

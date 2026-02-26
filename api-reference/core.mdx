@@ -522,3 +522,81 @@ const logger = new Logger({
   prefix: "myapp",
 });
 ```
+
+---
+
+## MCPToolProvider
+
+Connect to an MCP server and use its tools as native `ToolDef[]`.
+
+```typescript
+import { MCPToolProvider } from "@radaros/core";
+
+const mcp = new MCPToolProvider({
+  name: "github",
+  transport: "stdio",          // "stdio" | "http"
+  command: "npx",              // stdio only
+  args: ["-y", "@modelcontextprotocol/server-github"],
+  env: { GITHUB_TOKEN: "..." },
+  // url: "http://...",        // http only
+  // headers: {},              // http only
+});
+
+await mcp.connect();
+const tools = await mcp.getTools();  // ToolDef[]
+await mcp.refresh();                 // re-discover tools
+await mcp.close();                   // disconnect
+```
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `name` | `string` | Unique name for this MCP server. Used to namespace tool names. |
+| `transport` | `"stdio" \| "http"` | Transport protocol. |
+| `command` | `string` | Command to spawn (stdio only). |
+| `args` | `string[]` | Arguments for the command (stdio only). |
+| `env` | `Record<string, string>` | Environment variables (stdio only). |
+| `url` | `string` | MCP server URL (http only). |
+| `headers` | `Record<string, string>` | Custom HTTP headers (http only). |
+
+Requires peer dependency: `@modelcontextprotocol/sdk`
+
+---
+
+## A2ARemoteAgent
+
+Connect to a remote A2A-compliant agent.
+
+```typescript
+import { A2ARemoteAgent } from "@radaros/core";
+
+const remote = new A2ARemoteAgent({
+  url: "http://remote-service:3001",
+  headers: { Authorization: "Bearer ..." },  // optional
+  name: "remote-agent",                       // optional override
+  timeoutMs: 60000,                           // optional (default 60s)
+});
+
+// Discover agent capabilities
+const card = await remote.discover();
+
+// Synchronous call
+const result = await remote.run("Hello");
+
+// Streaming call
+for await (const chunk of remote.stream("Tell me a story")) {
+  if (chunk.type === "text") process.stdout.write(chunk.text);
+}
+
+// Use as a tool for another agent
+const tool = remote.asTool();
+
+// Get cached Agent Card
+const agentCard = remote.getAgentCard();
+```
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `url` | `string` | Base URL of the remote A2A agent. |
+| `headers` | `Record<string, string>` | Custom headers for auth. |
+| `name` | `string` | Override discovered name. |
+| `timeoutMs` | `number` | Request timeout (default 60000). |

@@ -1,0 +1,188 @@
+---
+title: MCP Client
+description: Connect to MCP (Model Context Protocol) servers and use their tools as native RadarOS agent tools.
+---
+
+# MCP Client
+
+RadarOS includes a built-in MCP client that lets your agents connect to any [Model Context Protocol](https://modelcontextprotocol.io/) server and use its tools natively — no glue code required.
+
+<Info>
+MCP is an open protocol that standardizes how LLM applications integrate with external tools, resources, and prompts. RadarOS acts as an MCP **client**, consuming tools from external MCP servers.
+</Info>
+
+---
+
+## Installation
+
+The MCP SDK is an optional peer dependency:
+
+```bash
+npm install @modelcontextprotocol/sdk
+```
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+// Connect to a GitHub MCP server via stdio
+const github = new MCPToolProvider({
+  name: "github",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-github"],
+  env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+});
+
+await github.connect();
+
+const agent = new Agent({
+  name: "dev-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a developer assistant with GitHub access.",
+  tools: [...await github.getTools()],
+});
+
+const result = await agent.run("What are the open issues in my repo?");
+console.log(result.text);
+
+await github.close();
+```
+
+---
+
+## Transports
+
+### stdio
+
+Spawns the MCP server as a child process and communicates via stdin/stdout. Best for local MCP servers.
+
+```typescript
+const tools = new MCPToolProvider({
+  name: "filesystem",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+});
+```
+
+<ParamField body="command" type="string" required>
+  The command to spawn (e.g. `"npx"`, `"node"`, `"python"`).
+</ParamField>
+
+<ParamField body="args" type="string[]">
+  Arguments for the command.
+</ParamField>
+
+<ParamField body="env" type="Record<string, string>">
+  Environment variables passed to the spawned process.
+</ParamField>
+
+### HTTP (Streamable HTTP)
+
+Connects to a remote MCP server over HTTP. Falls back to SSE transport if Streamable HTTP is not available.
+
+```typescript
+const tools = new MCPToolProvider({
+  name: "database",
+  transport: "http",
+  url: "http://localhost:8080/mcp",
+  headers: { Authorization: "Bearer my-token" },
+});
+```
+
+<ParamField body="url" type="string" required>
+  The MCP server URL.
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Custom HTTP headers (e.g. for authentication).
+</ParamField>
+
+---
+
+## Mixing MCP and Local Tools
+
+MCP tools are returned as standard `ToolDef[]` and can be combined with local tools:
+
+```typescript
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const localTool = defineTool({
+  name: "current_time",
+  description: "Returns the current date and time",
+  parameters: z.object({}),
+  execute: async () => new Date().toISOString(),
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [
+    ...await github.getTools(),    // MCP tools
+    ...await dbTools.getTools(),    // Another MCP server
+    localTool,                      // Local tool
+  ],
+});
+```
+
+---
+
+## Multiple MCP Servers
+
+Connect to multiple servers simultaneously. Tool names are namespaced as `{serverName}__{toolName}` to avoid collisions:
+
+```typescript
+const github = new MCPToolProvider({ name: "github", ... });
+const slack = new MCPToolProvider({ name: "slack", ... });
+
+await Promise.all([github.connect(), slack.connect()]);
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [
+    ...await github.getTools(),  // github__create_issue, github__list_repos, ...
+    ...await slack.getTools(),   // slack__send_message, slack__list_channels, ...
+  ],
+});
+```
+
+---
+
+## API Reference
+
+### MCPToolProvider
+
+<ParamField body="name" type="string" required>
+  A unique name for this MCP server connection. Used to namespace tool names.
+</ParamField>
+
+<ParamField body="transport" type="'stdio' | 'http'" required>
+  The transport protocol to use.
+</ParamField>
+
+| Method | Description |
+|---|---|
+| `connect()` | Connect to the MCP server and discover tools. |
+| `getTools()` | Returns `ToolDef[]` — all discovered tools. |
+| `refresh()` | Re-discover tools from the server. |
+| `close()` | Disconnect from the server and clean up. |
+
+---
+
+## Popular MCP Servers
+
+| Server | Install |
+|---|---|
+| GitHub | `npx -y @modelcontextprotocol/server-github` |
+| Filesystem | `npx -y @modelcontextprotocol/server-filesystem` |
+| PostgreSQL | `npx -y @modelcontextprotocol/server-postgres` |
+| Brave Search | `npx -y @modelcontextprotocol/server-brave-search` |
+| Slack | `npx -y @modelcontextprotocol/server-slack` |
+
+Browse all available servers at [mcp.so](https://mcp.so).

@@ -253,3 +253,71 @@ The transport layer extracts API keys from these HTTP headers:
 | `x-api-key` | Generic fallback |
 
 Keys can also be passed in the request body as `apiKey` or via Socket.IO event payload.
+
+---
+
+## A2A Server
+
+Expose RadarOS agents as A2A-compliant HTTP endpoints.
+
+```typescript
+import { createA2AServer } from "@radaros/transport";
+import express from "express";
+
+const app = express();
+
+createA2AServer(app, {
+  agents: { assistant, calculator },
+  basePath: "/",
+  provider: {
+    organization: "MyCompany",
+    url: "https://mycompany.com",
+  },
+  version: "1.0.0",
+});
+```
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `agents` | `Record<string, Agent>` | Map of agent name to Agent instance. |
+| `basePath` | `string` | Base path for the JSON-RPC endpoint (default `"/"`). |
+| `provider` | `{ organization, url? }` | Provider info for the Agent Card. |
+| `version` | `string` | Version string for the Agent Card (default `"1.0.0"`). |
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /.well-known/agent.json` | Agent Card (discovery). |
+| `POST {basePath}` | JSON-RPC 2.0 endpoint. |
+
+### JSON-RPC Methods
+
+| Method | Description |
+|--------|-------------|
+| `message/send` | Synchronous agent run. Returns completed task. |
+| `message/stream` | SSE streaming. Returns chunks as the agent generates. |
+| `tasks/get` | Retrieve a task by ID. |
+| `tasks/cancel` | Cancel a running task. |
+
+---
+
+## Agent Card Generator
+
+Generate Agent Cards from RadarOS agents without starting a server.
+
+```typescript
+import { generateAgentCard, generateMultiAgentCard } from "@radaros/transport";
+
+// Single agent card
+const card = generateAgentCard(agent, "http://localhost:3001", {
+  organization: "MyCompany",
+});
+
+// Multi-agent card
+const multiCard = generateMultiAgentCard(
+  { assistant, calculator },
+  "http://localhost:3001",
+  { organization: "MyCompany" },
+);
+```
