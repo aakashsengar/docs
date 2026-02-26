@@ -1,0 +1,115 @@
+---
+title: Reasoning
+description: Enable extended thinking and reasoning capabilities for agents using OpenAI, Anthropic, Google, and Vertex AI models.
+---
+
+# Reasoning
+
+RadarOS supports **extended thinking** (reasoning) across all major model providers. When enabled, the model produces an internal chain-of-thought before generating the final answer — improving performance on complex math, logic, and multi-step problems.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, google } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Thinker",
+  model: google("gemini-2.5-flash"),
+  instructions: "Solve problems step by step.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 8000,
+  },
+  logLevel: "info",
+});
+
+const result = await agent.run("What is the 15th prime number?");
+console.log(result.text);
+
+if (result.thinking) {
+  console.log("Reasoning:", result.thinking);
+}
+
+console.log("Reasoning tokens:", result.usage.reasoningTokens);
+```
+
+---
+
+## Configuration
+
+<ParamField path="reasoning.enabled" type="boolean" required>
+  Enable or disable reasoning for this agent.
+</ParamField>
+
+<ParamField path="reasoning.effort" type="'low' | 'medium' | 'high'" required={false}>
+  Reasoning effort level. **OpenAI only** — maps to `reasoning_effort` parameter. Default: `"medium"`.
+</ParamField>
+
+<ParamField path="reasoning.budgetTokens" type="number" required={false}>
+  Maximum tokens allocated for the thinking phase. **Anthropic, Google, Vertex AI** — maps to `budget_tokens` / `thinkingBudget`. Default: `10000`.
+</ParamField>
+
+---
+
+## Provider Support
+
+Each provider maps `ReasoningConfig` to its native API:
+
+| Provider | API Parameter | Effort | Budget | Models |
+|----------|---------------|--------|--------|--------|
+| **OpenAI** | `reasoning_effort` | `effort` field | N/A | `o1`, `o1-mini`, `o3-mini` |
+| **Anthropic** | `thinking.budget_tokens` | N/A | `budgetTokens` field | `claude-sonnet-4-20250514` |
+| **Google** | `thinkingConfig.thinkingBudget` | N/A | `budgetTokens` field | `gemini-2.5-flash`, `gemini-2.5-pro` |
+| **Vertex AI** | `thinkingConfig.thinkingBudget` | N/A | `budgetTokens` field | `gemini-2.5-flash`, `gemini-2.5-pro` |
+
+<Note>
+When reasoning is enabled for OpenAI, `temperature` is ignored (the API does not allow both). For Anthropic, the `temperature` parameter is removed when thinking is active.
+</Note>
+
+---
+
+## Output
+
+When reasoning is enabled, `RunOutput` includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thinking` | `string \| undefined` | The model's internal chain-of-thought |
+| `usage.reasoningTokens` | `number \| undefined` | Tokens consumed by the reasoning phase |
+
+### Streaming
+
+During streaming, reasoning content is delivered as `thinking` chunks:
+
+```typescript
+for await (const chunk of agent.stream("Solve this puzzle...")) {
+  if (chunk.type === "thinking") {
+    process.stdout.write(`[think] ${chunk.text}`);
+  } else if (chunk.type === "text") {
+    process.stdout.write(chunk.text);
+  }
+}
+```
+
+---
+
+## ReasoningConfig Type
+
+```typescript
+interface ReasoningConfig {
+  enabled: boolean;
+  effort?: "low" | "medium" | "high";
+  budgetTokens?: number;
+}
+```
+
+---
+
+## Logging
+
+When `logLevel` is `"info"` or higher, the agent logger displays:
+
+- Thinking content (truncated, italic, dimmed)
+- Reasoning token count with a brain icon in the usage summary

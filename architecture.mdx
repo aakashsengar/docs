@@ -25,7 +25,7 @@ RadarOS is organized as a monorepo with three primary packages. Each package has
 
 <CardGroup cols={3}>
   <Card title="@radaros/core" icon="box">
-    The heart of RadarOS. Provides `Agent`, `Team`, `Workflow`, `Memory`, `SessionManager`, `KnowledgeBase`, `MCPToolProvider`, `A2ARemoteAgent`, `Logger`, and `EventBus`. Model-agnostic via provider adapters.
+    The heart of RadarOS. Provides `Agent`, `Team`, `Workflow`, `Memory`, `UserMemory`, `SessionManager`, `KnowledgeBase`, `MCPToolProvider`, `A2ARemoteAgent`, `Logger`, and `EventBus`. Supports reasoning, tool caching, and cross-session personalization. Model-agnostic via provider adapters.
   </Card>
   <Card title="@radaros/transport" icon="globe">
     Expose agents over HTTP, WebSockets, and A2A protocol. Use `createAgentRouter()` for Express, `createAgentGateway()` for Socket.IO, or `createA2AServer()` for A2A interop.
@@ -46,7 +46,7 @@ RadarOS is built in layers. Higher layers depend on lower ones; infrastructure i
     **Agent**, **Team**, **Workflow** — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
   </Step>
   <Step title="Engine Layer">
-    **LLM Loop**, **Tool Executor**, **Session Manager** — Core execution logic. Handles the agent loop, tool invocation, and session state.
+    **LLM Loop**, **Tool Executor**, **Session Manager**, **User Memory** — Core execution logic. Handles the agent loop, tool invocation (with optional caching), session state, reasoning/extended thinking, and cross-session user personalization.
   </Step>
   <Step title="Model Abstraction">
     **ModelProvider** interface + adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: `openai(modelId)`, `anthropic(modelId)`, `google(modelId)`, `ollama(modelId)`.
@@ -87,13 +87,15 @@ API Request
 Response (text / tool calls)
     ↓
 Tool Executor (if tool calls)
-  ├─ Local tools
+  ├─ Local tools (with optional caching)
   ├─ MCP tools (external servers)
   └─ A2A tools (remote agents)
     ↓
 Loop until final response
     ↓
 SessionManager.save()
+    ↓
+UserMemory.extractAndStore() (if configured)
     ↓
 Output to caller
 ```

@@ -79,6 +79,14 @@ new Agent(config: AgentConfig)
   Custom event bus for event-driven workflows.
 </ParamField>
 
+<ParamField body="reasoning" type="ReasoningConfig">
+  Enable extended thinking / chain-of-thought reasoning. See [Reasoning](/agents/reasoning).
+</ParamField>
+
+<ParamField body="userMemory" type="UserMemory">
+  User memory instance for cross-session personalization. See [User Memory](/agents/user-memory).
+</ParamField>
+
 <ParamField body="logLevel" type="LogLevel" default="silent">
   Log verbosity: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
 </ParamField>
@@ -133,7 +141,19 @@ interface RunOutput {
   toolCalls: ToolCallResult[];
   usage: TokenUsage;
   structured?: unknown;
+  thinking?: string;
   durationMs?: number;
+}
+```
+
+## TokenUsage
+
+```typescript
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
 }
 ```
 
@@ -142,6 +162,7 @@ interface RunOutput {
 ```typescript
 type StreamChunk =
   | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "tool_call_start"; toolCall: { id: string; name: string } }
   | { type: "tool_call_delta"; toolCallId: string; argumentsDelta: string }
   | { type: "tool_call_end"; toolCallId: string }
@@ -185,6 +206,17 @@ interface ModelConfig {
   stop?: string[];
   responseFormat?: "text" | "json" | { type: "json_schema"; schema: object; name?: string };
   apiKey?: string;
+  reasoning?: ReasoningConfig;
+}
+```
+
+### ReasoningConfig
+
+```typescript
+interface ReasoningConfig {
+  enabled: boolean;
+  effort?: "low" | "medium" | "high";  // OpenAI only
+  budgetTokens?: number;               // Anthropic, Google, Vertex AI
 }
 ```
 
@@ -202,6 +234,7 @@ defineTool<T extends z.ZodObject>(config: {
   description: string;
   parameters: T;
   execute: (args: z.infer<T>, ctx: RunContext) => Promise<string | ToolResult>;
+  cache?: ToolCacheConfig;
 }): ToolDef
 ```
 
@@ -219,6 +252,16 @@ interface Artifact {
   mimeType?: string;
 }
 ```
+
+### ToolCacheConfig
+
+```typescript
+interface ToolCacheConfig {
+  ttl: number; // milliseconds
+}
+```
+
+See [Tool Caching](/agents/tool-caching) for details.
 
 ---
 
@@ -328,6 +371,49 @@ new Memory(config?: MemoryConfig)
 | `getSummaries(sessionId)` | `Promise<string[]>` | Get long-term summaries |
 | `getContextString(sessionId)` | `Promise<string>` | Formatted context string |
 | `clear(sessionId)` | `Promise<void>` | Clear all memory for session |
+
+---
+
+## UserMemory
+
+```typescript
+import { UserMemory } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new UserMemory(config?: UserMemoryConfig)
+```
+
+<ParamField body="storage" type="StorageDriver">Storage backend for facts. Defaults to `InMemoryStorage`.</ParamField>
+<ParamField body="model" type="ModelProvider">LLM for auto-extraction. Falls back to the agent's model.</ParamField>
+<ParamField body="maxFacts" type="number" default="100">Maximum facts per user.</ParamField>
+<ParamField body="enabled" type="boolean" default="true">Enable/disable auto-extraction.</ParamField>
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getFacts(userId)` | `Promise<UserFact[]>` | Get all facts for a user |
+| `addFacts(userId, facts, source?)` | `Promise<void>` | Add facts manually |
+| `removeFact(userId, factId)` | `Promise<void>` | Remove a fact by ID |
+| `clear(userId)` | `Promise<void>` | Clear all facts for a user |
+| `getContextString(userId)` | `Promise<string>` | Formatted string for system prompt |
+| `extractAndStore(userId, messages, model?)` | `Promise<void>` | Extract and store facts from messages |
+
+### UserFact
+
+```typescript
+interface UserFact {
+  id: string;
+  fact: string;
+  createdAt: Date;
+  source: "auto" | "manual";
+}
+```
+
+See [User Memory](/agents/user-memory) for usage guide.
 
 ---
 
