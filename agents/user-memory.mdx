@@ -106,6 +106,7 @@ const userMemory = new UserMemory(config?: UserMemoryConfig);
 | `clear(userId)` | `Promise<void>` | Clear all facts for a user |
 | `getContextString(userId)` | `Promise<string>` | Formatted facts string for system prompt injection |
 | `extractAndStore(userId, messages, model?)` | `Promise<void>` | Extract facts from messages and store them |
+| `asTool(config?)` | `ToolDef` | Create a tool the agent can call to recall user facts |
 
 ---
 
@@ -121,6 +122,37 @@ interface UserFact {
 ```
 
 Facts from auto-extraction have `source: "auto"`. Manually added facts have `source: "manual"`.
+
+---
+
+## asTool() — Let the Agent Recall Facts On Demand
+
+Instead of only injecting facts into the system prompt, you can give the agent a **tool** to actively look up user facts when asked. This is useful for queries like _"What do you know about me?"_.
+
+```typescript
+const agent = new Agent({
+  name: "MemoryBot",
+  model: openai("gpt-4o"),
+  instructions: "You are a friendly assistant with a great memory.",
+  storage,
+  userMemory,
+  tools: [userMemory.asTool()],
+});
+
+await agent.run("What do you know about me?", { userId: "user-42" });
+// Agent calls recall_user_facts tool → retrieves stored facts → responds
+```
+
+The tool reads `ctx.userId` from the run context automatically — no manual wiring needed.
+
+### Options
+
+```typescript
+userMemory.asTool({
+  name: "recall_user_facts",       // default
+  description: "Custom description" // optional override
+});
+```
 
 ---
 

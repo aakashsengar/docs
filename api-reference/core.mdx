@@ -401,6 +401,7 @@ new UserMemory(config?: UserMemoryConfig)
 | `clear(userId)` | `Promise<void>` | Clear all facts for a user |
 | `getContextString(userId)` | `Promise<string>` | Formatted string for system prompt |
 | `extractAndStore(userId, messages, model?)` | `Promise<void>` | Extract and store facts from messages |
+| `asTool(config?)` | `ToolDef` | Create a tool for the agent to recall user facts on demand |
 
 ### UserFact
 
