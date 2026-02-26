@@ -104,6 +104,36 @@ The `apiKey` in `RunOpts` is passed through to the model's `generate()` and `str
 
 ---
 
+## Realtime / Voice
+
+For real-time voice agents, use `openaiRealtime()` to create an OpenAI Realtime provider:
+
+```typescript
+import { VoiceAgent, openaiRealtime } from "@radaros/core";
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+  instructions: "You are a voice assistant.",
+  voice: "alloy",
+});
+```
+
+`openaiRealtime()` is a shorthand for `new OpenAIRealtimeProvider()`. It accepts the same config:
+
+```typescript
+openaiRealtime("gpt-4o-realtime-preview", {
+  apiKey: "sk-...",    // optional, defaults to OPENAI_API_KEY env
+  baseURL: "wss://...", // optional custom WebSocket endpoint
+});
+```
+
+Requires: `npm install ws`
+
+See the [Voice Agents](/voice/overview) docs for full details.
+
+---
+
 ## Full Example
 
 ```typescript

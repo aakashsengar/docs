@@ -45,6 +45,12 @@
             ]
           },
           {
+            "group": "Browser Agents",
+            "pages": [
+              "browser/overview"
+            ]
+          },
+          {
             "group": "Models",
             "pages": [
               "models/overview",

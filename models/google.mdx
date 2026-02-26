@@ -120,6 +120,34 @@ const response = await model.generate(messages);
 
 ---
 
+## Realtime / Voice (Gemini Live)
+
+For real-time voice agents, use `googleLive()` to create a Google Gemini Live provider:
+
+```typescript
+import { VoiceAgent, googleLive } from "@radaros/core";
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: googleLive("gemini-2.5-flash-native-audio-preview-12-2025"),
+  instructions: "You are a voice assistant.",
+});
+```
+
+`googleLive()` is a shorthand for `new GoogleLiveProvider()`. It accepts the same config:
+
+```typescript
+googleLive("gemini-2.5-flash-native-audio-preview-12-2025", {
+  apiKey: "...", // optional, defaults to GOOGLE_API_KEY env
+});
+```
+
+Requires: `npm install @google/genai`
+
+See the [Voice Agents](/voice/overview) docs for full details.
+
+---
+
 ## Full Example
 
 ```typescript

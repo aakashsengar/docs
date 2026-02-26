@@ -1,0 +1,635 @@
+---
+title: Browser Agents
+description: Vision-based autonomous browser automation. An agent sees screenshots, decides actions, and operates web pages via Playwright.
+---
+
+# Browser Agents
+
+RadarOS supports **autonomous browser automation** through the `BrowserAgent` class in `@radaros/browser`. The agent uses a vision-capable LLM (GPT-4o, Gemini) to interpret screenshots of a browser and decide what actions to take — clicking, typing, scrolling, navigating — until the task is complete.
+
+<Note>
+Browser agents use Playwright under the hood. After installing the package, run `npx playwright install chromium` to download the browser binary.
+</Note>
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @radaros/browser playwright
+npx playwright install chromium
+```
+
+```bash pnpm
+pnpm add @radaros/browser playwright
+npx playwright install chromium
+```
+
+</CodeGroup>
+
+---
+
+## Quick Start
+
+```typescript
+import { BrowserAgent } from "@radaros/browser";
+import { openai } from "@radaros/core";
+
+const browser = new BrowserAgent({
+  name: "web-navigator",
+  model: openai("gpt-4o"),
+  startUrl: "https://www.google.com",
+  maxSteps: 20,
+});
+
+const result = await browser.run(
+  "Search for 'TypeScript agent framework' and tell me the first 3 results"
+);
+
+console.log(result.success); // true
+console.log(result.result);  // "1. LangChain.js — ..."
+console.log(result.steps.length); // number of actions taken
+```
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Launch browser">
+    Playwright opens a Chromium browser (headless by default) and navigates to the start URL.
+  </Step>
+  <Step title="Take screenshot">
+    A PNG screenshot of the viewport is captured. If `useDOM` is enabled, a simplified accessibility tree is also extracted.
+  </Step>
+  <Step title="Send to vision model">
+    The screenshot (and DOM tree if enabled) and task description are sent to a vision-capable LLM.
+  </Step>
+  <Step title="Receive action">
+    The model returns a structured JSON action: click at coordinates, type text, scroll, navigate, etc.
+  </Step>
+  <Step title="Execute action">
+    The action is executed via Playwright's browser API.
+  </Step>
+  <Step title="Repeat or finish">
+    Steps 2-5 repeat until the model returns "done" (task complete) or "fail" (task impossible), or the max step limit is reached.
+  </Step>
+</Steps>
+
+---
+
+## BrowserAgentConfig
+
+```typescript
+const agent = new BrowserAgent(config: BrowserAgentConfig);
+```
+
+<ParamField path="name" type="string" required>
+  Name of the browser agent.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider" required>
+  Vision-capable model. Must support image inputs (e.g., `openai("gpt-4o")`, `google("gemini-2.5-flash")`).
+</ParamField>
+
+<ParamField path="instructions" type="string">
+  Extra instructions appended to the system prompt. Use for task-specific guidance.
+</ParamField>
+
+<ParamField path="maxSteps" type="number" default="30">
+  Maximum number of vision loop iterations before the agent gives up.
+</ParamField>
+
+<ParamField path="headless" type="boolean" default="true">
+  Run browser without a visible window. Set to `false` for debugging and demos.
+</ParamField>
+
+<ParamField path="viewport" type="{ width: number; height: number }" default="1280x720">
+  Browser viewport size in pixels. The model sees screenshots at this resolution.
+</ParamField>
+
+<ParamField path="startUrl" type="string">
+  Initial URL to navigate to before starting the task.
+</ParamField>
+
+<ParamField path="waitAfterAction" type="number" default="1500">
+  Milliseconds to wait after each action for the page to settle.
+</ParamField>
+
+<ParamField path="maxRepeats" type="number" default="3">
+  Max consecutive identical actions before the agent auto-fails (loop detection).
+</ParamField>
+
+<ParamField path="useDOM" type="boolean" default="false">
+  Include a simplified DOM/accessibility tree alongside the screenshot. This hybrid approach gives the model both visual context and precise element coordinates for better targeting.
+</ParamField>
+
+<ParamField path="storageState" type="string">
+  Path to a Playwright storageState JSON file. Restores cookies, localStorage, and sessionStorage from a previous session. Use this to maintain login state across runs.
+</ParamField>
+
+<ParamField path="recordVideo" type="boolean | { dir: string }" default="false">
+  Enable video recording of the browser session. Pass `true` for the default directory (`./browser-videos`) or `{ dir: "/path" }` for a custom location.
+</ParamField>
+
+<ParamField path="stealth" type="boolean | StealthConfig" default="false">
+  Enable anti-bot-detection mode. Patches `navigator.webdriver`, spoofs plugins, languages, WebGL renderer, and more. Pass `true` for sensible defaults or a `StealthConfig` object for fine control (custom user-agent, locale, timezone, geolocation, proxy).
+</ParamField>
+
+<ParamField path="humanize" type="boolean | HumanizeConfig" default="false">
+  Simulate human-like behavior — variable typing speed, jittered click coordinates, Bézier mouse movement curves, random micro-pauses. Pass `true` for defaults or a `HumanizeConfig` for fine control.
+</ParamField>
+
+<ParamField path="credentials" type="CredentialVault">
+  Secure credential store. The LLM only sees placeholders like `{{email}}` — real values are injected at execution time and scrubbed from all output.
+</ParamField>
+
+<ParamField path="logLevel" type="string" default="silent">
+  Logging level: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
+</ParamField>
+
+---
+
+## run()
+
+```typescript
+const result = await agent.run(task: string, opts?: BrowserRunOpts);
+```
+
+<ParamField path="task" type="string" required>
+  Natural language description of what the agent should do in the browser.
+</ParamField>
+
+<ParamField path="opts.startUrl" type="string">
+  Override the config's `startUrl` for this run.
+</ParamField>
+
+<ParamField path="opts.apiKey" type="string">
+  Per-run API key override for the vision model.
+</ParamField>
+
+<ParamField path="opts.saveStorageState" type="string">
+  Path to save cookies/auth state after the run completes. Load it back on the next run via `storageState` in config.
+</ParamField>
+
+### BrowserRunOutput
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `result` | `string` | Final text result or failure reason |
+| `success` | `boolean` | Whether the task completed successfully |
+| `steps` | `BrowserStep[]` | Full action history with screenshots |
+| `finalUrl` | `string` | URL at completion |
+| `finalScreenshot` | `Buffer` | Last screenshot (PNG) |
+| `durationMs` | `number` | Total time taken |
+| `videoPath` | `string?` | Video file path (if `recordVideo` was enabled) |
+
+---
+
+## Available Actions
+
+The vision model can choose from these actions at each step:
+
+| Action | Parameters | Description |
+|--------|-----------|-------------|
+| `click` | `x`, `y`, `description` | Click at viewport coordinates |
+| `type` | `text`, `x?`, `y?` | Type text (optionally click a position first) |
+| `scroll` | `direction`, `amount?` | Scroll up or down |
+| `navigate` | `url` | Go to a specific URL |
+| `back` | — | Go back to the previous page |
+| `wait` | `ms` | Wait for page to load |
+| `done` | `result` | Task is complete |
+| `fail` | `reason` | Task cannot be completed |
+
+---
+
+## DOM Extraction (Hybrid Mode)
+
+By default, the agent relies purely on vision — the model interprets screenshots to locate elements. Enabling `useDOM: true` adds a **hybrid mode** where a simplified accessibility tree is also extracted and sent alongside the screenshot.
+
+```typescript
+const agent = new BrowserAgent({
+  name: "hybrid-navigator",
+  model: openai("gpt-4o"),
+  useDOM: true, // enables hybrid vision + DOM mode
+});
+```
+
+The DOM snapshot lists interactive elements with their center coordinates:
+
+```
+[640,300] input(text): "Search..."
+[960,45] button: "Sign In"
+[120,680] a: "Contact Us"
+```
+
+This helps the model target elements more precisely, especially when text is small or overlapping.
+
+You can also call `extractDOM()` directly on a `BrowserProvider`:
+
+```typescript
+import { BrowserProvider } from "@radaros/browser";
+
+const browser = new BrowserProvider();
+await browser.launch();
+await browser.navigate("https://example.com");
+
+const dom = await browser.extractDOM({ maxElements: 50 });
+console.log(dom);
+```
+
+---
+
+## Cookie & Auth Persistence
+
+Maintain login sessions across agent runs using Playwright's storage state.
+
+```typescript
+const agent = new BrowserAgent({
+  name: "auth-agent",
+  model: openai("gpt-4o"),
+  storageState: "./auth-state.json", // load saved cookies
+});
+
+// First run: log in and save the state
+const result = await agent.run("Log in with test@example.com", {
+  saveStorageState: "./auth-state.json",
+});
+
+// Second run: starts already logged in
+const result2 = await agent.run("Go to dashboard and get stats");
+```
+
+The storage state file includes cookies, localStorage, and sessionStorage — everything needed to resume an authenticated session.
+
+---
+
+## Stealth Mode (Anti-Detection)
+
+Many websites detect and block headless browsers. Stealth mode patches common detection vectors so the browser appears as a normal user session.
+
+```typescript
+const agent = new BrowserAgent({
+  name: "stealth-agent",
+  model: openai("gpt-4o"),
+  stealth: true,  // sensible defaults
+  humanize: true,  // human-like behavior
+});
+```
+
+### What stealth patches
+
+| Vector | What it does |
+|--------|-------------|
+| `navigator.webdriver` | Removed (normally `true` in automation) |
+| `navigator.plugins` | Spoofed with realistic Chrome plugins |
+| `navigator.languages` | Set to `["en-US", "en"]` |
+| `navigator.permissions` | Notifications return `"prompt"` instead of `"denied"` |
+| `window.chrome.runtime` | Stubbed to appear like a real Chrome extension API |
+| WebGL renderer | Reports "Intel Iris OpenGL Engine" instead of "SwiftShader" |
+| DOM markers | Removes `cdc_` and `__playwright` attributes |
+| Chrome launch flags | `--disable-blink-features=AutomationControlled` |
+| User-Agent | Rotated from a pool of realistic Chrome/Safari strings |
+
+### Fine-grained StealthConfig
+
+```typescript
+const agent = new BrowserAgent({
+  name: "stealth-agent",
+  model: openai("gpt-4o"),
+  stealth: {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+    locale: "de-DE",
+    timezone: "Europe/Berlin",
+    geolocation: { latitude: 52.52, longitude: 13.405 },
+    proxy: {
+      server: "http://proxy.example.com:8080",
+      username: "user",
+      password: "pass",
+    },
+  },
+});
+```
+
+### HumanizeConfig
+
+Makes the browser behave like a real person — variable timing, imprecise clicks, curved mouse paths.
+
+```typescript
+const agent = new BrowserAgent({
+  name: "human-agent",
+  model: openai("gpt-4o"),
+  humanize: {
+    typingDelay: [50, 150],   // ms per character (random in range)
+    clickJitter: 4,           // ±4px random offset on clicks
+    actionDelay: [300, 1000], // random pause between actions
+    mouseMovement: true,      // Bézier curve mouse movement
+  },
+});
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `typingDelay` | `[40, 120]` | Min/max ms delay between keystrokes |
+| `clickJitter` | `3` | Random pixel offset added to click coordinates |
+| `actionDelay` | `[200, 800]` | Random pause after each interaction |
+| `mouseMovement` | `true` | Simulate smoothstep mouse curves to target |
+
+---
+
+## Video Recording
+
+Record the agent's entire browser session as a video for debugging, auditing, or demos.
+
+```typescript
+const agent = new BrowserAgent({
+  name: "recorded-agent",
+  model: openai("gpt-4o"),
+  recordVideo: true, // saves to ./browser-videos/
+  // or: recordVideo: { dir: "./my-recordings" }
+});
+
+const result = await agent.run("Navigate to example.com and take notes");
+
+if (result.videoPath) {
+  console.log("Video saved at:", result.videoPath);
+}
+```
+
+Playwright generates one video file per browser page. The path is returned in `result.videoPath` when the run completes.
+
+---
+
+## Parallel Browsing (Multi-Tab)
+
+`BrowserProvider` supports multiple tabs for advanced workflows:
+
+```typescript
+import { BrowserProvider } from "@radaros/browser";
+
+const browser = new BrowserProvider();
+await browser.launch();
+
+// Navigate first tab
+await browser.navigate("https://site-a.com");
+
+// Open a second tab
+const tab2 = await browser.newTab("https://site-b.com");
+
+// Switch between tabs
+await browser.switchTab(tab2);
+const screenshot2 = await browser.screenshot();
+
+await browser.switchTab("tab-0"); // back to first tab
+const screenshot1 = await browser.screenshot();
+
+// List all open tabs
+const tabs = browser.listTabs();
+// [{ id: "tab-0", url: "https://site-a.com", active: true },
+//  { id: "tab-1", url: "https://site-b.com", active: false }]
+
+// Close a tab
+await browser.closeTab(tab2);
+
+await browser.close();
+```
+
+### Tab API
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `newTab(url?)` | `string` | Open a new tab, optionally navigate |
+| `switchTab(tabId)` | `void` | Make a tab active |
+| `closeTab(tabId)` | `void` | Close a tab (can't close the last one) |
+| `listTabs()` | `TabInfo[]` | List all open tabs with URL and active status |
+| `currentTabId` | `string` | Get the active tab's ID |
+
+---
+
+## Browser Gateway (Socket.IO)
+
+Stream browser agent execution over Socket.IO for live observation UIs, dashboards, or remote monitoring.
+
+```typescript
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { BrowserAgent } from "@radaros/browser";
+import { createBrowserGateway } from "@radaros/transport";
+import { openai } from "@radaros/core";
+
+const app = express();
+const server = createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+const browserAgent = new BrowserAgent({
+  name: "web-scraper",
+  model: openai("gpt-4o"),
+  headless: true,
+  logLevel: "info",
+});
+
+createBrowserGateway({
+  agents: { scraper: browserAgent },
+  io,
+  // namespace: "/radaros-browser",     // default
+  // streamScreenshots: true,           // default
+});
+
+server.listen(3002, () => console.log("Browser gateway on :3002"));
+```
+
+### Client Usage
+
+```typescript
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:3002/radaros-browser");
+
+// Start a browser task
+socket.emit("browser.start", {
+  agentName: "scraper",
+  task: "Go to Hacker News and list the top 5 stories",
+  startUrl: "https://news.ycombinator.com",
+});
+
+// Live screenshots (base64 PNG)
+socket.on("browser.screenshot", ({ data, mimeType }) => {
+  const img = document.getElementById("live-view");
+  img.src = `data:${mimeType};base64,${data}`;
+});
+
+// Each action decided by the model
+socket.on("browser.action", ({ action }) => {
+  console.log("Agent decided:", action);
+});
+
+// Step-by-step progress
+socket.on("browser.step", ({ index, action, pageUrl }) => {
+  console.log(`Step ${index}: ${action.action} at ${pageUrl}`);
+});
+
+// Task complete
+socket.on("browser.done", ({ result, success, durationMs, totalSteps }) => {
+  console.log(success ? "Done!" : "Failed", result);
+  console.log(`Took ${totalSteps} steps in ${durationMs}ms`);
+});
+
+// Cancel a running task
+socket.emit("browser.stop");
+```
+
+### Gateway Events
+
+| Direction | Event | Payload |
+|-----------|-------|---------|
+| Client → Server | `browser.start` | `{ agentName, task, startUrl?, apiKey? }` |
+| Client → Server | `browser.stop` | — |
+| Server → Client | `browser.started` | `{ agentName, task }` |
+| Server → Client | `browser.screenshot` | `{ data: base64, mimeType }` |
+| Server → Client | `browser.action` | `{ action }` |
+| Server → Client | `browser.step` | `{ index, action, pageUrl, screenshot? }` |
+| Server → Client | `browser.done` | `{ result, success, finalUrl, durationMs, totalSteps, videoPath? }` |
+| Server → Client | `browser.error` | `{ error: string }` |
+| Server → Client | `browser.stopped` | — |
+
+### BrowserGatewayOptions
+
+<ParamField path="agents" type="Record<string, BrowserAgent>" required>
+  Named BrowserAgent instances. Clients pick one via `agentName`.
+</ParamField>
+
+<ParamField path="io" type="Server" required>
+  Socket.IO server instance.
+</ParamField>
+
+<ParamField path="namespace" type="string" default="/radaros-browser">
+  Socket.IO namespace for the gateway.
+</ParamField>
+
+<ParamField path="streamScreenshots" type="boolean" default="true">
+  Stream live screenshots to clients. Disable for bandwidth-constrained connections.
+</ParamField>
+
+<ParamField path="authMiddleware" type="(socket, next) => void">
+  Optional authentication middleware applied to the namespace.
+</ParamField>
+
+---
+
+## Loop Detection
+
+The agent detects when it's stuck repeating the same action:
+
+```typescript
+const agent = new BrowserAgent({
+  name: "safe-agent",
+  model: openai("gpt-4o"),
+  maxRepeats: 3, // auto-fail after 3 identical consecutive actions
+});
+```
+
+When the agent repeats the same action more than `maxRepeats` times, it stops and returns `success: false` with a descriptive error. This prevents infinite loops caused by popups, consent banners, or ambiguous page states.
+
+---
+
+## asTool() — Browser as an Agent Tool
+
+The most powerful pattern: give a regular text agent the ability to browse the web.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+
+const browser = new BrowserAgent({
+  name: "browser",
+  model: openai("gpt-4o"),
+  headless: true,
+});
+
+const agent = new Agent({
+  name: "research-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You help with research. Use the browser tool to look things up.",
+  tools: [browser.asTool()],
+});
+
+const result = await agent.run(
+  "Go to Hacker News and summarize the top 5 stories"
+);
+```
+
+The text agent decides when to use the browser and what task to give it. The BrowserAgent handles all the visual navigation autonomously and returns a text result.
+
+```typescript
+browser.asTool({
+  name: "browse_web",        // tool name (default)
+  description: "...",        // custom description
+});
+```
+
+---
+
+## Events
+
+Browser agents emit events via `EventBus`:
+
+| Event | Payload | When |
+|-------|---------|------|
+| `browser.screenshot` | `{ data: Buffer }` | Screenshot captured |
+| `browser.action` | `{ action }` | Action decided by model |
+| `browser.step` | `{ index, action, pageUrl, screenshot }` | Each loop iteration |
+| `browser.done` | `{ result, success, steps }` | Task completed |
+| `browser.error` | `{ error: Error }` | Error occurred |
+
+```typescript
+browser.eventBus.on("browser.action", ({ action }) => {
+  console.log("Action:", JSON.stringify(action));
+});
+
+browser.eventBus.on("browser.done", ({ result, success }) => {
+  console.log(success ? "Completed" : "Failed", result);
+});
+```
+
+---
+
+## Tips
+
+<CardGroup cols={2}>
+  <Card title="Use headless: false" icon="eye">
+    Set `headless: false` during development to watch the agent navigate in real time.
+  </Card>
+  <Card title="Enable useDOM" icon="code">
+    Turn on `useDOM: true` for pages with many small or overlapping interactive elements.
+  </Card>
+  <Card title="Be specific" icon="crosshairs">
+    Clear, specific task descriptions produce better results than vague ones.
+  </Card>
+  <Card title="Set a start URL" icon="link">
+    Always provide a `startUrl` when possible. Starting from a blank page wastes steps.
+  </Card>
+  <Card title="Record videos" icon="video">
+    Use `recordVideo: true` during development to replay agent sessions.
+  </Card>
+  <Card title="Persist auth" icon="lock">
+    Use `storageState` + `saveStorageState` to avoid re-logging-in every run.
+  </Card>
+  <Card title="Go stealth" icon="user-secret">
+    Use `stealth: true` + `humanize: true` to bypass bot detection on protected sites.
+  </Card>
+  <Card title="Secure credentials" icon="key">
+    Use `CredentialVault` so the LLM never sees passwords — only `{{placeholders}}`.
+  </Card>
+</CardGroup>
+
+---
+
+## Examples
+
+| Example | Description |
+|---------|-------------|
+| `examples/30-browser-agent.ts` | Standalone browser agent — Hacker News search |
+| `examples/31-browser-as-tool.ts` | Browser as a tool inside a research agent |

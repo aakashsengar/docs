@@ -20,7 +20,7 @@ npm install @radaros/core ws
 ```
 
 ```typescript
-import { VoiceAgent, OpenAIRealtimeProvider, defineTool } from "@radaros/core";
+import { VoiceAgent, openaiRealtime, defineTool } from "@radaros/core";
 import { z } from "zod";
 
 const weatherTool = defineTool({
@@ -32,7 +32,7 @@ const weatherTool = defineTool({
 
 const agent = new VoiceAgent({
   name: "assistant",
-  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
   instructions: "You are a helpful voice assistant.",
   tools: [weatherTool],
   voice: "alloy",
@@ -92,7 +92,7 @@ const agent = new VoiceAgent(config: VoiceAgentConfig);
 </ParamField>
 
 <ParamField path="provider" type="RealtimeProvider" required>
-  The realtime provider to use (e.g., `OpenAIRealtimeProvider`, `GoogleLiveProvider`).
+  The realtime provider to use. Use the shorthand helpers `openaiRealtime()` or `googleLive()`, or instantiate `OpenAIRealtimeProvider` / `GoogleLiveProvider` directly.
 </ParamField>
 
 <ParamField path="instructions" type="string">
@@ -185,9 +185,9 @@ The session handle returned by `connect()`:
 ### OpenAI Realtime
 
 ```typescript
-import { OpenAIRealtimeProvider } from "@radaros/core";
+import { openaiRealtime } from "@radaros/core";
 
-const provider = new OpenAIRealtimeProvider("gpt-4o-realtime-preview", {
+const provider = openaiRealtime("gpt-4o-realtime-preview", {
   apiKey: "sk-...",   // optional, defaults to OPENAI_API_KEY env
   baseURL: "wss://...", // optional custom endpoint
 });
@@ -198,14 +198,18 @@ Requires: `npm install ws`
 ### Google Gemini Live
 
 ```typescript
-import { GoogleLiveProvider } from "@radaros/core";
+import { googleLive } from "@radaros/core";
 
-const provider = new GoogleLiveProvider("gemini-2.0-flash-live-001", {
+const provider = googleLive("gemini-2.0-flash-live-001", {
   apiKey: "...",  // optional, defaults to GOOGLE_API_KEY env
 });
 ```
 
 Requires: `npm install @google/genai`
+
+<Tip>
+Both `openaiRealtime()` and `googleLive()` are shorthand helpers that return a `RealtimeProvider`. They mirror the `openai()` / `google()` pattern used for text models. The class exports (`OpenAIRealtimeProvider`, `GoogleLiveProvider`) are still available for advanced use.
+</Tip>
 
 ---
 
@@ -229,16 +233,16 @@ Voice agents support the same `UserMemory` as regular agents. The flow:
 </Steps>
 
 ```typescript
-import { VoiceAgent, OpenAIRealtimeProvider, OpenAIProvider, UserMemory, MongoDBStorage } from "@radaros/core";
+import { VoiceAgent, openaiRealtime, openai, UserMemory, MongoDBStorage } from "@radaros/core";
 
 const storage = new MongoDBStorage("mongodb://localhost:27017", "myapp", "voice_data");
 const userMemory = new UserMemory({ storage, maxFacts: 200 });
 
 const agent = new VoiceAgent({
   name: "assistant",
-  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
   userMemory,
-  model: new OpenAIProvider("gpt-4o-mini"), // for fact extraction
+  model: openai("gpt-4o-mini"), // for fact extraction
   instructions: "You are a helpful voice assistant.",
   voice: "alloy",
 });
@@ -278,7 +282,7 @@ const trackShipment = defineTool({
 
 const agent = new VoiceAgent({
   name: "logistics",
-  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
   tools: [trackShipment],
   instructions: "You help track shipments. Ask for the tracking number.",
 });
@@ -298,12 +302,12 @@ npm install @radaros/transport express socket.io
 import express from "express";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
-import { VoiceAgent, OpenAIRealtimeProvider } from "@radaros/core";
+import { VoiceAgent, openaiRealtime } from "@radaros/core";
 import { createVoiceGateway } from "@radaros/transport";
 
 const agent = new VoiceAgent({
   name: "assistant",
-  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
   instructions: "You are a voice assistant.",
   voice: "alloy",
 });
