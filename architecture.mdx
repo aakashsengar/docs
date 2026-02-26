@@ -71,32 +71,32 @@ RadarOS is built in layers. Higher layers depend on lower ones; infrastructure i
 
 A typical request flows through the system as follows:
 
-```
+```text
 User Input
-    ↓
+    |
 Agent.run() / Agent.stream()
-    ↓
+    |
 buildMessages (history + system instructions)
-    ↓
+    |
 LLM Loop
-    ↓
+    |
 ModelProvider (OpenAI / Anthropic / Google / Ollama)
-    ↓
+    |
 API Request
-    ↓
+    |
 Response (text / tool calls)
-    ↓
+    |
 Tool Executor (if tool calls)
-  ├─ Local tools (with optional caching)
-  ├─ MCP tools (external servers)
-  └─ A2A tools (remote agents)
-    ↓
+  +-- Local tools (with optional caching)
+  +-- MCP tools (external servers)
+  +-- A2A tools (remote agents)
+    |
 Loop until final response
-    ↓
+    |
 SessionManager.save()
-    ↓
+    |
 UserMemory.extractAndStore() (async, non-blocking)
-    ↓
+    |
 Output to caller
 ```
 
