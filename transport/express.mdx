@@ -127,6 +127,31 @@ curl -X POST http://localhost:3000/api/agents/assistant/run \
 }
 ```
 
+### Structured Output Response
+
+When an agent has `structuredOutput` configured, the `structured` field contains the parsed and validated JSON object:
+
+```json
+{
+  "text": "{\"summary\":\"AI agents have advanced...\",\"keyPoints\":[...],\"confidence\":0.85}",
+  "toolCalls": [],
+  "usage": {
+    "promptTokens": 82,
+    "completionTokens": 129,
+    "totalTokens": 211
+  },
+  "structured": {
+    "summary": "AI agents have advanced significantly in 2026...",
+    "keyPoints": [
+      "Diagnostic accuracy improved by 20% with AI imaging tools.",
+      "Customer service bots handle 70% of inquiries."
+    ],
+    "confidence": 0.85
+  },
+  "durationMs": 3026
+}
+```
+
 ### Stream Response (SSE)
 
 ```bash

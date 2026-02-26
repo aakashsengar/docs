@@ -143,6 +143,64 @@ console.log(JSON.stringify(result.structured, null, 2));
 
 ---
 
+## Structured Output in Express / Swagger
+
+When you expose an agent with `structuredOutput` via Express, RadarOS **automatically generates a typed response schema** in the OpenAPI spec. Swagger UI will display the exact shape of the `structured` field — consumers of your API see the full contract without extra documentation.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+
+const analyst = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "Analyze data and provide insights.",
+  structuredOutput: z.object({
+    summary: z.string(),
+    keyPoints: z.array(z.string()),
+    confidence: z.number().min(0).max(1),
+  }),
+});
+
+const app = express();
+app.use(express.json());
+
+const router = createAgentRouter({
+  agents: { analyst },
+  swagger: { enabled: true },
+});
+
+app.use("/api", router);
+app.listen(3000);
+```
+
+The generated OpenAPI spec for `POST /api/agents/analyst/run` will include:
+
+```json
+"structured": {
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "keyPoints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": ["summary", "keyPoints", "confidence"]
+}
+```
+
+Agents **without** `structuredOutput` use the generic `RunOutput` schema where `structured` is untyped.
+
+---
+
 ## Provider Support
 
 | Provider | Support |
@@ -150,5 +208,6 @@ console.log(JSON.stringify(result.structured, null, 2));
 | **OpenAI** | `responseFormat: { type: "json_schema", schema: {...} }` |
 | **Google Gemini** | `responseFormat: "json"` with `json_schema` |
 | **Anthropic** | Structured output via tool use or response format where supported |
+| **Vertex AI** | `responseFormat: "json"` with `json_schema` |
 
 RadarOS abstracts provider differences. Use a Zod schema and the framework handles the rest.
