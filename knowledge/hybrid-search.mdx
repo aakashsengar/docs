@@ -1,0 +1,229 @@
+---
+title: Hybrid Search
+description: Combine vector (semantic) and keyword (BM25) search with Reciprocal Rank Fusion for better retrieval accuracy.
+---
+
+# Hybrid Search
+
+RadarOS supports three search modes in `KnowledgeBase`:
+
+| Mode | How it works | Best for |
+|------|-------------|----------|
+| `vector` | Embedding similarity (cosine distance) | Semantic meaning, paraphrased queries |
+| `keyword` | BM25 scoring on an in-memory inverted index | Exact terms, acronyms, codes, IDs |
+| `hybrid` | Combines both via Reciprocal Rank Fusion (RRF) | Best of both — the recommended default for production |
+
+<Note>
+Hybrid search is built into `KnowledgeBase` and works with **all** vector store backends (InMemory, PgVector, Qdrant, MongoDB). No additional dependencies needed.
+</Note>
+
+---
+
+## Why Hybrid?
+
+Pure vector search understands meaning but can miss exact terms. Pure keyword search matches terms exactly but misses semantics. Hybrid combines both:
+
+<CardGroup cols={2}>
+  <Card title="Vector Search" icon="brain">
+    Query: *"time off vacation days"*
+    Finds: PTO policy doc (no doc says "vacation" but meaning matches)
+  </Card>
+  <Card title="Keyword Search" icon="text">
+    Query: *"401k matching"*
+    Finds: 401(k) plan doc (exact term match scores high)
+  </Card>
+</CardGroup>
+
+Hybrid search runs **both** searches in parallel, then merges the results using Reciprocal Rank Fusion — so you get the best of both worlds in a single query.
+
+---
+
+## Quick Start
+
+```typescript
+import { KnowledgeBase, InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const kb = new KnowledgeBase({
+  name: "Company Policies",
+  vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+  searchMode: "hybrid",
+});
+
+await kb.initialize();
+await kb.addDocuments([
+  { id: "pto", content: "Employees accrue 20 days of PTO per year..." },
+  { id: "401k", content: "The company matches 401(k) contributions up to 6%..." },
+]);
+
+const results = await kb.search("401k matching", { topK: 3 });
+```
+
+---
+
+## KnowledgeBase Config
+
+<ParamField path="searchMode" type='"vector" | "keyword" | "hybrid"' default="vector">
+  Default search mode for all `search()` and `asTool()` calls. Can be overridden per call.
+</ParamField>
+
+<ParamField path="hybridConfig" type="HybridSearchConfig">
+  Fine-tune hybrid search behavior. Only used when `searchMode` is `"hybrid"`.
+</ParamField>
+
+### HybridSearchConfig
+
+```typescript
+interface HybridSearchConfig {
+  vectorWeight?: number;  // Weight for vector results in RRF. Default: 1.0
+  keywordWeight?: number; // Weight for keyword results in RRF. Default: 1.0
+  rrfK?: number;          // RRF constant k. Default: 60
+}
+```
+
+<ParamField path="vectorWeight" type="number" default="1.0">
+  Weight for vector (semantic) results. Increase to favor semantic matches.
+</ParamField>
+
+<ParamField path="keywordWeight" type="number" default="1.0">
+  Weight for keyword (BM25) results. Increase to favor exact term matches.
+</ParamField>
+
+<ParamField path="rrfK" type="number" default="60">
+  RRF smoothing constant. Higher values dampen the effect of rank differences across the two result lists. Lower values make top-ranked results more dominant.
+</ParamField>
+
+---
+
+## Per-Query Override
+
+You can override the search mode on individual `search()` calls, regardless of the default:
+
+```typescript
+const kb = new KnowledgeBase({
+  name: "docs",
+  vectorStore: myStore,
+  searchMode: "hybrid", // default
+});
+
+// Use keyword for this specific query
+const exact = await kb.search("SOC 2 compliance", { searchMode: "keyword", topK: 3 });
+
+// Use vector for this one
+const semantic = await kb.search("security training requirements", { searchMode: "vector", topK: 3 });
+
+// Default (hybrid)
+const best = await kb.search("SOC 2 2FA security", { topK: 3 });
+```
+
+---
+
+## With asTool()
+
+Pass `searchMode` to `asTool()` to control how the agent searches:
+
+```typescript
+const agent = new Agent({
+  name: "Policy Bot",
+  model: openai("gpt-4o"),
+  tools: [
+    kb.asTool({ topK: 3, searchMode: "hybrid" }),
+  ],
+  instructions: "Answer questions about company policies.",
+});
+```
+
+If `searchMode` is not passed to `asTool()`, it inherits the KB's default.
+
+---
+
+## How It Works Under the Hood
+
+<Steps>
+  <Step title="Parallel retrieval">
+    `search()` runs vector search (via the vector store) and keyword search (via the built-in BM25 index) in parallel. Each fetches `topK × 2` candidates for better fusion quality.
+  </Step>
+  <Step title="BM25 scoring">
+    The in-memory `BM25Index` tokenizes the query, computes term frequency / inverse document frequency scores, and ranks documents. Stop words are filtered, and scores are length-normalized.
+  </Step>
+  <Step title="Reciprocal Rank Fusion">
+    Both ranked lists are merged using RRF. For each document, its fused score is:
+
+    `score = Σ weight_i / (k + rank_i)`
+
+    Documents appearing in both lists get scores from both, naturally ranking higher.
+  </Step>
+  <Step title="Final ranking">
+    Results are sorted by fused score and trimmed to `topK`.
+  </Step>
+</Steps>
+
+---
+
+## BM25 Index
+
+The `BM25Index` is built-in and maintained automatically:
+
+- **Auto-populated**: When you call `add()` or `addDocuments()`, documents are indexed in both the vector store and the BM25 index.
+- **Auto-cleaned**: When you call `delete()` or `clear()`, documents are removed from both.
+- **In-memory**: The BM25 index lives in process memory. It's rebuilt from the vector store's documents on startup if needed.
+- **Configurable**: BM25 uses standard Okapi BM25 parameters (`k1 = 1.5`, `b = 0.75`) which work well for most use cases.
+
+---
+
+## Tuning Tips
+
+| Goal | Adjustment |
+|------|-----------|
+| Favor semantic matches | Set `vectorWeight: 2.0, keywordWeight: 1.0` |
+| Favor exact term matches | Set `vectorWeight: 1.0, keywordWeight: 2.0` |
+| Less sensitive to rank position | Increase `rrfK` (e.g., 100) |
+| More sensitive to top results | Decrease `rrfK` (e.g., 20) |
+| Technical docs with many acronyms | Higher `keywordWeight` |
+| Natural language Q&A | Higher `vectorWeight` |
+
+---
+
+## Full Example
+
+See `examples/28-hybrid-search.ts` for a complete comparison of all three search modes:
+
+```typescript
+import {
+  Agent, openai, KnowledgeBase,
+  OpenAIEmbedding, InMemoryVectorStore,
+} from "@radaros/core";
+
+const kb = new KnowledgeBase({
+  name: "Company Policies",
+  vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+  searchMode: "hybrid",
+  hybridConfig: {
+    vectorWeight: 1.0,
+    keywordWeight: 1.0,
+    rrfK: 60,
+  },
+});
+
+await kb.initialize();
+
+await kb.addDocuments([
+  { id: "pto", content: "Employees accrue 20 days of PTO per year. Unused PTO carries over up to 5 days." },
+  { id: "401k", content: "The company matches 401(k) contributions up to 6% of base salary." },
+  { id: "security", content: "All employees must complete SOC 2 compliance training annually. 2FA is mandatory." },
+]);
+
+// Compare search modes
+const vector  = await kb.search("401k matching", { topK: 3, searchMode: "vector" });
+const keyword = await kb.search("401k matching", { topK: 3, searchMode: "keyword" });
+const hybrid  = await kb.search("401k matching", { topK: 3, searchMode: "hybrid" });
+
+// Use with an agent
+const agent = new Agent({
+  name: "Policy Assistant",
+  model: openai("gpt-4o"),
+  tools: [kb.asTool({ topK: 3, searchMode: "hybrid" })],
+  instructions: "Answer questions about company policies. Always search first.",
+});
+
+const result = await agent.run("What's the 401k match and how does vesting work?");
+```

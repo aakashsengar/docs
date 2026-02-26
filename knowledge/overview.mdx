@@ -55,6 +55,14 @@ const results = await kb.search("How do I set up webhooks?");
   Collection/index name inside the vector store. Defaults to a sanitized version of `name`.
 </ParamField>
 
+<ParamField path="searchMode" type='"vector" | "keyword" | "hybrid"' required={false} default="vector">
+  Default search strategy. `"hybrid"` combines vector + keyword search via Reciprocal Rank Fusion for the best results. See [Hybrid Search](/knowledge/hybrid-search).
+</ParamField>
+
+<ParamField path="hybridConfig" type="HybridSearchConfig" required={false}>
+  Fine-tune hybrid search weights and RRF constant. See [Hybrid Search](/knowledge/hybrid-search).
+</ParamField>
+
 ---
 
 ## asTool() — Expose KB to Agents
@@ -101,6 +109,10 @@ const result = await agent.run("How do I reset my password?");
   Metadata filter applied to every search.
 </ParamField>
 
+<ParamField path="searchMode" type='"vector" | "keyword" | "hybrid"' required={false}>
+  Override search mode for this tool. Inherits from KB config if not set.
+</ParamField>
+
 <ParamField path="formatResults" type="(results) => string" required={false}>
   Custom formatter for search results. Default: numbered list with scores.
 </ParamField>
@@ -133,4 +145,5 @@ const result = await agent.run("How do I reset my password?");
 
 - [Vector Stores](/knowledge/vector-stores) — InMemory, PgVector, Qdrant, MongoDB
 - [Embeddings](/knowledge/embeddings) — OpenAI and Google embedding providers
+- [Hybrid Search](/knowledge/hybrid-search) — BM25, RRF, and hybrid search modes
 - [RAG Example](/knowledge/rag-example) — End-to-end walkthrough

@@ -159,6 +159,42 @@ await kb.initialize();
 // Add and query as above
 ```
 
+## RAG with Hybrid Search
+
+For the best retrieval accuracy, enable hybrid search. It combines semantic (vector) and keyword (BM25) matching:
+
+```typescript
+import {
+  Agent, openai, KnowledgeBase,
+  InMemoryVectorStore, OpenAIEmbedding,
+} from "@radaros/core";
+
+const kb = new KnowledgeBase({
+  name: "Product Docs",
+  vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+  searchMode: "hybrid",
+});
+
+await kb.initialize();
+await kb.addDocuments([
+  { id: "pricing", content: "Our Pro plan costs $49/month with unlimited API calls." },
+  { id: "sla", content: "Enterprise SLA guarantees 99.9% uptime with 4-hour response time." },
+]);
+
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o"),
+  tools: [kb.asTool({ topK: 3, searchMode: "hybrid" })],
+  instructions: "Answer using the knowledge base. Cite sources.",
+});
+
+const result = await agent.run("What's the SLA uptime guarantee?");
+```
+
+See [Hybrid Search](/knowledge/hybrid-search) for tuning weights, BM25 details, and comparison of all three modes.
+
+---
+
 ## Customizing the Tool
 
 The `asTool()` method accepts configuration to customize how the knowledge base is exposed to the agent:

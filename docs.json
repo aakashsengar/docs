@@ -90,6 +90,7 @@
               "knowledge/overview",
               "knowledge/vector-stores",
               "knowledge/embeddings",
+              "knowledge/hybrid-search",
               "knowledge/rag-example"
             ]
           },
