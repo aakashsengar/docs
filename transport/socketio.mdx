@@ -136,11 +136,11 @@ httpServer.listen(3000);
   const socket = io("http://localhost:3000/chat");
 
   socket.on("agent.chunk", ({ chunk }) => {
-    process.stdout.write(chunk);
+    document.getElementById("output").textContent += chunk;
   });
 
   socket.on("agent.done", ({ output }) => {
-    console.log("\nDone:", output.text);
+    console.log("Done:", output.text);
   });
 
   socket.on("agent.error", ({ error }) => {
@@ -210,3 +210,9 @@ socket.emit("agent.run", {
   sessionId,
 });
 ```
+
+---
+
+## Voice Gateway
+
+For **real-time voice** over Socket.IO, see the dedicated [Voice Agents](/voice/overview) docs. The `createVoiceGateway()` function streams audio between browser clients and `VoiceAgent` instances using the same Socket.IO server.
