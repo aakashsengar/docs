@@ -84,6 +84,17 @@
             ]
           },
           {
+            "group": "Toolkits",
+            "pages": [
+              "toolkits/overview",
+              "toolkits/duckduckgo",
+              "toolkits/hackernews",
+              "toolkits/websearch",
+              "toolkits/gmail",
+              "toolkits/whatsapp"
+            ]
+          },
+          {
             "group": "MCP (Model Context Protocol)",
             "pages": [
               "mcp/overview"
