@@ -83,6 +83,20 @@
             ]
           },
           {
+            "group": "MCP (Model Context Protocol)",
+            "pages": [
+              "mcp/overview"
+            ]
+          },
+          {
+            "group": "A2A (Agent-to-Agent)",
+            "pages": [
+              "a2a/overview",
+              "a2a/server",
+              "a2a/client"
+            ]
+          },
+          {
             "group": "Transport",
             "pages": [
               "transport/overview",

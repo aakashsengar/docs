@@ -1,0 +1,87 @@
+---
+title: A2A Protocol
+description: Agent-to-Agent (A2A) protocol support — expose your agents as A2A servers and call remote A2A agents.
+---
+
+# A2A Protocol
+
+RadarOS provides full support for the [Agent-to-Agent (A2A)](https://google.github.io/A2A/) protocol, enabling interoperability between AI agents built on different frameworks.
+
+<Info>
+A2A is an open standard by Google that defines how AI agents communicate with each other via JSON-RPC 2.0 over HTTP. It includes agent discovery, task management, and streaming.
+</Info>
+
+---
+
+## Capabilities
+
+RadarOS supports both sides of A2A:
+
+<CardGroup cols={2}>
+  <Card title="A2A Server" icon="server" href="/a2a/server">
+    Expose your RadarOS agents as A2A-compliant endpoints. Other frameworks (LangGraph, CrewAI, etc.) can discover and call your agents.
+  </Card>
+  <Card title="A2A Client" icon="satellite-dish" href="/a2a/client">
+    Connect to remote A2A agents. Use them as tools, team members, or call them directly.
+  </Card>
+</CardGroup>
+
+---
+
+## How It Works
+
+```
+┌──────────────────┐         ┌──────────────────┐
+│  RadarOS Agent    │  A2A    │  Remote Agent     │
+│  (Server)         │◄───────►│  (Any Framework)  │
+│                   │ HTTP/   │                   │
+│  /.well-known/    │  SSE    │  /.well-known/    │
+│   agent.json      │         │   agent.json      │
+└──────────────────┘         └──────────────────┘
+```
+
+1. **Discovery** — Agents publish an Agent Card at `/.well-known/agent.json` describing their capabilities
+2. **Communication** — JSON-RPC 2.0 messages over HTTP (`message/send`) or SSE (`message/stream`)
+3. **Task Management** — Each interaction creates a task with lifecycle states (submitted → working → completed)
+
+---
+
+## Quick Example
+
+### Expose an agent as A2A server
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createA2AServer } from "@radaros/transport";
+
+const app = express();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+createA2AServer(app, {
+  agents: { assistant: agent },
+  provider: { organization: "MyCompany" },
+});
+
+app.listen(3001);
+// Agent Card: http://localhost:3001/.well-known/agent.json
+```
+
+### Call a remote A2A agent
+
+```typescript
+import { A2ARemoteAgent } from "@radaros/core";
+
+const remote = new A2ARemoteAgent({
+  url: "http://localhost:3001",
+});
+
+await remote.discover();
+const result = await remote.run("Hello!");
+console.log(result.text);
+```
