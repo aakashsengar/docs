@@ -155,11 +155,12 @@ type StreamChunk =
 ### Factory Functions
 
 ```typescript
-import { openai, anthropic, google, ollama } from "@radaros/core";
+import { openai, anthropic, google, vertex, ollama } from "@radaros/core";
 
 openai(modelId: string, config?: { apiKey?: string; baseURL?: string }): ModelProvider
 anthropic(modelId: string, config?: { apiKey?: string }): ModelProvider
 google(modelId: string, config?: { apiKey?: string }): ModelProvider
+vertex(modelId: string, config?: { project?: string; location?: string; credentials?: string }): ModelProvider
 ollama(modelId: string, config?: { baseURL?: string }): ModelProvider
 ```
 
