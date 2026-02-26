@@ -216,3 +216,37 @@ socket.emit("agent.run", {
 ## Voice Gateway
 
 For **real-time voice** over Socket.IO, see the dedicated [Voice Agents](/voice/overview) docs. The `createVoiceGateway()` function streams audio between browser clients and `VoiceAgent` instances using the same Socket.IO server.
+
+```typescript
+import { VoiceAgent, openaiRealtime } from "@radaros/core";
+import { createVoiceGateway } from "@radaros/transport";
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+  instructions: "You are a voice assistant.",
+  voice: "alloy",
+});
+
+createVoiceGateway({
+  agents: { assistant: agent },
+  io,
+  namespace: "/voice",
+});
+```
+
+## Browser Gateway
+
+For **live browser agent observation** over Socket.IO, see the [Browser Agents](/browser/overview) docs. The `createBrowserGateway()` function streams screenshots, actions, and step events from `BrowserAgent` runs to connected clients.
+
+```typescript
+import { BrowserAgent } from "@radaros/browser";
+import { createBrowserGateway } from "@radaros/transport";
+
+createBrowserGateway({
+  agents: { browser: agent },
+  io,
+  namespace: "/browser",
+  streamScreenshots: true,
+});
+```

@@ -55,13 +55,15 @@ interface ModelProvider {
 
 Use factory functions to create model instances. Each returns a `ModelProvider` ready for agents, teams, and workflows.
 
-| Factory | Provider | Config |
-|---------|----------|--------|
-| `openai(modelId, config?)` | OpenAI | `{ apiKey?, baseURL? }` |
-| `anthropic(modelId, config?)` | Anthropic | `{ apiKey? }` |
-| `google(modelId, config?)` | Google Gemini | `{ apiKey? }` |
-| `vertex(modelId, config?)` | Google Vertex AI | `{ project?, location?, credentials? }` |
-| `ollama(modelId, config?)` | Ollama (local) | `{ host? }` (default: `http://localhost:11434`) |
+| Factory | Provider | Returns | Config |
+|---------|----------|---------|--------|
+| `openai(modelId, config?)` | OpenAI | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `anthropic(modelId, config?)` | Anthropic | `ModelProvider` | `{ apiKey? }` |
+| `google(modelId, config?)` | Google Gemini | `ModelProvider` | `{ apiKey? }` |
+| `vertex(modelId, config?)` | Google Vertex AI | `ModelProvider` | `{ project?, location?, credentials? }` |
+| `ollama(modelId, config?)` | Ollama (local) | `ModelProvider` | `{ host? }` (default: `http://localhost:11434`) |
+| `openaiRealtime(modelId?, config?)` | OpenAI Realtime | `RealtimeProvider` | `{ apiKey?, baseURL? }` |
+| `googleLive(modelId?, config?)` | Gemini Live | `RealtimeProvider` | `{ apiKey? }` |
 
 ### Switching Models in One Line
 
@@ -87,6 +89,26 @@ const agent = new Agent({
   name: "Assistant",
   model,
   instructions: "You are a helpful assistant.",
+});
+```
+
+### Realtime Providers (Voice)
+
+For voice agents, use the realtime helpers that return a `RealtimeProvider`:
+
+```typescript
+import { VoiceAgent, openaiRealtime, googleLive } from "@radaros/core";
+
+// OpenAI Realtime
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+});
+
+// Google Gemini Live
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: googleLive("gemini-2.5-flash-native-audio-preview-12-2025"),
 });
 ```
 
