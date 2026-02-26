@@ -25,10 +25,10 @@ RadarOS is organized as a monorepo with three primary packages. Each package has
 
 <CardGroup cols={3}>
   <Card title="@radaros/core" icon="box">
-    The heart of RadarOS. Provides `Agent`, `Team`, `Workflow`, `Memory`, `UserMemory`, `SessionManager`, `KnowledgeBase`, `MCPToolProvider`, `A2ARemoteAgent`, `Logger`, and `EventBus`. Supports reasoning, tool caching, and cross-session personalization. Model-agnostic via provider adapters.
+    The heart of RadarOS. Provides Agent, Team, Workflow, Memory, UserMemory, SessionManager, KnowledgeBase, MCPToolProvider, A2ARemoteAgent, Logger, and EventBus. Supports reasoning, tool caching, and cross-session personalization. Model-agnostic via provider adapters.
   </Card>
   <Card title="@radaros/transport" icon="globe">
-    Expose agents over HTTP, WebSockets, and A2A protocol. Use `createAgentRouter()` for Express, `createAgentGateway()` for Socket.IO, or `createA2AServer()` for A2A interop.
+    Expose agents over HTTP, WebSockets, and A2A protocol. Use createAgentRouter for Express, createAgentGateway for Socket.IO, or createA2AServer for A2A interop.
   </Card>
   <Card title="@radaros/queue" icon="clock">
     BullMQ-based job queue for async agent runs. Offload long-running tasks to workers without blocking the main process.
@@ -43,25 +43,25 @@ RadarOS is built in layers. Higher layers depend on lower ones; infrastructure i
 
 <Steps>
   <Step title="SDK Layer">
-    **Agent**, **Team**, **Workflow** — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
+    Agent, Team, Workflow — The primary API surface. Developers interact with these classes to define behavior, orchestrate agents, and run workflows.
   </Step>
   <Step title="Engine Layer">
-    **LLM Loop**, **Tool Executor**, **Session Manager**, **User Memory** — Core execution logic. Handles the agent loop (with automatic retry on transient failures), tool invocation (with optional caching), session state, token-based history trimming, reasoning/extended thinking, and cross-session user personalization.
+    LLM Loop, Tool Executor, Session Manager, User Memory — Core execution logic. Handles the agent loop (with automatic retry on transient failures), tool invocation (with optional caching), session state, token-based history trimming, reasoning/extended thinking, and cross-session user personalization.
   </Step>
   <Step title="Model Abstraction">
-    **ModelProvider** interface + adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: `openai(modelId)`, `anthropic(modelId)`, `google(modelId)`, `ollama(modelId)`.
+    ModelProvider interface and adapters — Abstracts over OpenAI, Anthropic, Google, Ollama. Factory functions: openai(), anthropic(), google(), ollama().
   </Step>
   <Step title="Protocol Integration">
-    **MCP Client** (consume external tools via Model Context Protocol), **A2A Client** (call remote agents via Agent-to-Agent protocol) — Connect to the broader AI ecosystem.
+    MCP Client (consume external tools via Model Context Protocol), A2A Client (call remote agents via Agent-to-Agent protocol) — Connect to the broader AI ecosystem.
   </Step>
   <Step title="Infrastructure">
-    **Storage** (in-memory, SQLite, PostgreSQL, MongoDB), **Vector Stores**, **Embeddings** — Pluggable persistence and retrieval.
+    Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, Embeddings — Pluggable persistence and retrieval.
   </Step>
   <Step title="Transport (Optional)">
-    **Express**, **Socket.IO**, **A2A Server** — Expose agents via REST, WebSocket, or A2A protocol. Only loaded when `@radaros/transport` is used.
+    Express, Socket.IO, A2A Server — Expose agents via REST, WebSocket, or A2A protocol. Only loaded when @radaros/transport is used.
   </Step>
   <Step title="Queue (Optional)">
-    **BullMQ workers** — Background job processing. Only loaded when `@radaros/queue` is used.
+    BullMQ workers — Background job processing. Only loaded when @radaros/queue is used.
   </Step>
 </Steps>
 
@@ -101,15 +101,15 @@ Output to caller
 ```
 
 <Accordion title="Detailed Flow">
-  1. **User Input** — A string or multi-modal content (text, images, files).
-  2. **Agent** — Receives input, loads session history from `SessionManager`.
-  3. **buildMessages** — Constructs the message array: system prompt, session history (auto-trimmed if `maxContextTokens` is set), current user message.
-  4. **LLM Loop** — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors), receives response.
-  5. **ModelProvider** — Translates to the provider's API format (OpenAI, Anthropic, etc.).
-  6. **Response** — Either text or tool calls.
-  7. **Tool Executor** — If tool calls, executes tools, appends results, and loops back to the model.
-  8. **SessionManager.save()** — Persists the new turn to storage.
-  9. **Output** — Returns or streams the final response to the caller.
+  1. User Input — A string or multi-modal content (text, images, files).
+  2. Agent — Receives input, loads session history from SessionManager.
+  3. buildMessages — Constructs the message array: system prompt, session history (auto-trimmed if maxContextTokens is set), current user message.
+  4. LLM Loop — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors), receives response.
+  5. ModelProvider — Translates to the provider API format (OpenAI, Anthropic, etc.).
+  6. Response — Either text or tool calls.
+  7. Tool Executor — If tool calls, executes tools, appends results, and loops back to the model.
+  8. SessionManager.save — Persists the new turn to storage.
+  9. Output — Returns or streams the final response to the caller.
 </Accordion>
 
 ---
@@ -139,13 +139,13 @@ RadarOS is designed for minimal overhead. Key optimizations include:
 | Optimization | Impact |
 |-------------|--------|
 | **Tool schema caching** | Tool definitions are converted to JSON Schema once at construction, not on every LLM roundtrip. |
-| **Minimal schema serialization** | Uses compact JSON Schema 7 output, stripping metadata like `$schema` that inflate token counts. |
-| **Session read deduplication** | Session data is loaded once per `run()` / `stream()` call and reused for both context and history. |
-| **Non-blocking fact extraction** | `UserMemory.extractAndStore()` runs in the background without blocking the response to the caller. |
-| **Smart context deduplication** | When `userMemory.asTool()` is registered, user facts are not also injected into the system prompt. |
-| **Token-based history trimming** | `maxContextTokens` auto-trims history (oldest first) to prevent context window overflow. |
-| **Automatic retry** | Transient LLM API failures (429, 5xx, network errors) are retried with exponential backoff + jitter. |
-| **Streaming usage tracking** | Token usage is accurately tracked in both `run()` and `stream()` modes. |
+| **Minimal schema serialization** | Uses compact JSON Schema 7 output, stripping metadata that inflate token counts. |
+| **Session read deduplication** | Session data is loaded once per run/stream call and reused for both context and history. |
+| **Non-blocking fact extraction** | UserMemory extraction runs in the background without blocking the response. |
+| **Smart context deduplication** | When userMemory.asTool() is registered, user facts skip system prompt injection. |
+| **Token-based history trimming** | maxContextTokens auto-trims history (oldest first) to prevent context window overflow. |
+| **Automatic retry** | Transient LLM API failures (429, 5xx, network errors) are retried with exponential backoff. |
+| **Streaming usage tracking** | Token usage is accurately tracked in both run and stream modes. |
 
 ---
 
@@ -159,7 +159,7 @@ RadarOS is designed for minimal overhead. Key optimizations include:
     Providers (openai, anthropic, etc.) are peer dependencies. Lazy-loaded so you only bundle what you use.
   </Card>
   <Card title="Event-Driven" icon="broadcast">
-    `EventBus` emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
+    EventBus emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
   </Card>
   <Card title="Pluggable Everything" icon="sliders">
     Storage, models, vector stores, and transport are all swappable. Configure once, change later without rewriting logic.
