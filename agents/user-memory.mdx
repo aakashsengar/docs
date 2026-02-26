@@ -237,3 +237,32 @@ const userMemory = new UserMemory({
 </CardGroup>
 
 Both can be used together — session memory provides immediate conversation context, while user memory provides long-term personalization.
+
+---
+
+## User Memory in Voice Agents
+
+`UserMemory` also works with [Voice Agents](/voice/overview). The `VoiceAgent` handles everything internally:
+
+1. On `connect({ userId })`, stored facts are loaded and appended to the voice agent's instructions
+2. During the conversation, transcripts are collected
+3. On disconnect, transcripts are consolidated (fragmented speech deltas merged) and facts are auto-extracted
+
+```typescript
+import { VoiceAgent, OpenAIRealtimeProvider, OpenAIProvider, UserMemory } from "@radaros/core";
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  userMemory,
+  model: new OpenAIProvider("gpt-4o-mini"),
+  instructions: "You are a helpful voice assistant.",
+});
+
+const session = await agent.connect({ userId: "user-42" });
+// Facts are loaded automatically. New facts extracted on disconnect.
+```
+
+<Note>
+Voice agents use `UserMemory` but **not** `Memory` (long-term summarization). The realtime API manages its own conversation context. Only `UserMemory` persists across voice sessions.
+</Note>

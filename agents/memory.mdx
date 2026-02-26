@@ -1,85 +1,26 @@
 ---
 title: Memory
-description: Short-term and long-term memory for agents. Memory class, config, and usage with MongoDB persistence.
+description: Long-term conversation memory with LLM-powered summarization. Kicks in when session history overflows.
 ---
 
 # Memory
 
-RadarOS agents can maintain conversation context across turns using the `Memory` class. Memory combines **short-term** (recent messages) and optional **long-term** (summarized overflow) storage for multi-turn conversations.
+Memory in RadarOS provides **long-term conversation context** through LLM-powered summarization. When a session's message history grows beyond a configured limit, the oldest messages overflow into Memory, where they are summarized and stored. These summaries are injected into the system prompt on future runs, giving the agent context from earlier in the conversation.
 
 <Note>
-Looking for **cross-session personalization**? See [User Memory](/agents/user-memory) — a separate memory layer that remembers facts about users across different sessions.
+Memory does **not** store raw messages — that's [Session's](/agents/sessions) job. Memory only stores summaries of overflowed messages. See [how they work together](#how-session-and-memory-work-together) below.
 </Note>
 
 ---
 
-## Memory Class
-
-```typescript
-import { Memory } from "@radaros/core";
-
-const memory = new Memory({
-  storage,
-  maxShortTermMessages: 50,
-  enableLongTerm: false,
-});
-```
-
----
-
-## Constructor
-
-<ParamField path="storage" type="StorageDriver" required={false}>
-  Storage driver for persisting messages and summaries. Defaults to `InMemoryStorage` if not provided.
-</ParamField>
-
-<ParamField path="maxShortTermMessages" type="number" required={false} default="50">
-  Maximum number of recent messages kept in short-term storage. Older messages are truncated.
-</ParamField>
-
-<ParamField path="enableLongTerm" type="boolean" required={false} default="false">
-  When `true`, overflow messages are summarized and stored in long-term storage. Summaries are injected into the system prompt via `getContextString()`.
-</ParamField>
-
----
-
-## Short-Term vs Long-Term
-
-<CardGroup cols={2}>
-  <Card title="Short-Term" icon="message">
-    Recent messages kept in the `memory:short` namespace. Used by the agent to maintain immediate context.
-  </Card>
-  <Card title="Long-Term" icon="database">
-    When `enableLongTerm` is true, overflow messages are summarized and stored in `memory:long`. Summaries are injected into the system prompt.
-  </Card>
-</CardGroup>
-
-When the short-term buffer exceeds `maxShortTermMessages`, the oldest messages are removed. If `enableLongTerm` is true, they are summarized (e.g., truncated and joined) before the buffer is trimmed, and the summary is stored.
-
----
-
-## Methods
-
-| Method | Description |
-|--------|-------------|
-| `addMessages(sessionId, messages)` | Adds messages to short-term storage. Handles overflow and optional long-term summarization. |
-| `getMessages(sessionId)` | Returns the current short-term messages for the session. |
-| `getSummaries(sessionId)` | Returns long-term summaries (if enabled). |
-| `getContextString(sessionId)` | Returns a formatted string of long-term summaries for injection into the system prompt. |
-| `clear(sessionId)` | Clears short-term messages for the session. |
-
----
-
-## Usage with Agent
-
-Pass a `Memory` instance in `AgentConfig`:
+## Quick Start
 
 ```typescript
 import { Agent, Memory, openai } from "@radaros/core";
 
 const memory = new Memory({
-  maxShortTermMessages: 50,
-  enableLongTerm: true,
+  model: openai("gpt-4o-mini"),  // used for summarization
+  maxSummaries: 20,
 });
 
 const agent = new Agent({
@@ -87,99 +28,132 @@ const agent = new Agent({
   model: openai("gpt-4o"),
   instructions: "You are a helpful assistant.",
   memory,
+  numHistoryRuns: 25,  // keep last 25 exchanges in session, overflow goes to Memory
 });
-
-const result = await agent.run("Remember my name is Alice.", {
-  sessionId: "user-123",
-});
-await agent.run("What is my name?", { sessionId: "user-123" });
-// Agent has context from memory and can respond correctly.
 ```
-
-The agent automatically calls `memory.addMessages()` after each run and uses `memory.getContextString()` when building the system prompt.
 
 ---
 
-## Token-Based History Trimming
+## How It Works
 
-By default, history is trimmed by message count (`numHistoryRuns`). For tighter control, set `maxContextTokens` on the agent to automatically trim conversation history to fit within a token budget:
+<Steps>
+  <Step title="Session stores messages">
+    Every `run()` or `stream()` call saves the user/assistant exchange to the session (via `SessionManager`).
+  </Step>
+  <Step title="History overflows">
+    When session messages exceed the limit (set by `numHistoryRuns` × 2), the oldest messages are trimmed.
+  </Step>
+  <Step title="Memory summarizes overflow">
+    The trimmed messages are sent to Memory, which uses an LLM to generate a concise summary and stores it.
+  </Step>
+  <Step title="Summaries are injected">
+    On the next run, Memory's summaries are injected into the system prompt via `getContextString()`, giving the agent context from earlier parts of the conversation.
+  </Step>
+</Steps>
+
+---
+
+## Constructor
 
 ```typescript
-const agent = new Agent({
-  name: "assistant",
-  model: openai("gpt-4o"),
-  memory,
-  maxContextTokens: 4000,
-});
+const memory = new Memory(config?: MemoryConfig);
 ```
 
-When `maxContextTokens` is set, the agent estimates token counts for the system prompt, current user input, and history messages. History is trimmed from the oldest messages first until the total fits within the budget. This prevents context window overflow, especially with long conversations or multimodal content.
+<ParamField path="storage" type="StorageDriver" required={false}>
+  Storage driver for persisting summaries. Defaults to `InMemoryStorage`. Use `MongoDBStorage`, `PostgresStorage`, or `SqliteStorage` for persistence across restarts.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider" required={false}>
+  LLM used to generate conversation summaries from overflow messages. If not provided, falls back to basic text concatenation (truncated to 500 chars). **Recommended:** set this for meaningful summaries.
+</ParamField>
+
+<ParamField path="maxSummaries" type="number" required={false} default="20">
+  Maximum number of summaries stored per session. When exceeded, the oldest summaries are dropped.
+</ParamField>
 
 ---
 
-## Using MongoDB for Persistent Memory
+## Methods
 
-For production, use a persistent storage driver like `MongoDBStorage`:
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `summarize(sessionId, messages, fallbackModel?)` | `Promise<void>` | Summarize messages via LLM and store the summary |
+| `getSummaries(sessionId)` | `Promise<string[]>` | Get all stored summaries for a session, sorted chronologically |
+| `getContextString(sessionId)` | `Promise<string>` | Formatted summary string for system prompt injection |
+| `clear(sessionId)` | `Promise<void>` | Clear all summaries for a session |
+
+---
+
+## How Session and Memory Work Together
+
+Session and Memory serve distinct roles with **no duplication**:
+
+<CardGroup cols={2}>
+  <Card title="Session" icon="clock">
+    Stores **raw messages** (user + assistant). Replayed as conversation history to the LLM on each run. Think of it as short-term / working memory.
+  </Card>
+  <Card title="Memory" icon="brain">
+    Stores **LLM-generated summaries** of overflowed messages. Injected into the system prompt as context. Think of it as long-term memory.
+  </Card>
+</CardGroup>
+
+The flow for a long conversation:
+
+```
+Run 1-25:  Session stores all messages. Memory is idle.
+Run 26:    Session overflows → oldest messages are trimmed.
+           Trimmed messages are sent to Memory → LLM summary is generated and stored.
+Run 27+:   LLM receives:
+             - System prompt + Memory summaries (what happened in runs 1-X)
+             - Session history (recent runs)
+             - Current user input
+```
+
+This gives the agent a complete picture: detailed recent context from Session + summarized older context from Memory.
+
+---
+
+## With MongoDB Persistence
 
 ```typescript
 import { Agent, Memory, MongoDBStorage, openai } from "@radaros/core";
 
 const storage = new MongoDBStorage(
-  process.env.MONGO_URI ?? "mongodb://localhost:27017",
+  "mongodb://localhost:27017",
   "myapp",
   "agent_data"
 );
 
 const memory = new Memory({
   storage,
-  maxShortTermMessages: 50,
-  enableLongTerm: true,
+  model: openai("gpt-4o-mini"),
+  maxSummaries: 20,
 });
 
 const agent = new Agent({
   name: "assistant",
   model: openai("gpt-4o"),
   instructions: "You are a helpful assistant.",
-  storage,
-  memory,
-  logLevel: "info",
+  storage,          // Session persistence
+  memory,           // Long-term summarization
+  numHistoryRuns: 25,
 });
 
-const result = await agent.run("Hello!", { sessionId: "user-456" });
+await agent.run("Hello!", { sessionId: "conv-1" });
 ```
 
 ---
 
-## Example: Full Memory Flow
+## Three Memory Layers
 
-<Steps>
-  <Step title="Create Memory">
-    Instantiate `Memory` with optional storage and long-term settings.
-  </Step>
-  <Step title="Attach to Agent">
-    Pass `memory` in `AgentConfig`.
-  </Step>
-  <Step title="Run with sessionId">
-    Use the same `sessionId` in `RunOpts` for multi-turn conversations.
-  </Step>
-  <Step title="Context Injection">
-    Long-term summaries (if enabled) are injected into the system prompt via `getContextString()`.
-  </Step>
-</Steps>
+RadarOS has three complementary memory layers:
 
-<CodeGroup>
+| Layer | Class | Keyed by | Stores | When it writes | When it reads |
+|-------|-------|----------|--------|----------------|---------------|
+| **Session** | `SessionManager` | `sessionId` | Raw messages + state | Every run | Every run (history replay) |
+| **Memory** | `Memory` | `sessionId` | LLM summaries | When session overflows | Every run (system prompt) |
+| **User Memory** | `UserMemory` | `userId` | Personal facts | After each run (auto-extract) | Every run (system prompt) |
 
-```typescript In-memory (default)
-const memory = new Memory({ maxShortTermMessages: 30 });
-```
-
-```typescript Persistent with long-term
-const storage = new MongoDBStorage(uri, db, coll);
-const memory = new Memory({
-  storage,
-  maxShortTermMessages: 50,
-  enableLongTerm: true,
-});
-```
-
-</CodeGroup>
+<Note>
+All three can be used together. Session provides immediate context, Memory provides long-term conversation context, and User Memory provides cross-session personalization.
+</Note>

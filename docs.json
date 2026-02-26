@@ -39,6 +39,12 @@
             ]
           },
           {
+            "group": "Voice Agents",
+            "pages": [
+              "voice/overview"
+            ]
+          },
+          {
             "group": "Models",
             "pages": [
               "models/overview",

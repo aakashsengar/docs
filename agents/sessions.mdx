@@ -1,123 +1,147 @@
 ---
 title: Sessions
-description: SessionManager, session storage, multi-turn conversations, and state management in RadarOS.
+description: Session management for multi-turn conversations. Message history, state, overflow handling, and storage drivers.
 ---
 
 # Sessions
 
-Sessions in RadarOS track conversation history and arbitrary state per user or connection. Use `SessionManager` (or the built-in agent session handling) to persist messages and state across turns.
+Sessions in RadarOS track **conversation history** and **arbitrary state** per conversation. The `SessionManager` stores raw messages and replays them as context to the LLM on each run.
 
 ---
 
-## SessionManager Class
+## How It Works
+
+Every time you call `agent.run()` or `agent.stream()` with a `sessionId`, the agent:
+
+1. Loads the session's message history from storage
+2. Includes the history as conversation context to the LLM
+3. After the run, appends the new user/assistant exchange to the session
+
+If you use the same `sessionId` across multiple calls, the agent maintains a continuous conversation.
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  storage: new InMemoryStorage(),
+});
+
+await agent.run("My name is Bob.", { sessionId: "conv-1" });
+const result = await agent.run("What's my name?", { sessionId: "conv-1" });
+// Agent knows "Bob" from the first message
+```
+
+If `sessionId` is omitted, a new UUID is generated per run — each call is a fresh conversation.
+
+---
+
+## Session Object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sessionId` | `string` | Unique identifier for the session |
+| `userId` | `string?` | Optional user identifier |
+| `messages` | `ChatMessage[]` | Conversation history |
+| `state` | `Record<string, unknown>` | Arbitrary key-value state |
+| `createdAt` | `Date` | When the session was created |
+| `updatedAt` | `Date` | When the session was last updated |
+
+---
+
+## History Overflow
+
+When `numHistoryRuns` is set on the agent, the session automatically trims older messages to stay within the limit. This prevents the context window from growing unboundedly.
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  storage,
+  numHistoryRuns: 25,  // keep last 25 exchanges (50 messages)
+});
+```
+
+When messages overflow, if a [Memory](/agents/memory) instance is configured, the trimmed messages are sent to Memory for LLM-powered summarization. This way, old conversation context is preserved as summaries rather than lost.
+
+---
+
+## Token-Based Trimming
+
+For tighter control, set `maxContextTokens` to automatically trim history based on estimated token count:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  storage,
+  maxContextTokens: 4000,
+});
+```
+
+The agent estimates tokens for the system prompt, current input, and history. History is trimmed from oldest first until everything fits within the budget.
+
+---
+
+## Session State
+
+Sessions support arbitrary `state` for persisting data across turns. Access it via `RunContext.sessionState` in hooks or tools:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  storage: new InMemoryStorage(),
+  hooks: {
+    beforeRun: async (ctx) => {
+      const count = ctx.getState<number>("runCount") ?? 0;
+      ctx.setState("runCount", count + 1);
+    },
+  },
+});
+```
+
+State is automatically persisted via `updateState` after each run.
+
+---
+
+## SessionManager API
 
 `SessionManager` is used internally by agents but can also be used standalone:
 
 ```typescript
 import { SessionManager, InMemoryStorage } from "@radaros/core";
 
-const storage = new InMemoryStorage();
-const sessionManager = new SessionManager(storage);
-```
-
----
-
-## Session Object
-
-A session has the following shape:
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `sessionId` | `string` | Unique identifier for the session. |
-| `userId` | `string?` | Optional user identifier. |
-| `messages` | `ChatMessage[]` | Conversation history (user + assistant messages). |
-| `state` | `Record<string, unknown>` | Arbitrary key-value state. |
-| `createdAt` | `Date` | When the session was created. |
-| `updatedAt` | `Date` | When the session was last updated. |
-
----
-
-## How Sessions Work
-
-<Steps>
-  <Step title="getOrCreate">
-    Call `getOrCreate(sessionId, userId?)` to fetch an existing session or create a new one.
-  </Step>
-  <Step title="appendMessages">
-    Add messages after each agent run. The agent does this automatically when you pass `sessionId` in `RunOpts`.
-  </Step>
-  <Step title="getHistory">
-    Retrieve history for a session, optionally with a `limit` (e.g., last N messages).
-  </Step>
-  <Step title="updateState">
-    Merge arbitrary key-value data into `session.state` for persistence across turns.
-  </Step>
-</Steps>
-
----
-
-## Passing sessionId in RunOpts
-
-For multi-turn conversations, pass the same `sessionId` in `RunOpts`:
-
-```typescript
-const agent = new Agent({
-  name: "assistant",
-  model: openai("gpt-4o"),
-  instructions: "You are a helpful assistant.",
-  storage: new InMemoryStorage(),
+const sm = new SessionManager(new InMemoryStorage(), {
+  maxMessages: 50,  // optional: auto-trim when exceeded
 });
 
-// First turn
-await agent.run("My name is Bob.", { sessionId: "conv-1" });
+const session = await sm.getOrCreate("conv-1", "user-42");
+const { overflow } = await sm.appendMessages("conv-1", [
+  { role: "user", content: "Hello" },
+  { role: "assistant", content: "Hi there!" },
+]);
+// overflow contains trimmed messages (empty if under maxMessages)
 
-// Second turn — agent has context from the first message
-const result = await agent.run("What's my name?", { sessionId: "conv-1" });
-console.log(result.text); // "Your name is Bob."
-```
-
-If `sessionId` is omitted, a new UUID is generated per run, so each call is effectively a new conversation.
-
----
-
-## Session State
-
-Sessions support arbitrary `state` that you can read and update. Use `RunContext.sessionState` in hooks or tools to mutate state; it is persisted via `updateState` after each run.
-
-```typescript
-const agent = new Agent({
-  name: "assistant",
-  model: openai("gpt-4o"),
-  instructions: "You are a helpful assistant.",
-  storage: new InMemoryStorage(),
-  hooks: {
-    beforeRun: async (ctx) => {
-      ctx.sessionState.preferences = ctx.sessionState.preferences ?? {};
-    },
-    afterRun: async (ctx) => {
-      // ctx.sessionState is merged back into session.state
-    },
-  },
-});
+const history = await sm.getHistory("conv-1", 20); // last 20 messages
+await sm.updateState("conv-1", { topic: "greetings" });
+await sm.deleteSession("conv-1");
 ```
 
 ---
 
-## Storage Drivers for Session Persistence
-
-Use different storage drivers depending on your deployment:
+## Storage Drivers
 
 <CardGroup cols={2}>
   <Card title="InMemoryStorage" icon="memory">
-    Default. Sessions live in process memory. Lost on restart.
+    Default. Sessions live in process memory. Lost on restart. Good for development.
   </Card>
   <Card title="MongoDBStorage" icon="database">
     Persistent sessions in MongoDB. Use for production.
   </Card>
-  <Card title="SqliteStorage" icon="storage">
+  <Card title="SqliteStorage" icon="hard-drive">
     Persistent sessions in SQLite. Good for single-node deployments.
   </Card>
-  <Card title="PostgresStorage" icon="storage">
+  <Card title="PostgresStorage" icon="server">
     Persistent sessions in PostgreSQL. Use for scalable deployments.
   </Card>
 </CardGroup>
@@ -126,7 +150,7 @@ Use different storage drivers depending on your deployment:
 import { Agent, MongoDBStorage, openai } from "@radaros/core";
 
 const storage = new MongoDBStorage(
-  process.env.MONGO_URI ?? "mongodb://localhost:27017",
+  "mongodb://localhost:27017",
   "myapp",
   "sessions"
 );
@@ -141,37 +165,12 @@ const agent = new Agent({
 
 ---
 
-## Example: Socket.IO with socket.id as sessionId
+## Session vs Memory vs User Memory
 
-When using Socket.IO, each connection has a unique `socket.id`. Use it as `sessionId` for per-connection state:
+| Layer | Stores | Keyed by | Purpose |
+|-------|--------|----------|---------|
+| **Session** | Raw messages + state | `sessionId` | Immediate conversation history, replayed to LLM |
+| **Memory** | LLM summaries | `sessionId` | Long-term context from overflowed messages |
+| **User Memory** | Personal facts | `userId` | Cross-session personalization |
 
-```typescript
-import { createAgentGateway } from "@radaros/transport";
-import { Agent, openai, Memory, MongoDBStorage } from "@radaros/core";
-
-const storage = new MongoDBStorage(MONGO_URI, "radaros_realtime", "agent_data");
-await storage.initialize();
-
-const memory = new Memory({
-  storage,
-  maxShortTermMessages: 50,
-  enableLongTerm: true,
-});
-
-const assistant = new Agent({
-  name: "assistant",
-  model: openai("gpt-4o"),
-  instructions: "You are a helpful real-time assistant.",
-  storage,
-  memory,
-  logLevel: "info",
-});
-
-createAgentGateway({
-  agents: { assistant },
-  io,
-  namespace: "/radaros",
-});
-```
-
-The gateway automatically passes `socket.id` as `sessionId` when handling messages, so each WebSocket connection maintains its own conversation and session state.
+Session is always active. Memory kicks in when history overflows. User Memory persists facts about a person across all their sessions. See [Memory](/agents/memory) and [User Memory](/agents/user-memory) for details.

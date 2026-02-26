@@ -1,0 +1,355 @@
+---
+title: Voice Agents
+description: Build real-time voice agents with speech-to-speech AI. Supports OpenAI Realtime and Google Gemini Live APIs.
+---
+
+# Voice Agents
+
+RadarOS supports **real-time voice conversations** through the `VoiceAgent` class. Voice agents connect to speech-to-speech APIs (OpenAI Realtime, Google Gemini Live) over WebSocket, handle audio streaming, tool calling, and persistent user memory — all with the same patterns as regular text agents.
+
+<Note>
+Voice agents use a separate `RealtimeProvider` interface (not the regular `ModelProvider`). The realtime API manages its own conversation context within the WebSocket connection.
+</Note>
+
+---
+
+## Quick Start
+
+```bash
+npm install @radaros/core ws
+```
+
+```typescript
+import { VoiceAgent, OpenAIRealtimeProvider, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => `${city}: 22°C, sunny`,
+});
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  instructions: "You are a helpful voice assistant.",
+  tools: [weatherTool],
+  voice: "alloy",
+});
+
+const session = await agent.connect();
+
+// Send audio from a microphone
+session.sendAudio(pcmBuffer);
+
+// Listen for responses
+session.on("audio", ({ data }) => { /* play PCM audio */ });
+session.on("transcript", ({ text, role }) => console.log(`[${role}] ${text}`));
+
+// Clean up
+await session.close();
+```
+
+---
+
+## Architecture
+
+Voice agents have a layered architecture:
+
+```
+Browser/Client
+    ↕ Socket.IO (audio + events)
+Voice Gateway (@radaros/transport)
+    ↕ events
+VoiceAgent (@radaros/core)
+    ↕ WebSocket
+RealtimeProvider (OpenAI / Google)
+```
+
+<CardGroup cols={3}>
+  <Card title="VoiceAgent" icon="microphone">
+    Orchestrator. Manages the realtime connection, tools, user memory, and session lifecycle.
+  </Card>
+  <Card title="RealtimeProvider" icon="plug">
+    WebSocket adapter for a specific speech-to-speech API. Translates between RadarOS events and the provider's protocol.
+  </Card>
+  <Card title="Voice Gateway" icon="tower-broadcast">
+    Thin Socket.IO relay. Bridges browser audio to VoiceAgent. No business logic.
+  </Card>
+</CardGroup>
+
+---
+
+## VoiceAgent Config
+
+```typescript
+const agent = new VoiceAgent(config: VoiceAgentConfig);
+```
+
+<ParamField path="name" type="string" required>
+  Name of the voice agent.
+</ParamField>
+
+<ParamField path="provider" type="RealtimeProvider" required>
+  The realtime provider to use (e.g., `OpenAIRealtimeProvider`, `GoogleLiveProvider`).
+</ParamField>
+
+<ParamField path="instructions" type="string">
+  System instructions for the voice agent. User memory facts are automatically appended on connect.
+</ParamField>
+
+<ParamField path="tools" type="ToolDef[]">
+  Tools the agent can call during a voice conversation. Same `defineTool()` API as regular agents.
+</ParamField>
+
+<ParamField path="voice" type="string">
+  Voice to use for speech synthesis (e.g., `"alloy"`, `"shimmer"`, `"echo"`). Provider-specific.
+</ParamField>
+
+<ParamField path="userMemory" type="UserMemory">
+  Cross-session user memory. Facts are loaded into instructions on connect and auto-extracted from transcripts on disconnect.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider">
+  LLM model used by UserMemory for auto-extracting facts from conversation transcripts. Required when `userMemory` is set.
+</ParamField>
+
+<ParamField path="userId" type="string">
+  Default user ID. Can be overridden per `connect()` call.
+</ParamField>
+
+<ParamField path="temperature" type="number">
+  Temperature for response generation.
+</ParamField>
+
+<ParamField path="turnDetection" type="TurnDetectionConfig | null">
+  Server-side voice activity detection config. Set to `null` to disable.
+</ParamField>
+
+<ParamField path="logLevel" type="string" default="silent">
+  Logging level: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
+</ParamField>
+
+---
+
+## connect()
+
+Call `connect()` to start a voice session:
+
+```typescript
+const session = await agent.connect({
+  apiKey: "sk-...",   // optional per-session key override
+  userId: "akash",    // identifies the user for memory
+  sessionId: "s-123", // optional session identifier
+});
+```
+
+On connect, the agent:
+
+1. Loads user facts from `UserMemory` (if configured) and appends them to instructions
+2. Opens a WebSocket to the realtime provider
+3. Sends session config (instructions, tools, voice, etc.)
+4. Returns a `VoiceSession` handle
+
+---
+
+## VoiceSession
+
+The session handle returned by `connect()`:
+
+| Method | Description |
+|--------|-------------|
+| `sendAudio(data: Buffer)` | Send raw PCM audio to the agent |
+| `sendText(text: string)` | Send a text message (triggers a spoken response) |
+| `interrupt()` | Interrupt the current response |
+| `close()` | End the session. Triggers user memory extraction. |
+
+### Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `audio` | `{ data: Buffer, mimeType: string }` | Audio response chunk (PCM16) |
+| `transcript` | `{ text: string, role: "user" \| "assistant" }` | Speech-to-text transcript |
+| `text` | `{ text: string }` | Text-only response delta |
+| `tool_call_start` | `{ name: string, args: unknown }` | Tool call initiated |
+| `tool_result` | `{ name: string, result: string }` | Tool call completed |
+| `interrupted` | `{}` | Response was interrupted |
+| `error` | `{ error: Error }` | Error occurred |
+| `disconnected` | `{}` | Session ended |
+
+---
+
+## Realtime Providers
+
+### OpenAI Realtime
+
+```typescript
+import { OpenAIRealtimeProvider } from "@radaros/core";
+
+const provider = new OpenAIRealtimeProvider("gpt-4o-realtime-preview", {
+  apiKey: "sk-...",   // optional, defaults to OPENAI_API_KEY env
+  baseURL: "wss://...", // optional custom endpoint
+});
+```
+
+Requires: `npm install ws`
+
+### Google Gemini Live
+
+```typescript
+import { GoogleLiveProvider } from "@radaros/core";
+
+const provider = new GoogleLiveProvider("gemini-2.0-flash-live-001", {
+  apiKey: "...",  // optional, defaults to GOOGLE_API_KEY env
+});
+```
+
+Requires: `npm install @google/genai`
+
+---
+
+## User Memory in Voice
+
+Voice agents support the same `UserMemory` as regular agents. The flow:
+
+<Steps>
+  <Step title="User connects">
+    `connect({ userId: "akash" })` loads stored facts and appends them to the agent's instructions.
+  </Step>
+  <Step title="Conversation happens">
+    The agent knows the user's name, preferences, etc. from the injected facts.
+  </Step>
+  <Step title="User disconnects">
+    On `close()` or disconnect, all transcripts are consolidated (small deltas merged into full messages) and sent to the LLM for fact extraction.
+  </Step>
+  <Step title="Facts are stored">
+    New facts are deduplicated and saved. Next time the user connects, they're automatically loaded.
+  </Step>
+</Steps>
+
+```typescript
+import { VoiceAgent, OpenAIRealtimeProvider, OpenAIProvider, UserMemory, MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage("mongodb://localhost:27017", "myapp", "voice_data");
+const userMemory = new UserMemory({ storage, maxFacts: 200 });
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  userMemory,
+  model: new OpenAIProvider("gpt-4o-mini"), // for fact extraction
+  instructions: "You are a helpful voice assistant.",
+  voice: "alloy",
+});
+
+// User "akash" connects — their stored facts are loaded automatically
+const session = await agent.connect({ userId: "akash" });
+```
+
+<Note>
+Voice agents do **not** use the `Memory` class (long-term summarization) or `SessionManager`. The realtime API manages its own conversation context within the WebSocket connection. Only `UserMemory` persists across sessions.
+</Note>
+
+---
+
+## Tool Calling
+
+Tools work the same as regular agents. When the realtime API detects a tool call intent:
+
+1. The provider emits a `tool_call` event
+2. `VoiceAgent` executes the tool via `ToolExecutor`
+3. The result is sent back to the provider
+4. The agent speaks the result
+
+```typescript
+const trackShipment = defineTool({
+  name: "trackShipment",
+  description: "Track a shipment by tracking number",
+  parameters: z.object({
+    trackingNumber: z.string(),
+  }),
+  execute: async ({ trackingNumber }) => {
+    const res = await fetch(`https://api.example.com/track?id=${trackingNumber}`);
+    const data = await res.json();
+    return `Status: ${data.status}, ETA: ${data.eta}`;
+  },
+});
+
+const agent = new VoiceAgent({
+  name: "logistics",
+  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  tools: [trackShipment],
+  instructions: "You help track shipments. Ask for the tracking number.",
+});
+```
+
+---
+
+## Voice Gateway (Socket.IO)
+
+For browser-based voice apps, use the `createVoiceGateway` from `@radaros/transport`:
+
+```bash
+npm install @radaros/transport express socket.io
+```
+
+```typescript
+import express from "express";
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
+import { VoiceAgent, OpenAIRealtimeProvider } from "@radaros/core";
+import { createVoiceGateway } from "@radaros/transport";
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: new OpenAIRealtimeProvider("gpt-4o-realtime-preview"),
+  instructions: "You are a voice assistant.",
+  voice: "alloy",
+});
+
+const app = express();
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+
+createVoiceGateway({
+  agents: { assistant: agent },
+  io,
+  namespace: "/voice",
+});
+
+httpServer.listen(3001);
+```
+
+The gateway is a **thin relay** — it forwards Socket.IO events to the `VoiceAgent` and streams audio/events back. All memory, session, and tool logic lives in the agent.
+
+### Client-Side Events
+
+| Event (emit) | Payload | Description |
+|--------------|---------|-------------|
+| `voice.start` | `{ agentName, userId?, apiKey? }` | Start a voice session |
+| `voice.audio` | `{ data: base64 }` | Send mic audio (PCM16, base64) |
+| `voice.text` | `{ text: string }` | Send text input |
+| `voice.interrupt` | — | Interrupt the current response |
+| `voice.stop` | — | End the session |
+
+| Event (listen) | Payload | Description |
+|----------------|---------|-------------|
+| `voice.started` | `{ userId }` | Session started |
+| `voice.audio` | `{ data: base64, mimeType }` | Audio response (PCM16, base64) |
+| `voice.transcript` | `{ text, role }` | Transcript delta |
+| `voice.tool.call` | `{ name, args }` | Tool call started |
+| `voice.tool.result` | `{ name, result }` | Tool call result |
+| `voice.interrupted` | — | Response interrupted |
+| `voice.error` | `{ error: string }` | Error |
+| `voice.stopped` | — | Session ended |
+
+---
+
+## Examples
+
+| Example | Description |
+|---------|-------------|
+| `examples/26-voice-openai.ts` | OpenAI voice agent with mic/speaker |
+| `examples/27-voice-google.ts` | Google Gemini Live voice agent |
+| `examples/29-voice-socketio.ts` | Full browser voice app with Socket.IO, tools, and MongoDB-backed user memory |
