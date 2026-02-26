@@ -1,0 +1,268 @@
+---
+title: Human-in-the-Loop
+description: Require human approval before executing sensitive tool calls. Supports CLI callbacks, event-driven approval via Socket.IO, and configurable timeouts.
+---
+
+# Human-in-the-Loop (HITL)
+
+RadarOS can **pause the agent loop** before executing sensitive tools and request human approval. This is useful for:
+
+- Destructive operations (delete file, drop database)
+- Financial actions (send payment, place order)
+- External communications (send email, post message)
+- Any tool where you want a human reviewer in the loop
+
+<Note>
+HITL is fully optional. By default, all tools execute automatically. You opt in per-tool or per-agent.
+</Note>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import type { ApprovalRequest } from "@radaros/core";
+import { z } from "zod";
+
+const deleteTool = defineTool({
+  name: "deleteUser",
+  description: "Delete a user account permanently",
+  parameters: z.object({ userId: z.string() }),
+  execute: async ({ userId }) => `User ${userId} deleted.`,
+  requiresApproval: true,
+});
+
+const agent = new Agent({
+  name: "Admin",
+  model: openai("gpt-4o"),
+  tools: [deleteTool],
+  approval: {
+    policy: ["deleteUser"],
+    onApproval: async (req: ApprovalRequest) => {
+      console.log(`Approve "${req.toolName}" with args ${JSON.stringify(req.args)}? (y/n)`);
+      // In a real app, prompt the user via CLI, Slack, UI, etc.
+      return { approved: true, reason: "Auto-approved for demo" };
+    },
+    timeout: 60_000,
+  },
+});
+```
+
+---
+
+## How It Works
+
+```
+LLM Loop → ToolExecutor
+                ↓
+        needsApproval? ──no──→ Execute tool
+                ↓ yes
+        Emit "tool.approval.request"
+                ↓
+        Wait for decision (callback or event)
+                ↓
+        approved? ──yes──→ Execute tool
+                ↓ no
+        Return "[DENIED] reason" to LLM
+```
+
+When a tool call is denied, the denial message is returned to the LLM as the tool result. The LLM can then respond to the user explaining why the action was not performed.
+
+---
+
+## ApprovalConfig
+
+Set on `AgentConfig.approval`:
+
+<ParamField path="policy" type="'none' | 'all' | string[]" required>
+  Which tools require approval:
+  - `"none"` — No tools require approval (default behavior)
+  - `"all"` — Every tool call requires approval
+  - `string[]` — List of tool names that require approval (e.g., `["deleteUser", "sendPayment"]`)
+</ParamField>
+
+<ParamField path="onApproval" type="(request: ApprovalRequest) => Promise<ApprovalDecision>">
+  Callback invoked when approval is needed. Return `{ approved: true/false, reason?: string }`. If not provided, approval operates in event-driven mode.
+</ParamField>
+
+<ParamField path="timeout" type="number" default="300000">
+  Timeout in milliseconds for waiting on a human response. Auto-denied after timeout (default: 5 minutes).
+</ParamField>
+
+---
+
+## Per-Tool Approval
+
+Set `requiresApproval` on individual tools:
+
+```typescript
+const alwaysAsk = defineTool({
+  name: "deleteFile",
+  description: "Delete a file",
+  parameters: z.object({ path: z.string() }),
+  execute: async ({ path }) => { /* ... */ },
+  requiresApproval: true,
+});
+```
+
+### Conditional Approval
+
+Pass a function for dynamic approval logic:
+
+```typescript
+const sendEmail = defineTool({
+  name: "sendEmail",
+  description: "Send an email",
+  parameters: z.object({ to: z.string(), subject: z.string(), body: z.string() }),
+  execute: async ({ to, subject, body }) => { /* ... */ },
+  requiresApproval: (args) => {
+    // Only require approval for external emails
+    return !(args.to as string).endsWith("@mycompany.com");
+  },
+});
+```
+
+---
+
+## Agent-Level Policy
+
+Set `approval.policy` on the agent to control which tools need approval:
+
+```typescript
+const agent = new Agent({
+  name: "Admin",
+  model: openai("gpt-4o"),
+  tools: [readTool, deleteTool, sendEmailTool],
+  approval: {
+    policy: ["deleteFile", "sendEmail"],
+    onApproval: async (req) => {
+      // Prompt user...
+      return { approved: true };
+    },
+  },
+});
+```
+
+### Priority
+
+Per-tool `requiresApproval` takes precedence over the agent-level policy:
+
+| Tool `requiresApproval` | Agent `policy` | Result |
+|--------------------------|----------------|--------|
+| `undefined` | `"none"` | No approval |
+| `undefined` | `["toolName"]` | Approval required |
+| `true` | any | Approval required |
+| `false` | `"all"` | **No approval** (tool opts out) |
+| `(args) => bool` | any | Function result decides |
+
+---
+
+## Callback Mode
+
+For CLI scripts or simple integrations, use `onApproval`:
+
+```typescript
+import * as readline from "node:readline/promises";
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+const agent = new Agent({
+  name: "CLI-Agent",
+  model: openai("gpt-4o"),
+  tools: [deleteTool],
+  approval: {
+    policy: "all",
+    onApproval: async ({ toolName, args }) => {
+      const answer = await rl.question(
+        `Allow "${toolName}" with ${JSON.stringify(args)}? (y/n): `
+      );
+      return { approved: answer === "y" };
+    },
+  },
+});
+```
+
+---
+
+## Event-Driven Mode
+
+For web apps (Socket.IO, REST), omit `onApproval` and use events:
+
+```typescript
+const agent = new Agent({
+  name: "WebAgent",
+  model: openai("gpt-4o"),
+  tools: [deleteTool, sendEmailTool],
+  approval: {
+    policy: ["deleteTool", "sendEmailTool"],
+    timeout: 120_000,
+  },
+});
+
+// Forward approval requests to the client
+agent.eventBus.on("tool.approval.request", ({ requestId, toolName, args }) => {
+  socket.emit("approval.request", { requestId, toolName, args });
+});
+
+// Receive decisions from the client
+socket.on("approval.response", ({ requestId, approved, reason }) => {
+  const manager = agent.approvalManager;
+  if (approved) {
+    manager.approve(requestId, reason);
+  } else {
+    manager.deny(requestId, reason);
+  }
+});
+```
+
+### Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `tool.approval.request` | `{ requestId, toolName, args, agentName, runId }` | Approval needed |
+| `tool.approval.response` | `{ requestId, approved, reason? }` | Decision made |
+
+---
+
+## ApprovalRequest & ApprovalDecision
+
+```typescript
+interface ApprovalRequest {
+  requestId: string;
+  toolName: string;
+  args: unknown;
+  agentName: string;
+  runId: string;
+}
+
+interface ApprovalDecision {
+  approved: boolean;
+  reason?: string;
+}
+```
+
+---
+
+## Timeout
+
+If no human responds within the configured `timeout` (default: 5 minutes), the tool call is **auto-denied** with reason `"Approval timed out"`. This prevents the agent from hanging indefinitely.
+
+```typescript
+approval: {
+  policy: "all",
+  timeout: 30_000, // 30 seconds
+  onApproval: async (req) => {
+    // If this takes longer than 30s, auto-denied
+    return await waitForSlackResponse(req);
+  },
+}
+```
+
+---
+
+## See Also
+
+- [Sandbox Execution](/agents/sandbox) — Run tools in isolated subprocesses
+- [Tools & Function Calling](/agents/tools) — `defineTool()` reference
+- [Hooks & Guardrails](/agents/hooks-and-guardrails) — Pre/post run hooks

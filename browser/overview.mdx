@@ -143,7 +143,7 @@ const agent = new BrowserAgent(config: BrowserAgentConfig);
 </ParamField>
 
 <ParamField path="credentials" type="CredentialVault">
-  Secure credential store. The LLM only sees placeholders like `{{email}}` — real values are injected at execution time and scrubbed from all output.
+  Secure credential store. The LLM only sees named placeholders — real values are injected at execution time and scrubbed from all output.
 </ParamField>
 
 <ParamField path="logLevel" type="string" default="silent">
@@ -621,7 +621,7 @@ browser.eventBus.on("browser.done", ({ result, success }) => {
     Use `stealth: true` + `humanize: true` to bypass bot detection on protected sites.
   </Card>
   <Card title="Secure credentials" icon="key">
-    Use `CredentialVault` so the LLM never sees passwords — only `{{placeholders}}`.
+    Use `CredentialVault` so the LLM never sees passwords — only placeholders.
   </Card>
 </CardGroup>
 

@@ -35,6 +35,8 @@
               "agents/multimodal",
               "agents/reasoning",
               "agents/hooks-and-guardrails",
+              "agents/sandbox",
+              "agents/approval",
               "agents/logging"
             ]
           },

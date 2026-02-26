@@ -1,0 +1,187 @@
+---
+title: Sandbox Execution
+description: Run tools in isolated subprocesses with timeout, memory limits, and restricted filesystem/network access.
+---
+
+# Sandbox Execution
+
+RadarOS can run tool code inside **isolated subprocesses** with configurable timeout, memory limits, and filesystem/network restrictions. This prevents untrusted or long-running tool code from crashing, hanging, or compromising the host process.
+
+<Note>
+Sandbox is **entirely optional** and **off by default**. Tools run normally in the main process unless you explicitly opt in — per-tool or per-agent.
+</Note>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const calculateTool = defineTool({
+  name: "calculate",
+  description: "Evaluate a math expression",
+  parameters: z.object({ expression: z.string() }),
+  execute: async ({ expression }) => {
+    return `Result: ${new Function("return " + expression)()}`;
+  },
+  sandbox: {
+    timeout: 5_000,
+    maxMemoryMB: 64,
+  },
+});
+
+const agent = new Agent({
+  name: "CalcBot",
+  model: openai("gpt-4o"),
+  tools: [calculateTool],
+});
+```
+
+---
+
+## How It Works
+
+When a sandboxed tool is called:
+
+1. The tool's `execute` function is serialized and sent to a **forked child process** via IPC
+2. The child process runs the function in isolation with memory limits (`--max-old-space-size`)
+3. The result (or error) is sent back via IPC
+4. If the tool exceeds the timeout, the child process is killed with `SIGKILL`
+5. The error is returned to the LLM as a tool result
+
+```
+Agent Loop → ToolExecutor → Sandbox.execute()
+                                ↓
+                         fork(sandbox-worker)
+                                ↓
+                      Run tool.execute(args)
+                                ↓
+                          IPC result back
+```
+
+---
+
+## SandboxConfig
+
+<ParamField path="enabled" type="boolean" default="true">
+  Explicit on/off toggle. Defaults to `true` when a config object is provided. Set `false` to disable sandbox for a specific tool even when the agent has a global sandbox.
+</ParamField>
+
+<ParamField path="timeout" type="number" default="30000">
+  Maximum execution time in milliseconds. The subprocess is killed if it exceeds this limit.
+</ParamField>
+
+<ParamField path="maxMemoryMB" type="number" default="256">
+  Maximum V8 heap memory in megabytes (passed as `--max-old-space-size`).
+</ParamField>
+
+<ParamField path="allowNetwork" type="boolean" default="false">
+  Allow outbound network access from the sandbox.
+</ParamField>
+
+<ParamField path="allowFS" type="boolean | object" default="false">
+  Allow filesystem access. Pass an object for granular control: `{ readOnly: ["/data"], readWrite: ["/tmp"] }`.
+</ParamField>
+
+<ParamField path="env" type="Record<string, string>">
+  Whitelisted environment variables forwarded to the sandbox process. Only these variables are available inside the sandbox.
+</ParamField>
+
+---
+
+## Per-Tool Sandbox
+
+Add `sandbox` to any tool definition:
+
+```typescript
+const riskyTool = defineTool({
+  name: "runUserCode",
+  description: "Execute user-provided code snippet",
+  parameters: z.object({ code: z.string() }),
+  execute: async ({ code }) => {
+    return eval(code);
+  },
+  sandbox: {
+    timeout: 5_000,
+    maxMemoryMB: 64,
+    allowNetwork: false,
+    allowFS: false,
+  },
+});
+```
+
+Use `sandbox: true` for defaults (30s timeout, 256MB, no network, no FS):
+
+```typescript
+const tool = defineTool({
+  name: "safe",
+  description: "...",
+  parameters: z.object({}),
+  execute: async () => "ok",
+  sandbox: true,
+});
+```
+
+---
+
+## Agent-Level Sandbox
+
+Set `sandbox` on `AgentConfig` to apply to **all** tools by default:
+
+```typescript
+const agent = new Agent({
+  name: "SecureAgent",
+  model: openai("gpt-4o"),
+  tools: [tool1, tool2, tool3],
+  sandbox: {
+    timeout: 10_000,
+    maxMemoryMB: 128,
+  },
+});
+```
+
+Individual tools can **opt out** by setting `sandbox: false`:
+
+```typescript
+const trustedTool = defineTool({
+  name: "dbQuery",
+  description: "Run a database query (trusted, no sandbox)",
+  parameters: z.object({ sql: z.string() }),
+  execute: async ({ sql }) => { /* ... */ },
+  sandbox: false, // overrides agent-level sandbox
+});
+```
+
+### Priority
+
+Per-tool config always takes precedence over agent-level config:
+
+| Tool `sandbox` | Agent `sandbox` | Result |
+|----------------|-----------------|--------|
+| `undefined` | `undefined` | No sandbox |
+| `undefined` | `{ timeout: 10000 }` | Sandboxed (agent config) |
+| `true` | `undefined` | Sandboxed (defaults) |
+| `{ timeout: 5000 }` | `{ timeout: 10000 }` | Sandboxed (tool config: 5s) |
+| `false` | `{ timeout: 10000 }` | **No sandbox** (tool opts out) |
+
+---
+
+## Limitations
+
+- **Serialization**: The tool's `execute` function is serialized as source code. It cannot capture closures over non-serializable values (database connections, class instances, etc.).
+- **No shared state**: The sandbox runs in a separate process. It cannot access variables from the parent process.
+- **Node.js only**: Uses `child_process.fork()` — works in Node.js, not in browser/edge runtimes.
+
+<Tip>
+For tools that need database connections or shared state, keep them unsandboxed (`sandbox: false`) and use [Human-in-the-Loop](/agents/approval) approval instead for safety.
+</Tip>
+
+---
+
+## See Also
+
+- [Human-in-the-Loop](/agents/approval) — Require human approval before executing sensitive tools
+- [Tools & Function Calling](/agents/tools) — `defineTool()` reference
+- [Tool Caching](/agents/tool-caching) — Cache tool results

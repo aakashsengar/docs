@@ -185,3 +185,23 @@ const weatherTool = defineTool({
 ```
 
 See [Tool Caching](/agents/tool-caching) for full documentation.
+
+---
+
+## Sandbox & Approval
+
+Tools support two additional safety features:
+
+- **`sandbox`** — Run the tool in an isolated subprocess with timeout and memory limits. See [Sandbox Execution](/agents/sandbox).
+- **`requiresApproval`** — Require human approval before executing the tool. See [Human-in-the-Loop](/agents/approval).
+
+```typescript
+const riskyTool = defineTool({
+  name: "deleteUser",
+  description: "Delete a user account",
+  parameters: z.object({ userId: z.string() }),
+  execute: async ({ userId }) => `Deleted ${userId}`,
+  sandbox: { timeout: 5_000 },
+  requiresApproval: true,
+});
+```
