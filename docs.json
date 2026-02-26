@@ -41,6 +41,7 @@
               "models/openai",
               "models/anthropic",
               "models/google",
+              "models/vertex",
               "models/ollama",
               "models/custom-provider"
             ]

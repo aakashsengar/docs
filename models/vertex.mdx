@@ -1,0 +1,157 @@
+---
+title: Vertex AI
+description: Use Google Vertex AI with RadarOS. Enterprise-grade Gemini models with Google Cloud authentication.
+---
+
+# Vertex AI
+
+Use Google's Gemini models through **Vertex AI** — Google Cloud's enterprise ML platform. Same models as the Gemini API, but with Google Cloud IAM authentication, VPC support, and enterprise compliance.
+
+<Info>
+Use `vertex()` when you need Google Cloud authentication (service accounts, ADC). Use `google()` when you have a simple API key.
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Vertex AI uses the same SDK as Gemini:
+
+```bash
+npm install @google/genai
+```
+  </Tab>
+  <Tab title="Authentication">
+    Vertex AI uses **Application Default Credentials (ADC)**. Authenticate via one of:
+
+```bash
+# Option 1: gcloud CLI (development)
+gcloud auth application-default login
+
+# Option 2: Service account key (production)
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+```
+
+Set your project and region:
+
+```bash
+export GOOGLE_CLOUD_PROJECT="my-project-id"
+export GOOGLE_CLOUD_LOCATION="us-central1"  # optional, defaults to us-central1
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { vertex } from "@radaros/core";
+
+const model = vertex("gemini-2.0-flash", {
+  project: "my-gcp-project",
+  location: "us-central1",
+});
+```
+
+<ParamField path="modelId" type="string" required>
+  The Gemini model identifier (same model IDs as the Gemini API).
+</ParamField>
+
+<ParamField path="config" type="object" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gemini-2.5-flash` | Fast, efficient. Great for high-throughput and latency-sensitive apps. |
+| `gemini-2.5-pro` | Highest capability. Best for complex reasoning and long-context tasks. |
+| `gemini-2.0-flash` | Previous generation flash model. |
+
+All Gemini models available in your Vertex AI region can be used.
+
+---
+
+## Config
+
+<ParamField path="project" type="string" required>
+  Google Cloud project ID. Falls back to `GOOGLE_CLOUD_PROJECT` env var.
+</ParamField>
+
+<ParamField path="location" type="string" default="us-central1">
+  Google Cloud region. Falls back to `GOOGLE_CLOUD_LOCATION` env var.
+</ParamField>
+
+<ParamField path="credentials" type="string" required={false}>
+  Service account key JSON string or file path. If omitted, uses Application Default Credentials.
+</ParamField>
+
+### Example
+
+```typescript
+const model = vertex("gemini-2.5-flash", {
+  project: "my-project-id",
+  location: "europe-west4",
+});
+```
+
+---
+
+## Vertex AI vs Gemini API
+
+| Feature | `google()` (Gemini API) | `vertex()` (Vertex AI) |
+|---------|------------------------|----------------------|
+| Auth | API key | Google Cloud IAM / ADC |
+| Pricing | Pay-per-use | GCP billing |
+| VPC / Private | No | Yes |
+| Enterprise compliance | Limited | SOC2, HIPAA, etc. |
+| Same models | Yes | Yes |
+| Multi-modal | Yes | Yes |
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, vertex, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "enterprise-assistant",
+  model: vertex("gemini-2.5-flash", {
+    project: "my-project",
+    location: "us-central1",
+  }),
+  instructions: "You are an enterprise assistant with access to internal tools.",
+  tools: [
+    defineTool({
+      name: "lookup_employee",
+      description: "Look up an employee by name",
+      parameters: z.object({
+        name: z.string().describe("Employee name"),
+      }),
+      execute: async (args) => `Employee ${args.name} found in Engineering.`,
+    }),
+  ],
+  logLevel: "info",
+});
+
+const output = await agent.run("Look up John Smith");
+console.log(output.text);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLOUD_PROJECT` | Default GCP project ID |
+| `GOOGLE_CLOUD_LOCATION` | Default GCP region (default: `us-central1`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account key JSON |

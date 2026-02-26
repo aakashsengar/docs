@@ -7,7 +7,7 @@ description: Model-agnostic design, ModelProvider interface, factory functions, 
 
 ## Model Agnosticism
 
-RadarOS is **model-agnostic**. You can use OpenAI, Anthropic, Google Gemini, Ollama, or any custom provider through a unified `ModelProvider` interface. Switch models with a single line change—no refactoring required.
+RadarOS is **model-agnostic**. You can use OpenAI, Anthropic, Google Gemini, Vertex AI, Ollama, or any custom provider through a unified `ModelProvider` interface. Switch models with a single line change—no refactoring required.
 
 <CardGroup cols={2}>
   <Card title="Unified Interface" icon="layer-group">
@@ -60,12 +60,13 @@ Use factory functions to create model instances. Each returns a `ModelProvider` 
 | `openai(modelId, config?)` | OpenAI | `{ apiKey?, baseURL? }` |
 | `anthropic(modelId, config?)` | Anthropic | `{ apiKey? }` |
 | `google(modelId, config?)` | Google Gemini | `{ apiKey? }` |
+| `vertex(modelId, config?)` | Google Vertex AI | `{ project?, location?, credentials? }` |
 | `ollama(modelId, config?)` | Ollama (local) | `{ host? }` (default: `http://localhost:11434`) |
 
 ### Switching Models in One Line
 
 ```typescript
-import { Agent, openai, anthropic, ollama } from "@radaros/core";
+import { Agent, openai, anthropic, google, vertex, ollama } from "@radaros/core";
 
 // OpenAI
 const model = openai("gpt-4o");
@@ -73,8 +74,11 @@ const model = openai("gpt-4o");
 // Anthropic
 const model = anthropic("claude-sonnet-4-20250514");
 
-// Google Gemini
+// Google Gemini (API key)
 const model = google("gemini-2.5-flash");
+
+// Google Vertex AI (GCP auth)
+const model = vertex("gemini-2.5-flash", { project: "my-project" });
 
 // Local Ollama (no API key)
 const model = ollama("llama3.1");
@@ -139,6 +143,9 @@ const response = await model.generate(messages, {
   </Card>
   <Card title="Google Gemini" icon="google" href="/models/google">
     Gemini 2.5 Flash, Gemini 2.5 Pro. Multi-modal support.
+  </Card>
+  <Card title="Vertex AI" icon="cloud" href="/models/vertex">
+    Enterprise Gemini via Google Cloud. IAM auth, VPC, compliance.
   </Card>
   <Card title="Ollama" icon="server" href="/models/ollama">
     Local models: Llama, CodeLlama, Mistral.
