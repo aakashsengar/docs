@@ -1,0 +1,174 @@
+---
+title: Custom Provider
+description: Implement your own ModelProvider for any LLM API. Register with ModelRegistry and use with agents, teams, and workflows.
+---
+
+# Custom Provider
+
+Implement the `ModelProvider` interface to add support for any LLM API. Once implemented, your custom provider works with agents, teams, workflows, and RAG—just like the built-in providers.
+
+---
+
+## ModelProvider Interface
+
+Your provider must implement:
+
+```typescript
+interface ModelProvider {
+  readonly providerId: string;
+  readonly modelId: string;
+  generate(messages: ChatMessage[], options?: ModelConfig & { tools?: ToolDefinition[] }): Promise<ModelResponse>;
+  stream(messages: ChatMessage[], options?: ModelConfig & { tools?: ToolDefinition[] }): AsyncGenerator<StreamChunk>;
+}
+```
+
+---
+
+## Example Skeleton
+
+<CodeGroup>
+  <CodeGroup.Item title="CustomProvider.ts">
+```typescript
+import type {
+  ModelProvider,
+  ChatMessage,
+  ModelConfig,
+  ModelResponse,
+  StreamChunk,
+  ToolDefinition,
+} from "@radaros/core";
+
+export class MyCustomProvider implements ModelProvider {
+  readonly providerId = "my-provider";
+  readonly modelId: string;
+
+  constructor(modelId: string, config?: { apiKey?: string }) {
+    this.modelId = modelId;
+    // Initialize your API client
+  }
+
+  async generate(
+    messages: ChatMessage[],
+    options?: ModelConfig & { tools?: ToolDefinition[] }
+  ): Promise<ModelResponse> {
+    // 1. Convert messages to your API format
+    // 2. Call your LLM API
+    // 3. Normalize response to ModelResponse
+    return {
+      message: { role: "assistant", content: "..." },
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: "stop",
+      raw: {},
+    };
+  }
+
+  async *stream(
+    messages: ChatMessage[],
+    options?: ModelConfig & { tools?: ToolDefinition[] }
+  ): AsyncGenerator<StreamChunk> {
+    // 1. Call your streaming API
+    // 2. Yield { type: "text", text: delta } for each chunk
+    // 3. Yield { type: "finish", finishReason, usage } at end
+    yield { type: "text", text: "Hello" };
+    yield { type: "finish", finishReason: "stop", usage: undefined };
+  }
+}
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## Register with ModelRegistry
+
+Register your provider so it can be resolved by ID:
+
+```typescript
+import { registry } from "@radaros/core";
+import { MyCustomProvider } from "./MyCustomProvider.js";
+
+registry.register("my-provider", (modelId, config) => {
+  return new MyCustomProvider(modelId, config as { apiKey?: string });
+});
+
+// Use it
+const model = registry.resolve("my-provider", "my-model-v1", {
+  apiKey: process.env.MY_API_KEY,
+});
+```
+
+---
+
+## StreamChunk Types
+
+When implementing `stream()`, yield these chunk types:
+
+| Type | Payload | Description |
+|------|---------|-------------|
+| `text` | `{ text: string }` | Text delta |
+| `tool_call_start` | `{ toolCall: { id, name } }` | Tool call began |
+| `tool_call_delta` | `{ toolCallId, argumentsDelta }` | Tool call arguments delta |
+| `tool_call_end` | `{ toolCallId }` | Tool call finished |
+| `finish` | `{ finishReason, usage? }` | Stream complete |
+
+---
+
+## Full Example
+
+```typescript
+import {
+  Agent,
+  registry,
+  type ModelProvider,
+  type ChatMessage,
+  type ModelResponse,
+  type StreamChunk,
+} from "@radaros/core";
+
+class CohereProvider implements ModelProvider {
+  readonly providerId = "cohere";
+  readonly modelId: string;
+  private apiKey: string;
+
+  constructor(modelId: string, config: { apiKey: string }) {
+    this.modelId = modelId;
+    this.apiKey = config.apiKey;
+  }
+
+  async generate(messages: ChatMessage[]): Promise<ModelResponse> {
+    const res = await fetch("https://api.cohere.ai/v1/chat", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: this.modelId,
+        message: messages[messages.length - 1]?.content,
+      }),
+    });
+    const data = await res.json();
+    return {
+      message: { role: "assistant", content: data.text },
+      usage: data.meta?.tokens ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      finishReason: "stop",
+      raw: data,
+    };
+  }
+
+  async *stream(): AsyncGenerator<StreamChunk> {
+    // Implement streaming if your API supports it
+    yield { type: "finish", finishReason: "stop", usage: undefined };
+  }
+}
+
+registry.register("cohere", (modelId, config) => {
+  return new CohereProvider(modelId, config as { apiKey: string });
+});
+
+const model = registry.resolve("cohere", "command-r", {
+  apiKey: process.env.COHERE_API_KEY,
+});
+
+const agent = new Agent({ name: "Cohere Agent", model });
+```

@@ -1,0 +1,108 @@
+---
+title: Broadcast Mode
+description: All agents process input; results are merged. Example with multi-perspective analysis.
+---
+
+# Broadcast Mode
+
+In **Broadcast** mode, the team sends the user's input to **all** member agents. Each agent processes the task independently, and the results are merged into a single response.
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="User sends input">
+    The user's message goes to the team.
+  </Step>
+  <Step title="Broadcast to all">
+    Every member agent receives the same input.
+  </Step>
+  <Step title="Agents run in parallel">
+    All agents process concurrently (where supported).
+  </Step>
+  <Step title="Results merged">
+    The team combines outputs into one response.
+  </Step>
+</Steps>
+
+---
+
+## Example: Multi-Perspective Analysis
+
+<CodeGroup>
+  <CodeGroup.Item title="broadcast-team.ts">
+```typescript
+import { Team, TeamMode, Agent, openai } from "@radaros/core";
+
+const technicalAgent = new Agent({
+  name: "Technical Analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "Analyze from a technical perspective: architecture, scalability, security, performance.",
+});
+
+const businessAgent = new Agent({
+  name: "Business Analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "Analyze from a business perspective: ROI, market fit, user value, competitive advantage.",
+});
+
+const riskAgent = new Agent({
+  name: "Risk Analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "Analyze risks: technical debt, compliance, operational, and strategic risks.",
+});
+
+const analysisTeam = new Team({
+  name: "360° Analysis",
+  mode: TeamMode.Broadcast,
+  model: openai("gpt-4o"),
+  members: [technicalAgent, businessAgent, riskAgent],
+  instructions: `
+    Each member analyzes the input from their perspective.
+    Merge all analyses into a comprehensive report with sections:
+    1. Technical Analysis
+    2. Business Analysis
+    3. Risk Analysis
+    4. Summary & Recommendations
+  `,
+});
+
+const output = await analysisTeam.run(
+  "Evaluate adopting microservices for our monolithic e-commerce platform."
+);
+console.log(output.text);
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## When to Use Broadcast
+
+<CardGroup cols={2}>
+  <Card title="Multi-perspective" icon="eye">
+    Get technical, business, and risk views in one pass.
+  </Card>
+  <Card title="Ensemble answers" icon="layer-group">
+    Combine multiple expert opinions for robustness.
+  </Card>
+  <Card title="Parallel processing" icon="bolt">
+    All agents run concurrently for faster results.
+  </Card>
+  <Card title="Comprehensive coverage" icon="check-double">
+    Ensure no angle is missed.
+  </Card>
+</CardGroup>
+
+---
+
+## Considerations
+
+<Accordion title="Cost and latency">
+  Broadcast invokes every member, so cost and latency scale with team size. Use smaller/faster models for members when appropriate.
+</Accordion>
+
+<Accordion title="Merge strategy">
+  The orchestrator model merges results. Clear instructions help it synthesize a coherent final output.
+</Accordion>

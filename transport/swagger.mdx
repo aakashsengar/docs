@@ -1,0 +1,181 @@
+---
+title: Swagger UI
+description: Swagger UI setup, OpenAPI spec generation, and SwaggerOptions for documenting RadarOS agent APIs.
+---
+
+# Swagger UI
+
+RadarOS can generate an **OpenAPI 3.0** spec and serve **Swagger UI** for your agent, team, and workflow endpoints. Enable it via `swagger.enabled` in `createAgentRouter()` options.
+
+---
+
+## Quick Enable
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+
+const router = createAgentRouter({
+  agents: { assistant: myAgent },
+  swagger: {
+    enabled: true,
+  },
+});
+```
+
+This serves:
+
+- **Swagger UI** at `/docs`
+- **OpenAPI spec** at `/docs/spec.json`
+
+---
+
+## SwaggerOptions
+
+<ParamField path="enabled" type="boolean" required={false} default="false">
+  Set to `true` to enable Swagger UI and spec generation.
+</ParamField>
+
+<ParamField path="title" type="string" required={false} default="RadarOS API">
+  API title shown in Swagger UI.
+</ParamField>
+
+<ParamField path="description" type="string" required={false}>
+  API description. Default: auto-generated from agents/teams/workflows.
+</ParamField>
+
+<ParamField path="version" type="string" required={false} default="1.0.0">
+  API version string.
+</ParamField>
+
+<ParamField path="routePrefix" type="string" required={false}>
+  Route prefix used in path generation (e.g., `/api`). Paths in the spec will include this prefix.
+</ParamField>
+
+<ParamField path="servers" type="Array<{url, description?}>" required={false}>
+  Server URLs for the OpenAPI spec. Useful for staging/production URLs.
+</ParamField>
+
+<ParamField path="docsPath" type="string" required={false} default="/docs">
+  Path to serve Swagger UI.
+</ParamField>
+
+<ParamField path="specPath" type="string" required={false} default="/docs/spec.json">
+  Path to serve the raw OpenAPI JSON spec.
+</ParamField>
+
+---
+
+## Full Example
+
+```typescript
+import express from "express";
+import { createAgentRouter } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+});
+
+const router = createAgentRouter({
+  agents: { assistant: agent },
+  swagger: {
+    enabled: true,
+    title: "My Agent API",
+    description: "Production API for the Assistant agent.",
+    version: "1.0.0",
+    routePrefix: "/api",
+    servers: [
+      { url: "https://api.example.com", description: "Production" },
+      { url: "http://localhost:3000", description: "Local" },
+    ],
+    docsPath: "/docs",
+    specPath: "/docs/spec.json",
+  },
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", router);
+
+app.listen(3000);
+```
+
+---
+
+## Dependencies
+
+Swagger UI requires `swagger-ui-express`:
+
+<CodeGroup>
+
+```bash npm
+npm install swagger-ui-express
+```
+
+```bash pnpm
+pnpm add swagger-ui-express
+```
+
+</CodeGroup>
+
+If `swagger-ui-express` is not installed, Swagger UI is disabled and a warning is logged.
+
+---
+
+## Generated Spec
+
+The OpenAPI spec includes:
+
+- **Paths** for each agent, team, and workflow
+- **Schemas** for RunRequest, RunOutput, StreamChunk, MultipartRunRequest
+- **Per-agent structured output schemas** — agents with `structuredOutput` get a dedicated response schema (e.g., `RunOutput_analyst`) that includes the full typed `structured` field
+- **Security schemes** for provider-specific API keys (`x-openai-api-key`, `x-google-api-key`, `x-anthropic-api-key`, `x-api-key`)
+
+### Structured Output in Swagger
+
+If an agent has a `structuredOutput` Zod schema, RadarOS automatically converts it to JSON Schema and includes it in the OpenAPI spec. The `structured` field in the response is fully typed — API consumers see the exact shape of the data.
+
+```typescript
+const analyst = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o-mini"),
+  structuredOutput: z.object({
+    summary: z.string(),
+    keyPoints: z.array(z.string()),
+    confidence: z.number().min(0).max(1),
+  }),
+});
+
+const router = createAgentRouter({
+  agents: { analyst },
+  swagger: { enabled: true },
+});
+```
+
+The spec for `POST /agents/analyst/run` will use the `RunOutput_analyst` schema with:
+
+```json
+"structured": {
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "keyPoints": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["summary", "keyPoints", "confidence"]
+}
+```
+
+Agents without `structuredOutput` use the generic `RunOutput` schema where `structured` is untyped.
+
+---
+
+## Fetching the Spec
+
+```bash
+curl http://localhost:3000/api/docs/spec.json
+```
+
+Use the spec URL with external tools (Postman, Insomnia, code generators) or embed it in other documentation.

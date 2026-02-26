@@ -1,0 +1,92 @@
+---
+title: Toolkits
+description: Pre-built tool collections for common integrations — web search, email, messaging, and more.
+---
+
+# Toolkits
+
+A **Toolkit** is a collection of related tools that share configuration and can be added to any Agent. RadarOS provides pre-built toolkits for common integrations so you don't have to write boilerplate.
+
+```typescript
+import { Agent, openai, DuckDuckGoToolkit } from "@radaros/core";
+
+const ddg = new DuckDuckGoToolkit();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [...ddg.getTools()],  // Spread toolkit tools into the agent
+});
+```
+
+---
+
+## Available Toolkits
+
+<CardGroup cols={2}>
+  <Card title="DuckDuckGo" icon="magnifying-glass" href="/toolkits/duckduckgo">
+    Web search and news — no API key required.
+  </Card>
+  <Card title="Hacker News" icon="newspaper" href="/toolkits/hackernews">
+    Top stories and user details from HN — no API key required.
+  </Card>
+  <Card title="Web Search" icon="globe" href="/toolkits/websearch">
+    Tavily or SerpAPI-powered web search with AI-optimized results.
+  </Card>
+  <Card title="Gmail" icon="envelope" href="/toolkits/gmail">
+    Send, search, and read emails via Gmail API.
+  </Card>
+  <Card title="WhatsApp" icon="message" href="/toolkits/whatsapp">
+    Send messages via Meta's WhatsApp Business Cloud API.
+  </Card>
+</CardGroup>
+
+---
+
+## Using Toolkits
+
+Every toolkit extends the `Toolkit` base class and exposes a `getTools()` method that returns `ToolDef[]`:
+
+```typescript
+const toolkit = new SomeToolkit({ /* config */ });
+const tools = toolkit.getTools();  // ToolDef[]
+```
+
+You can mix toolkit tools with local tools and MCP tools:
+
+```typescript
+const agent = new Agent({
+  tools: [
+    ...ddg.getTools(),           // DuckDuckGo toolkit
+    ...hn.getTools(),            // Hacker News toolkit
+    ...mcpServer.getTools(),     // MCP tools
+    myLocalTool,                 // Custom tool
+  ],
+});
+```
+
+---
+
+## Creating Custom Toolkits
+
+Extend the `Toolkit` base class:
+
+```typescript
+import { Toolkit, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+export class MyToolkit extends Toolkit {
+  readonly name = "my-toolkit";
+
+  getTools() {
+    return [
+      defineTool({
+        name: "my_tool",
+        description: "Does something useful",
+        parameters: z.object({ input: z.string() }),
+        execute: async (args) => `Result: ${args.input}`,
+      }),
+    ];
+  }
+}
+```

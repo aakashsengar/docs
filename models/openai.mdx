@@ -1,0 +1,122 @@
+---
+title: OpenAI
+description: Use OpenAI models (GPT-4o, GPT-4o-mini, o1) with RadarOS. Setup, factory, config, and per-request API key override.
+---
+
+# OpenAI
+
+Use OpenAI's GPT-4o, GPT-4o-mini, GPT-4-turbo, and o1 models with RadarOS through the unified `ModelProvider` interface.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Install the OpenAI SDK (required by RadarOS for OpenAI support):
+
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your API key via environment variable:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+Or pass it in config (see below).
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { openai } from "@radaros/core";
+
+const model = openai("gpt-4o");
+```
+
+<ParamField path="modelId" type="string" required>
+  The OpenAI model identifier.
+</ParamField>
+
+<ParamField path="config" type="object" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gpt-4o` | Latest flagship model. Fast, capable. |
+| `gpt-4o-mini` | Smaller, faster, cost-effective. |
+| `gpt-4-turbo` | High capability, larger context. |
+| `o1-preview` | Reasoning-optimized model. |
+
+<Accordion title="Using a different OpenAI model">
+  Pass any valid OpenAI model ID to the factory. New models are supported as soon as the OpenAI API supports them.
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="apiKey" type="string" required={false}>
+  OpenAI API key. If omitted, uses `OPENAI_API_KEY` environment variable.
+</ParamField>
+
+<ParamField path="baseURL" type="string" required={false}>
+  Custom API base URL. Use for Azure OpenAI, proxies, or self-hosted endpoints.
+</ParamField>
+
+### Example
+
+```typescript
+const model = openai("gpt-4o", {
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://api.openai.com/v1", // or Azure/proxy URL
+});
+```
+
+---
+
+## Per-Request API Key Override
+
+Override the API key for individual requests (e.g., multi-tenant apps):
+
+```typescript
+const model = openai("gpt-4o");
+
+// Use default key from env/config
+const out1 = await agent.run("Hello");
+
+// Override for this request
+const out2 = await agent.run("Hello", { apiKey: "sk-tenant-specific-key" });
+```
+
+The `apiKey` in `RunOpts` is passed through to the model's `generate()` and `stream()` calls.
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "GPT Assistant",
+  model: openai("gpt-4o", {
+    apiKey: process.env.OPENAI_API_KEY,
+  }),
+  instructions: "You are a concise, helpful assistant.",
+});
+
+const output = await agent.run("What is 2 + 2?");
+console.log(output.text);
+```

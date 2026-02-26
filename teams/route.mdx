@@ -1,0 +1,112 @@
+---
+title: Route Mode
+description: Route to the single best agent based on input. Example with specialist agents.
+---
+
+# Route Mode
+
+In **Route** mode, the team selects the **single best agent** for the user's input. Unlike Coordinate (which can invoke multiple agents), Route sends the task to exactly one member.
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="User sends input">
+    The user's message goes to the team.
+  </Step>
+  <Step title="Router selects one agent">
+    The routing model picks the single best member based on input and member descriptions.
+  </Step>
+  <Step title="Selected agent executes">
+    Only the chosen agent processes the task.
+  </Step>
+  <Step title="Response returned">
+    The team returns that agent's output.
+  </Step>
+</Steps>
+
+---
+
+## Example: Specialist Agents
+
+<CodeGroup>
+  <CodeGroup.Item title="route-team.ts">
+```typescript
+import { Team, TeamMode, Agent, openai } from "@radaros/core";
+
+const codeAgent = new Agent({
+  name: "Code Expert",
+  model: openai("gpt-4o-mini"),
+  instructions: "You help with programming: debugging, code review, and implementation.",
+});
+
+const dataAgent = new Agent({
+  name: "Data Analyst",
+  model: openai("gpt-4o-mini"),
+  instructions: "You help with data: SQL, analytics, visualization, and statistics.",
+});
+
+const supportAgent = new Agent({
+  name: "Support Agent",
+  model: openai("gpt-4o-mini"),
+  instructions: "You help with general questions, account issues, and product usage.",
+});
+
+const supportTeam = new Team({
+  name: "Support Router",
+  mode: TeamMode.Route,
+  model: openai("gpt-4o"),
+  members: [codeAgent, dataAgent, supportAgent],
+  instructions: `
+    Route each request to exactly one agent:
+    - Code Expert: programming, debugging, code, APIs, development.
+    - Data Analyst: SQL, data analysis, charts, statistics, databases.
+    - Support Agent: everything else—general help, accounts, product questions.
+  `,
+});
+
+// Routes to Code Expert
+const out1 = await supportTeam.run("How do I fix this TypeScript error: Cannot find module 'fs'?");
+
+// Routes to Data Analyst
+const out2 = await supportTeam.run("Write a SQL query to find top 10 customers by revenue.");
+
+// Routes to Support Agent
+const out3 = await supportTeam.run("How do I reset my password?");
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## When to Use Route
+
+<CardGroup cols={2}>
+  <Card title="Specialist routing" icon="user-ninja">
+    Each agent is an expert in a distinct domain.
+  </Card>
+  <Card title="Single-response" icon="reply">
+    You want one clear answer, not a merged result.
+  </Card>
+  <Card title="Cost efficiency" icon="coins">
+    Only one agent runs per request.
+  </Card>
+  <Card title="Support triage" icon="headset">
+    Route tickets to the right department.
+  </Card>
+</CardGroup>
+
+---
+
+## Route vs Coordinate
+
+| Aspect | Route | Coordinate |
+|--------|-------|------------|
+| Agents invoked | Exactly one | One or more |
+| Use case | "Pick the best expert" | "Orchestrate a pipeline" |
+| Output | Single agent's response | Combined/sequenced output |
+
+<Accordion title="Choosing between Route and Coordinate">
+  Use **Route** when the task fits one agent. Use **Coordinate** when the task needs multiple agents in sequence (e.g., research → write → review).
+</Accordion>

@@ -1,0 +1,145 @@
+---
+title: Quickstart
+description: Get up and running with RadarOS in minutes. Install, create your first agent, add tools, and stream responses.
+---
+
+# Quickstart
+
+This guide walks you through installing RadarOS and building your first agent in three steps.
+
+---
+
+## Installation
+
+Install the core package and your preferred LLM provider:
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @radaros/core
+    npm install openai
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @radaros/core
+    pnpm add openai
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @radaros/core
+    yarn add openai
+    ```
+  </Tab>
+</Tabs>
+
+For other providers, install `anthropic` or `@google/genai` instead of (or in addition to) `openai`.
+
+Set your API key as an environment variable:
+
+```bash
+export OPENAI_API_KEY=your-key
+```
+
+---
+
+## Step 1: Create Your First Agent
+
+Create a simple agent with a few lines of code:
+
+```typescript index.ts
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("What is TypeScript?");
+console.log(result.text);
+```
+
+Run it:
+
+```bash
+npx tsx index.ts
+```
+
+You now have a working agent that responds to user input.
+
+---
+
+## Step 2: Add Tools
+
+Extend your agent with function calling. Define tools with Zod schemas for type-safe parameters:
+
+```typescript weather-agent.ts
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "get_weather",
+  description: "Get current weather for a city",
+  parameters: z.object({
+    city: z.string().describe("City name"),
+  }),
+  execute: async ({ city }) => `Weather in ${city}: 72°F, sunny`,
+});
+
+const agent = new Agent({
+  name: "weather-bot",
+  model: openai("gpt-4o"),
+  instructions: "You help users check the weather.",
+  tools: [weatherTool],
+});
+
+const result = await agent.run("What's the weather in Tokyo?");
+console.log(result.text);
+```
+
+The agent will call `get_weather` when needed and incorporate the result into its response.
+
+---
+
+## Step 3: Stream Responses
+
+For real-time output, use the streaming API:
+
+```typescript stream-agent.ts
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+for await (const chunk of agent.stream("Tell me a joke")) {
+  if (chunk.type === "text") {
+    process.stdout.write(chunk.text);
+  }
+}
+```
+
+Streaming supports both text and tool-call chunks. Handle each `chunk.type` as needed for your use case.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agents" icon="robot" href="/agents/overview">
+    Learn about agent configuration, instructions, and advanced options.
+  </Card>
+  <Card title="Models" icon="cpu" href="/models/overview">
+    Switch providers, use local models with Ollama, or build custom adapters.
+  </Card>
+  <Card title="Teams" icon="users" href="/teams/overview">
+    Coordinate multiple agents with route, broadcast, and collaborate modes.
+  </Card>
+  <Card title="Workflows" icon="workflow" href="/workflows/overview">
+    Build stateful multi-step workflows with conditions and parallel execution.
+  </Card>
+</CardGroup>

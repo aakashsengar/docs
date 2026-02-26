@@ -1,0 +1,146 @@
+---
+title: Teams
+description: Multi-agent collaboration in RadarOS. TeamMode, TeamConfig, coordinate, route, broadcast, and collaborate.
+---
+
+# Teams
+
+**Teams** enable multiple agents to work together. Choose how tasks are distributed: an orchestrator can pick agents, route to the best one, broadcast to all, or run iterative collaboration rounds.
+
+---
+
+## Multi-Agent Collaboration
+
+<CardGroup cols={2}>
+  <Card title="Coordinate" icon="sitemap">
+    An orchestrator model picks which member agent handles the task.
+  </Card>
+  <Card title="Route" icon="route">
+    Routes to the single best agent based on input.
+  </Card>
+  <Card title="Broadcast" icon="broadcast-tower">
+    Sends input to ALL agents and merges results.
+  </Card>
+  <Card title="Collaborate" icon="people-arrows">
+    Iterative rounds between agents (maxRounds configurable).
+  </Card>
+</CardGroup>
+
+---
+
+## TeamMode
+
+```typescript
+enum TeamMode {
+  Coordinate = "coordinate",
+  Route = "route",
+  Broadcast = "broadcast",
+  Collaborate = "collaborate",
+}
+```
+
+| Mode | Behavior |
+|------|----------|
+| `coordinate` | Orchestrator decides which agent(s) to invoke |
+| `route` | Single best agent selected based on input |
+| `broadcast` | All agents process input; results merged |
+| `collaborate` | Agents pass work in rounds until done (maxRounds) |
+
+---
+
+## TeamConfig
+
+```typescript
+interface TeamConfig {
+  name: string;
+  mode: TeamMode;
+  model: ModelProvider;
+  members: Agent[];
+  instructions?: string;
+  storage?: StorageDriver;
+  maxRounds?: number;
+  eventBus?: EventBus;
+}
+```
+
+<ParamField path="name" type="string" required>
+  Display name for the team.
+</ParamField>
+
+<ParamField path="mode" type="TeamMode" required>
+  How the team distributes work: `coordinate`, `route`, `broadcast`, or `collaborate`.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider" required>
+  The orchestrator model (for coordinate/route) or shared model for the team.
+</ParamField>
+
+<ParamField path="members" type="Agent[]" required>
+  Array of member agents.
+</ParamField>
+
+<ParamField path="instructions" type="string" required={false}>
+  System instructions for the orchestrator (coordinate/route) or team context.
+</ParamField>
+
+<ParamField path="storage" type="StorageDriver" required={false}>
+  Storage for session state.
+</ParamField>
+
+<ParamField path="maxRounds" type="number" required={false}>
+  Max collaboration rounds (collaborate mode only).
+</ParamField>
+
+<ParamField path="eventBus" type="EventBus" required={false}>
+  Custom event bus for team events.
+</ParamField>
+
+---
+
+## Basic Example
+
+```typescript
+import { Team, TeamMode, Agent, openai } from "@radaros/core";
+
+const researcher = new Agent({
+  name: "Researcher",
+  model: openai("gpt-4o-mini"),
+  instructions: "You research topics and provide factual summaries.",
+});
+
+const writer = new Agent({
+  name: "Writer",
+  model: openai("gpt-4o-mini"),
+  instructions: "You write clear, engaging content from research notes.",
+});
+
+const team = new Team({
+  name: "Content Team",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [researcher, writer],
+  instructions: "Coordinate between Researcher and Writer. Use Researcher for facts, Writer for drafts.",
+});
+
+const output = await team.run("Write a short article about quantum computing.");
+console.log(output.text);
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Coordinate Mode" icon="sitemap" href="/teams/coordinate">
+    Orchestrator picks which agent handles each task.
+  </Card>
+  <Card title="Route Mode" icon="route" href="/teams/route">
+    Route to the single best agent.
+  </Card>
+  <Card title="Broadcast Mode" icon="broadcast-tower" href="/teams/broadcast">
+    All agents process; merge results.
+  </Card>
+  <Card title="Collaborate Mode" icon="people-arrows" href="/teams/collaborate">
+    Iterative rounds between agents.
+  </Card>
+</CardGroup>

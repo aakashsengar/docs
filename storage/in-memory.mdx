@@ -1,0 +1,124 @@
+---
+title: In-Memory Storage
+description: InMemoryStorage driver—zero dependencies, no persistence. Default for agents when no storage is configured.
+---
+
+# In-Memory Storage
+
+**InMemoryStorage** is the simplest storage driver. It keeps all data in a JavaScript `Map`—no external dependencies, no disk I/O. Data is **lost when the process restarts**. Use it for development, testing, or ephemeral workloads.
+
+---
+
+## When to Use
+
+<CardGroup cols={2}>
+  <Card title="Development" icon="code">
+    Fast iteration. No database setup required.
+  </Card>
+  <Card title="Testing" icon="flask">
+    Isolated tests. No shared state between runs.
+  </Card>
+  <Card title="Demos" icon="presentation">
+    Quick prototypes. No infrastructure needed.
+  </Card>
+  <Card title="Not for Production" icon="warning">
+    Data is lost on restart. Use Sqlite, Postgres, or MongoDB for persistence.
+  </Card>
+</CardGroup>
+
+---
+
+## Installation
+
+No additional packages required. `InMemoryStorage` is included in `@radaros/core`.
+
+---
+
+## Usage
+
+```typescript
+import { InMemoryStorage } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+// No initialize() needed—ready to use immediately
+await storage.set("namespace", "key", { foo: "bar" });
+const value = await storage.get<{ foo: string }>("namespace", "key");
+console.log(value); // { foo: "bar" }
+
+const items = await storage.list("namespace", "k");
+console.log(items); // [{ key: "key", value: { foo: "bar" } }]
+
+await storage.delete("namespace", "key");
+await storage.close();
+```
+
+---
+
+## With Agent
+
+When you don't provide a `storage` option, RadarOS defaults to `InMemoryStorage`:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+// Explicit (same as default)
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  storage: new InMemoryStorage(),
+});
+
+// Implicit—InMemoryStorage is used automatically
+const agent2 = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+});
+```
+
+---
+
+## With Memory
+
+```typescript
+import { Agent, Memory, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: false,
+});
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  memory,
+});
+
+// Session data lives in memory until process exits
+await agent.run("Hello!", { sessionId: "user-123" });
+```
+
+---
+
+## Limitations
+
+| Limitation | Description |
+|-----------|-------------|
+| **No persistence** | All data is lost when the Node.js process exits. |
+| **Single process** | Not shared across multiple server instances. |
+| **Memory bound** | Large datasets consume RAM. |
+| **No backup** | No built-in snapshot or export. |
+
+---
+
+## API Reference
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get` | `get<T>(namespace, key) => Promise<T \| null>` | Get value by key. |
+| `set` | `set<T>(namespace, key, value) => Promise<void>` | Store value (JSON-serialized). |
+| `delete` | `delete(namespace, key) => Promise<void>` | Remove key. |
+| `list` | `list<T>(namespace, prefix?) => Promise<Array<{key, value}>>` | List keys, optionally with prefix. |
+| `close` | `close() => Promise<void>` | Clears the in-memory store. |

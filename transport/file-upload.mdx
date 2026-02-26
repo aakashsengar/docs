@@ -1,0 +1,179 @@
+---
+title: File Upload
+description: File upload middleware and buildMultiModalInput for sending images, audio, and documents to agents via HTTP.
+---
+
+# File Upload
+
+RadarOS supports **multi-modal inputs** over HTTP via file upload. Enable `fileUpload` in the router options to accept `multipart/form-data` requests. Uploaded files are converted to content parts (images, audio, documents) and passed to agents.
+
+---
+
+## Enable File Upload
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+
+const router = createAgentRouter({
+  agents: { assistant: myAgent },
+  fileUpload: true, // Uses defaults
+});
+
+// Or with options
+const router = createAgentRouter({
+  agents: { assistant: myAgent },
+  fileUpload: {
+    maxFileSize: 50 * 1024 * 1024, // 50MB default
+    maxFiles: 10,
+    allowedMimeTypes: ["image/png", "image/jpeg", "application/pdf"],
+  },
+});
+```
+
+---
+
+## FileUploadOptions
+
+<ParamField path="maxFileSize" type="number" required={false} default="52428800">
+  Maximum file size in bytes. Default: 50MB.
+</ParamField>
+
+<ParamField path="maxFiles" type="number" required={false} default="10">
+  Maximum number of files per request.
+</ParamField>
+
+<ParamField path="allowedMimeTypes" type="string[]" required={false}>
+  Whitelist of MIME types. If omitted, all types are allowed (subject to maxFileSize).
+</ParamField>
+
+---
+
+## Supported MIME Types
+
+| Type | MIME Types | Part Type |
+|------|------------|-----------|
+| **Image** | image/png, image/jpeg, image/gif, image/webp | `image` |
+| **Audio** | audio/mpeg, audio/mp3, audio/wav, audio/ogg, audio/webm, audio/flac, audio/aac, audio/mp4 | `audio` |
+| **File** | All others | `file` |
+
+Images and audio are passed to vision/audio-capable models. Other files are passed as generic file parts.
+
+---
+
+## Request Format
+
+Send a `multipart/form-data` request with:
+
+- **input** — Text input (string)
+- **files** — One or more file uploads
+
+```bash
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -F "input=What is in this image?" \
+  -F "files=@/path/to/image.png"
+```
+
+---
+
+## buildMultiModalInput
+
+The transport layer uses `buildMultiModalInput(body, files)` internally to construct the agent input:
+
+- If no files: returns `body.input` (string)
+- If files: returns an array of content parts: `[{ type: "text", text: "..." }, { type: "image", data: "<base64>", mimeType: "image/png" }, ...]`
+
+You can use this helper in custom middleware or handlers:
+
+```typescript
+import { buildMultiModalInput, createFileUploadMiddleware } from "@radaros/transport";
+
+const upload = createFileUploadMiddleware({ maxFiles: 5 });
+app.post("/custom", upload, async (req, res) => {
+  const input = buildMultiModalInput(req.body, req.files);
+  const result = await agent.run(input);
+  res.json(result);
+});
+```
+
+---
+
+## createFileUploadMiddleware
+
+For custom routes, create the middleware directly:
+
+```typescript
+import {
+  createFileUploadMiddleware,
+  buildMultiModalInput,
+} from "@radaros/transport";
+
+const upload = createFileUploadMiddleware({
+  maxFileSize: 10 * 1024 * 1024,
+  maxFiles: 5,
+  allowedMimeTypes: ["image/png", "image/jpeg", "application/pdf"],
+});
+
+app.post("/analyze", upload, async (req, res) => {
+  const input = buildMultiModalInput(req.body, req.files);
+  if (!input) {
+    return res.status(400).json({ error: "input or files required" });
+  }
+  const result = await agent.run(input);
+  res.json(result);
+});
+```
+
+---
+
+## Dependencies
+
+File upload requires `multer`:
+
+<CodeGroup>
+
+```bash npm
+npm install multer
+```
+
+```bash pnpm
+pnpm add multer
+```
+
+</CodeGroup>
+
+---
+
+## Full Example
+
+```typescript
+import express from "express";
+import { createAgentRouter } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Vision",
+  model: openai("gpt-4o"), // Vision-capable model
+  instructions: "Describe images and answer questions about them.",
+});
+
+const router = createAgentRouter({
+  agents: { vision: agent },
+  fileUpload: {
+    maxFileSize: 20 * 1024 * 1024,
+    maxFiles: 3,
+    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  },
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", router);
+
+app.listen(3000);
+```
+
+```bash
+curl -X POST http://localhost:3000/api/agents/vision/run \
+  -F "input=What objects do you see?" \
+  -F "files=@photo.jpg"
+```

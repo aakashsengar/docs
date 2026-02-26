@@ -1,0 +1,105 @@
+---
+title: "Embeddings"
+description: "Generate vector embeddings with OpenAI and Google providers"
+---
+
+Embedding providers convert text into high-dimensional vectors for semantic search. RadarOS provides a unified `EmbeddingProvider` interface with OpenAI and Google implementations.
+
+## EmbeddingProvider Interface
+
+```typescript
+interface EmbeddingProvider {
+  embed(text: string): Promise<number[]>;
+  embedBatch(texts: string[]): Promise<number[][]>;
+}
+```
+
+## OpenAI Embeddings
+
+```bash
+npm install openai
+```
+
+```typescript
+import { OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding({
+  apiKey: process.env.OPENAI_API_KEY,  // optional, uses env var by default
+  model: "text-embedding-3-small",      // optional, this is the default
+});
+
+const vector = await embedder.embed("Hello world");
+console.log(vector.length); // 1536
+
+const vectors = await embedder.embedBatch(["Hello", "World"]);
+console.log(vectors.length); // 2
+```
+
+### Available Models
+
+| Model | Dimensions | Best For |
+|-------|-----------|----------|
+| `text-embedding-3-small` | 1536 | General use, cost-effective |
+| `text-embedding-3-large` | 3072 | Higher accuracy |
+| `text-embedding-ada-002` | 1536 | Legacy |
+
+<ParamField body="apiKey" type="string">
+  OpenAI API key. Falls back to `OPENAI_API_KEY` env var.
+</ParamField>
+
+<ParamField body="model" type="string" default="text-embedding-3-small">
+  Embedding model name.
+</ParamField>
+
+## Google Embeddings
+
+```bash
+npm install @google/genai
+```
+
+```typescript
+import { GoogleEmbedding } from "@radaros/core";
+
+const embedder = new GoogleEmbedding({
+  apiKey: process.env.GOOGLE_API_KEY,  // optional, uses env var by default
+  model: "text-embedding-004",         // optional, this is the default
+});
+
+const vector = await embedder.embed("Hello world");
+const vectors = await embedder.embedBatch(["Hello", "World"]);
+```
+
+### Available Models
+
+| Model | Dimensions | Best For |
+|-------|-----------|----------|
+| `text-embedding-004` | 768 | General use |
+| `embedding-001` | 768 | Legacy |
+
+<ParamField body="apiKey" type="string">
+  Google API key. Falls back to `GOOGLE_API_KEY` env var.
+</ParamField>
+
+<ParamField body="model" type="string" default="text-embedding-004">
+  Embedding model name.
+</ParamField>
+
+## Using with KnowledgeBase
+
+Embedding providers are passed to `KnowledgeBase` via the vector store. Most vector stores accept an `EmbeddingProvider` in their configuration or the `KnowledgeBase` handles embedding internally.
+
+```typescript
+import { KnowledgeBase, InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(1536);
+
+const kb = new KnowledgeBase({
+  name: "docs",
+  vectorStore,
+});
+```
+
+<Card title="RAG Example" icon="magnifying-glass" href="/knowledge/rag-example">
+  See a complete end-to-end RAG implementation using embeddings.
+</Card>

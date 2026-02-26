@@ -1,0 +1,191 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "RadarOS",
+  "colors": {
+    "primary": "#2563EB",
+    "light": "#3B82F6",
+    "dark": "#1E40AF"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture",
+              "performance"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/overview",
+              "agents/tools",
+              "agents/tool-caching",
+              "agents/memory",
+              "agents/user-memory",
+              "agents/sessions",
+              "agents/structured-output",
+              "agents/multimodal",
+              "agents/reasoning",
+              "agents/hooks-and-guardrails",
+              "agents/logging"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "models/overview",
+              "models/openai",
+              "models/anthropic",
+              "models/google",
+              "models/vertex",
+              "models/ollama",
+              "models/custom-provider"
+            ]
+          },
+          {
+            "group": "Teams",
+            "pages": [
+              "teams/overview",
+              "teams/coordinate",
+              "teams/route",
+              "teams/broadcast",
+              "teams/collaborate"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "workflows/overview",
+              "workflows/steps",
+              "workflows/retry-policy"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "storage/overview",
+              "storage/in-memory",
+              "storage/sqlite",
+              "storage/postgres",
+              "storage/mongodb"
+            ]
+          },
+          {
+            "group": "Knowledge & RAG",
+            "pages": [
+              "knowledge/overview",
+              "knowledge/vector-stores",
+              "knowledge/embeddings",
+              "knowledge/rag-example"
+            ]
+          },
+          {
+            "group": "Toolkits",
+            "pages": [
+              "toolkits/overview",
+              "toolkits/duckduckgo",
+              "toolkits/hackernews",
+              "toolkits/websearch",
+              "toolkits/gmail",
+              "toolkits/whatsapp"
+            ]
+          },
+          {
+            "group": "MCP (Model Context Protocol)",
+            "pages": [
+              "mcp/overview"
+            ]
+          },
+          {
+            "group": "A2A (Agent-to-Agent)",
+            "pages": [
+              "a2a/overview",
+              "a2a/server",
+              "a2a/client"
+            ]
+          },
+          {
+            "group": "Transport",
+            "pages": [
+              "transport/overview",
+              "transport/express",
+              "transport/swagger",
+              "transport/file-upload",
+              "transport/socketio",
+              "transport/api-keys"
+            ]
+          },
+          {
+            "group": "Queue",
+            "pages": [
+              "queue/overview",
+              "queue/producer",
+              "queue/worker"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Packages",
+            "pages": [
+              "api-reference/core",
+              "api-reference/transport",
+              "api-reference/queue"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/aakashsengar/agentOs",
+          "icon": "github"
+        },
+        {
+          "anchor": "npm",
+          "href": "https://www.npmjs.com/org/radaros",
+          "icon": "npm"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/aakashsengar/agentOs"
+      }
+    ]
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "cursor"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/aakashsengar/agentOs"
+    }
+  }
+}

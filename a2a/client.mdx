@@ -1,0 +1,154 @@
+---
+title: A2A Client
+description: Connect to remote A2A agents — use them as tools, team members, or call them directly.
+---
+
+# A2A Client
+
+`A2ARemoteAgent` lets you connect to any A2A-compliant agent and use it as if it were a local RadarOS agent. It supports discovery, synchronous calls, streaming, and can be used as a tool or team member.
+
+---
+
+## Discovery
+
+First, discover the remote agent by fetching its Agent Card:
+
+```typescript
+import { A2ARemoteAgent } from "@radaros/core";
+
+const remote = new A2ARemoteAgent({
+  url: "http://remote-service:3001",
+});
+
+const card = await remote.discover();
+
+console.log(card.name);           // "RadarOS Agent Server"
+console.log(card.skills);         // [{ id: "assistant", ... }]
+console.log(card.capabilities);   // { streaming: true, ... }
+```
+
+---
+
+## Direct Calls
+
+### Synchronous (message/send)
+
+```typescript
+const result = await remote.run("What is the capital of France?");
+console.log(result.text);  // "Paris"
+```
+
+### Streaming (message/stream)
+
+```typescript
+for await (const chunk of remote.stream("Tell me a story")) {
+  if (chunk.type === "text") {
+    process.stdout.write(chunk.text);
+  }
+}
+```
+
+---
+
+## As a Tool
+
+Wrap the remote agent as a `ToolDef` so an orchestrator agent can call it:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const remote = new A2ARemoteAgent({
+  url: "http://calculator-service:3001",
+});
+await remote.discover();
+
+const orchestrator = new Agent({
+  name: "orchestrator",
+  model: openai("gpt-4o"),
+  instructions: "Delegate math tasks to the remote calculator.",
+  tools: [remote.asTool()],
+});
+
+const result = await orchestrator.run("What is 2^10?");
+console.log(result.text);  // "1024"
+```
+
+The tool is automatically named `a2a_{agentName}` and uses the agent's description from the Agent Card.
+
+---
+
+## As a Team Member
+
+Remote A2A agents can participate in RadarOS Teams alongside local agents:
+
+```typescript
+import { Agent, openai, A2ARemoteAgent, Team, TeamMode } from "@radaros/core";
+
+const localWriter = new Agent({
+  name: "writer",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a creative writer.",
+});
+
+const remoteResearcher = new A2ARemoteAgent({
+  url: "http://research-service:3001",
+});
+await remoteResearcher.discover();
+
+const team = new Team({
+  name: "content-team",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [localWriter, remoteResearcher],
+  instructions: "Use the writer for creative tasks, the researcher for facts.",
+});
+
+const result = await team.run("Write a blog post about quantum computing");
+```
+
+---
+
+## Authentication
+
+Pass custom headers for authenticated A2A servers:
+
+```typescript
+const remote = new A2ARemoteAgent({
+  url: "https://secure-agent.example.com",
+  headers: {
+    Authorization: "Bearer my-api-token",
+  },
+});
+```
+
+---
+
+## Configuration
+
+<ParamField body="url" type="string" required>
+  Base URL of the remote A2A agent (e.g. `"http://localhost:3001"`).
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Custom headers sent with every request (useful for authentication).
+</ParamField>
+
+<ParamField body="name" type="string">
+  Override the agent name (otherwise discovered from the Agent Card).
+</ParamField>
+
+<ParamField body="timeoutMs" type="number" default="60000">
+  Request timeout in milliseconds.
+</ParamField>
+
+---
+
+## API
+
+| Method | Returns | Description |
+|---|---|---|
+| `discover()` | `A2AAgentCard` | Fetch the Agent Card and populate metadata. |
+| `run(input, opts?)` | `RunOutput` | Send `message/send` and return the result. |
+| `stream(input, opts?)` | `AsyncGenerator<StreamChunk>` | Send `message/stream` and yield chunks. |
+| `asTool()` | `ToolDef` | Wrap as a tool for use by other agents. |
+| `getAgentCard()` | `A2AAgentCard \| null` | Return the cached Agent Card. |

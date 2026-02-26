@@ -1,0 +1,323 @@
+---
+title: "@radaros/transport"
+description: "Complete API reference for the transport package"
+---
+
+## Installation
+
+```bash
+npm install @radaros/transport express socket.io
+```
+
+Optional peer dependencies for specific features:
+
+| Feature | Package |
+|---------|---------|
+| Swagger UI | `swagger-ui-express` |
+| File uploads | `multer` |
+
+---
+
+## Express
+
+### createAgentRouter
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+
+const router = createAgentRouter(opts: RouterOptions): Express.Router;
+```
+
+<ParamField body="agents" type="Record<string, Agent>">
+  Named agents to expose as endpoints.
+</ParamField>
+
+<ParamField body="teams" type="Record<string, Team>">
+  Named teams to expose as endpoints.
+</ParamField>
+
+<ParamField body="workflows" type="Record<string, Workflow>">
+  Named workflows to expose as endpoints.
+</ParamField>
+
+<ParamField body="middleware" type="RequestHandler[]">
+  Express middleware applied to all routes.
+</ParamField>
+
+<ParamField body="swagger" type="SwaggerOptions">
+  Swagger UI configuration.
+</ParamField>
+
+<ParamField body="fileUpload" type="boolean | FileUploadOptions">
+  Enable multipart file upload handling.
+</ParamField>
+
+### Generated Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agents/:name/run` | Run agent, return JSON |
+| POST | `/agents/:name/stream` | Stream agent response via SSE |
+| POST | `/teams/:name/run` | Run team, return JSON |
+| POST | `/teams/:name/stream` | Stream team response via SSE |
+| POST | `/workflows/:name/run` | Run workflow, return JSON |
+| GET | `/docs` | Swagger UI (if enabled) |
+| GET | `/docs/spec.json` | OpenAPI spec JSON (if enabled) |
+
+### Request Body
+
+```typescript
+// JSON
+{
+  "input": "Hello",              // string or ContentPart[]
+  "sessionId": "optional-id",
+  "userId": "optional-user",
+  "apiKey": "optional-key"
+}
+
+// Multipart (with fileUpload enabled)
+// Form fields: input (text), files (file uploads)
+```
+
+### Response
+
+```typescript
+// Run endpoint
+{
+  "text": "Agent response",
+  "toolCalls": [],
+  "usage": { "promptTokens": 100, "completionTokens": 50, "totalTokens": 150 },
+  "structured": null,
+  "durationMs": 1234
+}
+
+// Stream endpoint (SSE)
+data: {"type":"text","text":"Hello"}
+data: {"type":"finish","finishReason":"stop"}
+```
+
+---
+
+## SwaggerOptions
+
+```typescript
+interface SwaggerOptions {
+  enabled?: boolean;
+  title?: string;         // Default: "RadarOS API"
+  description?: string;
+  version?: string;       // Default: "1.0.0"
+  routePrefix?: string;
+  servers?: Array<{ url: string; description?: string }>;
+  docsPath?: string;      // Default: "/docs"
+  specPath?: string;      // Default: "/docs/spec.json"
+}
+```
+
+### generateOpenAPISpec
+
+```typescript
+import { generateOpenAPISpec } from "@radaros/transport";
+
+const spec = generateOpenAPISpec(routerOpts: RouterOptions, swaggerOpts?: SwaggerOptions);
+```
+
+Returns a complete OpenAPI 3.0.3 specification object with auto-generated paths, schemas, and security schemes based on the registered agents/teams/workflows.
+
+---
+
+## FileUploadOptions
+
+```typescript
+interface FileUploadOptions {
+  maxFileSize?: number;        // Default: 52428800 (50MB)
+  maxFiles?: number;           // Default: 10
+  allowedMimeTypes?: string[];
+}
+```
+
+### createFileUploadMiddleware
+
+```typescript
+import { createFileUploadMiddleware } from "@radaros/transport";
+
+const upload = createFileUploadMiddleware(opts?: FileUploadOptions);
+```
+
+### buildMultiModalInput
+
+```typescript
+import { buildMultiModalInput } from "@radaros/transport";
+
+const input = buildMultiModalInput(req.body, req.files);
+// Returns string (text only) or ContentPart[] (text + files)
+```
+
+---
+
+## Middleware
+
+### errorHandler
+
+```typescript
+import { errorHandler } from "@radaros/transport";
+
+app.use("/api", router);
+app.use(errorHandler);
+```
+
+### requestLogger
+
+```typescript
+import { requestLogger } from "@radaros/transport";
+
+app.use(requestLogger);
+```
+
+---
+
+## Socket.IO
+
+### createAgentGateway
+
+```typescript
+import { createAgentGateway } from "@radaros/transport";
+
+createAgentGateway(opts: GatewayOptions): void;
+```
+
+<ParamField body="agents" type="Record<string, Agent>">
+  Named agents available via WebSocket.
+</ParamField>
+
+<ParamField body="teams" type="Record<string, Team>">
+  Named teams available via WebSocket.
+</ParamField>
+
+<ParamField body="io" type="SocketIOServer" required>
+  Socket.IO server instance.
+</ParamField>
+
+<ParamField body="namespace" type="string" default="/radaros">
+  Socket.IO namespace.
+</ParamField>
+
+<ParamField body="authMiddleware" type="(socket, next) => void">
+  Authentication middleware for connections.
+</ParamField>
+
+### Client Events (Send)
+
+#### `agent.run`
+
+```typescript
+socket.emit("agent.run", {
+  name: "assistant",       // Agent name
+  input: "Hello",          // User message
+  sessionId?: "session-1", // Optional session ID
+  apiKey?: "sk-..."        // Optional API key
+});
+```
+
+#### `team.run`
+
+```typescript
+socket.emit("team.run", {
+  name: "research-team",
+  input: "Analyze this topic",
+  sessionId?: "session-1",
+  apiKey?: "sk-..."
+});
+```
+
+### Server Events (Receive)
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `agent.chunk` | `{ chunk: string }` | Text token |
+| `agent.tool.call` | `{ toolName: string, args: null }` | Tool execution started |
+| `agent.tool.done` | `{ toolCallId: string }` | Tool execution completed |
+| `agent.done` | `{ output: { text: string } }` | Run completed |
+| `agent.error` | `{ error: string }` | Error occurred |
+
+---
+
+## API Key Headers
+
+The transport layer extracts API keys from these HTTP headers:
+
+| Header | Provider |
+|--------|----------|
+| `x-openai-api-key` | OpenAI |
+| `x-google-api-key` | Google |
+| `x-anthropic-api-key` | Anthropic |
+| `x-api-key` | Generic fallback |
+
+Keys can also be passed in the request body as `apiKey` or via Socket.IO event payload.
+
+---
+
+## A2A Server
+
+Expose RadarOS agents as A2A-compliant HTTP endpoints.
+
+```typescript
+import { createA2AServer } from "@radaros/transport";
+import express from "express";
+
+const app = express();
+
+createA2AServer(app, {
+  agents: { assistant, calculator },
+  basePath: "/",
+  provider: {
+    organization: "MyCompany",
+    url: "https://mycompany.com",
+  },
+  version: "1.0.0",
+});
+```
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `agents` | `Record<string, Agent>` | Map of agent name to Agent instance. |
+| `basePath` | `string` | Base path for the JSON-RPC endpoint (default `"/"`). |
+| `provider` | `{ organization, url? }` | Provider info for the Agent Card. |
+| `version` | `string` | Version string for the Agent Card (default `"1.0.0"`). |
+
+### Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /.well-known/agent.json` | Agent Card (discovery). |
+| `POST {basePath}` | JSON-RPC 2.0 endpoint. |
+
+### JSON-RPC Methods
+
+| Method | Description |
+|--------|-------------|
+| `message/send` | Synchronous agent run. Returns completed task. |
+| `message/stream` | SSE streaming. Returns chunks as the agent generates. |
+| `tasks/get` | Retrieve a task by ID. |
+| `tasks/cancel` | Cancel a running task. |
+
+---
+
+## Agent Card Generator
+
+Generate Agent Cards from RadarOS agents without starting a server.
+
+```typescript
+import { generateAgentCard, generateMultiAgentCard } from "@radaros/transport";
+
+// Single agent card
+const card = generateAgentCard(agent, "http://localhost:3001", {
+  organization: "MyCompany",
+});
+
+// Multi-agent card
+const multiCard = generateMultiAgentCard(
+  { assistant, calculator },
+  "http://localhost:3001",
+  { organization: "MyCompany" },
+);
+```

@@ -1,0 +1,156 @@
+---
+title: Models
+description: Model-agnostic design, ModelProvider interface, factory functions, and ModelConfig options in RadarOS.
+---
+
+# Models
+
+## Model Agnosticism
+
+RadarOS is **model-agnostic**. You can use OpenAI, Anthropic, Google Gemini, Vertex AI, Ollama, or any custom provider through a unified `ModelProvider` interface. Switch models with a single line change—no refactoring required.
+
+<CardGroup cols={2}>
+  <Card title="Unified Interface" icon="layer-group">
+    All providers implement the same `generate()` and `stream()` methods. Your agent code stays identical.
+  </Card>
+  <Card title="Easy Switching" icon="arrows-rotate">
+    Swap `openai("gpt-4o")` for `anthropic("claude-sonnet-4-20250514")` without touching the rest of your app.
+  </Card>
+</CardGroup>
+
+---
+
+## ModelProvider Interface
+
+Every model in RadarOS implements the `ModelProvider` interface:
+
+```typescript
+interface ModelProvider {
+  readonly providerId: string;
+  readonly modelId: string;
+  generate(messages: ChatMessage[], options?: ModelConfig & { tools?: ToolDefinition[] }): Promise<ModelResponse>;
+  stream(messages: ChatMessage[], options?: ModelConfig & { tools?: ToolDefinition[] }): AsyncGenerator<StreamChunk>;
+}
+```
+
+<ParamField path="providerId" type="string">
+  Unique identifier for the provider (e.g., `"openai"`, `"anthropic"`).
+</ParamField>
+
+<ParamField path="modelId" type="string">
+  The specific model identifier (e.g., `"gpt-4o"`, `"claude-sonnet-4-20250514"`).
+</ParamField>
+
+<ParamField path="generate" type="(messages, options?) => Promise&lt;ModelResponse&gt;">
+  Non-streaming completion. Returns the full response with message, usage, and finish reason.
+</ParamField>
+
+<ParamField path="stream" type="(messages, options?) => AsyncGenerator&lt;StreamChunk&gt;">
+  Streaming completion. Yields text deltas, tool call chunks, and finish events.
+</ParamField>
+
+---
+
+## Factory Functions
+
+Use factory functions to create model instances. Each returns a `ModelProvider` ready for agents, teams, and workflows.
+
+| Factory | Provider | Config |
+|---------|----------|--------|
+| `openai(modelId, config?)` | OpenAI | `{ apiKey?, baseURL? }` |
+| `anthropic(modelId, config?)` | Anthropic | `{ apiKey? }` |
+| `google(modelId, config?)` | Google Gemini | `{ apiKey? }` |
+| `vertex(modelId, config?)` | Google Vertex AI | `{ project?, location?, credentials? }` |
+| `ollama(modelId, config?)` | Ollama (local) | `{ host? }` (default: `http://localhost:11434`) |
+
+### Switching Models in One Line
+
+```typescript
+import { Agent, openai, anthropic, google, vertex, ollama } from "@radaros/core";
+
+// OpenAI
+const model = openai("gpt-4o");
+
+// Anthropic
+const model = anthropic("claude-sonnet-4-20250514");
+
+// Google Gemini (API key)
+const model = google("gemini-2.5-flash");
+
+// Google Vertex AI (GCP auth)
+const model = vertex("gemini-2.5-flash", { project: "my-project" });
+
+// Local Ollama (no API key)
+const model = ollama("llama3.1");
+
+const agent = new Agent({
+  name: "Assistant",
+  model,
+  instructions: "You are a helpful assistant.",
+});
+```
+
+---
+
+## ModelConfig Options
+
+Pass these options to `generate()` or `stream()` (or set them on agents):
+
+<ParamField path="temperature" type="number" required={false}>
+  Sampling temperature (0–2). Lower = more deterministic. Typical: 0.7.
+</ParamField>
+
+<ParamField path="maxTokens" type="number" required={false}>
+  Maximum tokens in the completion. Provider-specific limits apply.
+</ParamField>
+
+<ParamField path="topP" type="number" required={false}>
+  Nucleus sampling. Alternative to temperature for some providers.
+</ParamField>
+
+<ParamField path="stop" type="string[]" required={false}>
+  Stop sequences. Generation stops when any of these strings are produced.
+</ParamField>
+
+<ParamField path="responseFormat" type="'text' | 'json' | object" required={false}>
+  Output format: `"text"` (default), `"json"` (JSON object), or `{ type: "json_schema", schema, name? }` for structured output.
+</ParamField>
+
+<ParamField path="apiKey" type="string" required={false}>
+  Per-request API key override. Use when you need to override the key set at construction (e.g., multi-tenant).
+</ParamField>
+
+### Example: ModelConfig Usage
+
+```typescript
+const response = await model.generate(messages, {
+  temperature: 0.3,
+  maxTokens: 1024,
+  responseFormat: "json",
+});
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="robot" href="/models/openai">
+    GPT-4o, GPT-4o-mini, GPT-4-turbo, o1-preview.
+  </Card>
+  <Card title="Anthropic" icon="comments" href="/models/anthropic">
+    Claude Sonnet, Claude Haiku.
+  </Card>
+  <Card title="Google Gemini" icon="google" href="/models/google">
+    Gemini 2.5 Flash, Gemini 2.5 Pro. Multi-modal support.
+  </Card>
+  <Card title="Vertex AI" icon="cloud" href="/models/vertex">
+    Enterprise Gemini via Google Cloud. IAM auth, VPC, compliance.
+  </Card>
+  <Card title="Ollama" icon="server" href="/models/ollama">
+    Local models: Llama, CodeLlama, Mistral.
+  </Card>
+  <Card title="Custom Provider" icon="puzzle-piece" href="/models/custom-provider">
+    Implement your own ModelProvider.
+  </Card>
+</CardGroup>

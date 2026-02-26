@@ -1,0 +1,69 @@
+---
+title: DuckDuckGo
+description: Search the web and get news using DuckDuckGo — no API key required.
+---
+
+# DuckDuckGo
+
+Search the web and get the latest news using DuckDuckGo. No API key required — works out of the box.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, DuckDuckGoToolkit } from "@radaros/core";
+
+const ddg = new DuckDuckGoToolkit();
+
+const agent = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  instructions: "Search the web to answer questions with sources.",
+  tools: [...ddg.getTools()],
+});
+
+const result = await agent.run("What's happening in France?");
+```
+
+---
+
+## Config
+
+<ParamField body="enableSearch" type="boolean" default="true">
+  Enable the `duckduckgo_search` tool.
+</ParamField>
+
+<ParamField body="enableNews" type="boolean" default="true">
+  Enable the `duckduckgo_news` tool.
+</ParamField>
+
+<ParamField body="maxResults" type="number" default="5">
+  Default maximum results per search query.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `duckduckgo_search` | Search the web. Returns titles, URLs, and snippets. |
+| `duckduckgo_news` | Search for latest news. Returns headlines, sources, and URLs. |
+
+---
+
+## Example: News Agent
+
+```typescript
+const ddg = new DuckDuckGoToolkit({ enableSearch: false, enableNews: true });
+
+const agent = new Agent({
+  name: "news-agent",
+  model: openai("gpt-4o"),
+  instructions: "Get the latest news and summarize it.",
+  tools: [...ddg.getTools()],
+});
+
+const result = await agent.run("Latest AI news");
+```

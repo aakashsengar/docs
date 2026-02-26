@@ -1,0 +1,239 @@
+---
+title: User Memory
+description: Cross-session personalization with automatic fact extraction and persistent user profiles.
+---
+
+# User Memory
+
+RadarOS agents can remember facts about users **across sessions**. The `UserMemory` class automatically extracts personal details from conversations — like preferences, location, profession — and injects them into future interactions for personalized responses.
+
+This is different from [session memory](/agents/memory), which stores conversation history within a single session. User memory persists **per user**, not per session.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, UserMemory, MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage("mongodb://localhost:27017/myapp");
+
+const userMemory = new UserMemory({
+  storage,
+  model: openai("gpt-4o-mini"),
+  maxFacts: 50,
+});
+
+const agent = new Agent({
+  name: "PersonalAssistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful personal assistant.",
+  storage,
+  userMemory,
+  logLevel: "info",
+});
+
+// Conversation 1
+const r1 = await agent.run(
+  "Hi! I'm a TypeScript developer based in Mumbai.",
+  { userId: "user-42", sessionId: "session-1" }
+);
+
+// Conversation 2 — new session, agent remembers the user
+const r2 = await agent.run(
+  "What frameworks should I learn?",
+  { userId: "user-42", sessionId: "session-2" }
+);
+// Agent knows the user is a TypeScript developer from Mumbai
+```
+
+<Note>
+Storage is automatically initialized by both `UserMemory` and `Agent` — no need to call `storage.initialize()` manually.
+</Note>
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Conversation happens">
+    The user talks to the agent via `agent.run()` or `agent.stream()`.
+  </Step>
+  <Step title="Facts are auto-extracted">
+    After each run, the agent fires a non-blocking LLM call to extract personal facts from the conversation (e.g., "Lives in Mumbai", "Prefers concise answers"). This happens in the background and does not add latency to the response.
+  </Step>
+  <Step title="Facts are stored">
+    Extracted facts are deduplicated and persisted in the storage driver under the `memory:user` namespace, keyed by `userId`.
+  </Step>
+  <Step title="Facts are injected">
+    On subsequent runs, stored facts are injected into the system prompt so the agent can personalize its responses.
+  </Step>
+</Steps>
+
+---
+
+## Configuration
+
+```typescript
+const userMemory = new UserMemory(config?: UserMemoryConfig);
+```
+
+<ParamField path="storage" type="StorageDriver" required={false}>
+  Storage driver for persisting user facts. Defaults to `InMemoryStorage`. Use `MongoDBStorage`, `PostgresStorage`, or `SqliteStorage` for persistence.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider" required={false}>
+  LLM used for automatic fact extraction. If not provided, the agent's own model is used as a fallback.
+</ParamField>
+
+<ParamField path="maxFacts" type="number" required={false} default="100">
+  Maximum number of facts stored per user. When exceeded, the oldest facts are dropped.
+</ParamField>
+
+<ParamField path="enabled" type="boolean" required={false} default="true">
+  Enable or disable auto-extraction. When disabled, `getContextString()` returns empty and `extractAndStore()` is a no-op.
+</ParamField>
+
+---
+
+## Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getFacts(userId)` | `Promise<UserFact[]>` | Get all stored facts for a user |
+| `addFacts(userId, facts, source?)` | `Promise<void>` | Manually add facts (deduplicates automatically) |
+| `removeFact(userId, factId)` | `Promise<void>` | Remove a specific fact by ID |
+| `clear(userId)` | `Promise<void>` | Clear all facts for a user |
+| `getContextString(userId)` | `Promise<string>` | Formatted facts string for system prompt injection |
+| `extractAndStore(userId, messages, model?)` | `Promise<void>` | Extract facts from messages and store them |
+| `asTool(config?)` | `ToolDef` | Create a tool the agent can call to recall user facts |
+
+---
+
+## UserFact Type
+
+```typescript
+interface UserFact {
+  id: string;
+  fact: string;
+  createdAt: Date;
+  source: "auto" | "manual";
+}
+```
+
+Facts from auto-extraction have `source: "auto"`. Manually added facts have `source: "manual"`.
+
+---
+
+## asTool() — Let the Agent Recall Facts On Demand
+
+Instead of only injecting facts into the system prompt, you can give the agent a **tool** to actively look up user facts when asked. This is useful for queries like _"What do you know about me?"_.
+
+```typescript
+const agent = new Agent({
+  name: "MemoryBot",
+  model: openai("gpt-4o"),
+  instructions: "You are a friendly assistant with a great memory.",
+  storage,
+  userMemory,
+  tools: [userMemory.asTool()],
+});
+
+await agent.run("What do you know about me?", { userId: "user-42" });
+// Agent calls recall_user_facts tool → retrieves stored facts → responds
+```
+
+The tool reads `ctx.userId` from the run context automatically — no manual wiring needed.
+
+<Note>
+**Smart deduplication:** When `asTool()` is registered in the agent's tools, RadarOS automatically **skips** injecting user facts into the system prompt to avoid duplication. The agent retrieves facts on demand via the tool instead, saving tokens.
+</Note>
+
+### Options
+
+```typescript
+userMemory.asTool({
+  name: "recall_user_facts",       // default
+  description: "Custom description" // optional override
+});
+```
+
+---
+
+## What Gets Extracted
+
+The extraction LLM is prompted to identify:
+
+- Preferences (e.g., "Prefers concise answers")
+- Location (e.g., "Based in Mumbai")
+- Profession (e.g., "TypeScript developer")
+- Interests (e.g., "Loves building AI tools")
+- Goals and communication style
+
+It is explicitly instructed to **skip** transient information like "asked about weather today" and to avoid duplicating existing facts.
+
+---
+
+## Manual Fact Management
+
+You can also manage facts programmatically:
+
+```typescript
+// Add facts manually
+await userMemory.addFacts("user-42", [
+  "Prefers dark mode",
+  "Uses VS Code",
+]);
+
+// Remove a specific fact
+const facts = await userMemory.getFacts("user-42");
+await userMemory.removeFact("user-42", facts[0].id);
+
+// Clear all facts for a user
+await userMemory.clear("user-42");
+```
+
+---
+
+## Storage Options
+
+<CodeGroup>
+
+```typescript In-Memory (default)
+const userMemory = new UserMemory({
+  model: openai("gpt-4o-mini"),
+});
+```
+
+```typescript MongoDB
+const storage = new MongoDBStorage("mongodb://localhost:27017/myapp");
+const userMemory = new UserMemory({
+  storage,
+  model: openai("gpt-4o-mini"),
+});
+```
+
+```typescript PostgreSQL
+const storage = new PostgresStorage("postgres://localhost:5432/myapp");
+const userMemory = new UserMemory({
+  storage,
+  model: openai("gpt-4o-mini"),
+});
+```
+
+</CodeGroup>
+
+---
+
+## Session Memory vs User Memory
+
+<CardGroup cols={2}>
+  <Card title="Session Memory" icon="message">
+    Stores conversation history **per session**. Used for multi-turn context within a single conversation. Configured via `memory` in `AgentConfig`.
+  </Card>
+  <Card title="User Memory" icon="user">
+    Stores personal facts **per user**. Persists across sessions. Used for cross-session personalization. Configured via `userMemory` in `AgentConfig`.
+  </Card>
+</CardGroup>
+
+Both can be used together — session memory provides immediate conversation context, while user memory provides long-term personalization.

@@ -1,0 +1,243 @@
+---
+title: Vector Stores
+description: VectorStore interface and implementations—InMemory, PgVector, Qdrant, MongoDB—for semantic search in RadarOS.
+---
+
+# Vector Stores
+
+Vector stores hold document embeddings and support similarity search. RadarOS provides four implementations. Choose based on your scale, infrastructure, and persistence needs.
+
+---
+
+## VectorStore Interface
+
+```typescript
+interface VectorStore {
+  initialize(): Promise<void>;
+  upsert(collection: string, doc: VectorDocument): Promise<void>;
+  upsertBatch(collection: string, docs: VectorDocument[]): Promise<void>;
+  search(
+    collection: string,
+    query: number[] | string,
+    options?: VectorSearchOptions
+  ): Promise<VectorSearchResult[]>;
+  get(collection: string, id: string): Promise<VectorDocument | null>;
+  delete(collection: string, id: string): Promise<void>;
+  dropCollection(collection: string): Promise<void>;
+  close(): Promise<void>;
+}
+```
+
+### Types
+
+| Type | Shape |
+|------|-------|
+| `VectorDocument` | `{ id, content, embedding?, metadata? }` |
+| `VectorSearchOptions` | `{ topK?, minScore?, filter? }` |
+| `VectorSearchResult` | `{ id, content, score, metadata? }` |
+
+---
+
+## Implementations Comparison
+
+| Store | Dependencies | Initialize | Persistence | Best For |
+|-------|--------------|------------|-------------|----------|
+| **InMemoryVectorStore** | None | No | No | Dev, tests |
+| **PgVectorStore** | `pg`, `pgvector` | Yes | Yes | PostgreSQL users |
+| **QdrantVectorStore** | `@qdrant/js-client-rest` | No | Yes | Dedicated vector DB |
+| **MongoDBVectorStore** | `mongodb` | Yes | Yes | MongoDB / Atlas |
+
+---
+
+## InMemoryVectorStore
+
+No dependencies. Data lost on restart. Ideal for development and tests.
+
+```typescript
+import { InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding({ apiKey: process.env.OPENAI_API_KEY });
+const store = new InMemoryVectorStore(embedder);
+
+await store.initialize(); // no-op, but call for consistency
+await store.upsert("docs", {
+  id: "1",
+  content: "RadarOS is a TypeScript agent framework.",
+});
+const results = await store.search("docs", "What is RadarOS?");
+```
+
+---
+
+## PgVectorStore
+
+Uses PostgreSQL with the `pgvector` extension. Requires `pg` and `pgvector`.
+
+<CodeGroup>
+
+```bash npm
+npm install pg pgvector
+```
+
+```bash pnpm
+pnpm add pg pgvector
+```
+
+</CodeGroup>
+
+```typescript
+import { PgVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const store = new PgVectorStore(
+  {
+    connectionString: process.env.DATABASE_URL!,
+    dimensions: 1536, // optional, from embedder if omitted
+  },
+  embedder
+);
+
+await store.initialize(); // Creates vector extension + tables
+await store.upsert("docs", { id: "1", content: "..." });
+const results = await store.search("docs", "query", { topK: 5 });
+```
+
+<ParamField path="connectionString" type="string" required>
+  PostgreSQL connection string.
+</ParamField>
+
+<ParamField path="tableName" type="string" required={false}>
+  Not used directly—collections map to tables. Table names are sanitized from collection names.
+</ParamField>
+
+<ParamField path="dimensions" type="number" required={false}>
+  Embedding dimensions. Defaults to embedder's `dimensions` or 1536.
+</ParamField>
+
+---
+
+## QdrantVectorStore
+
+Uses Qdrant—a dedicated vector database. Requires `@qdrant/js-client-rest`.
+
+<CodeGroup>
+
+```bash npm
+npm install @qdrant/js-client-rest
+```
+
+```bash pnpm
+pnpm add @qdrant/js-client-rest
+```
+
+</CodeGroup>
+
+```typescript
+import { QdrantVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const store = new QdrantVectorStore(
+  {
+    url: "http://localhost:6333",
+    apiKey: process.env.QDRANT_API_KEY,
+    dimensions: 1536,
+  },
+  embedder
+);
+
+await store.initialize();
+await store.upsert("docs", { id: "1", content: "..." });
+const results = await store.search("docs", "query", { topK: 5, minScore: 0.7 });
+```
+
+<ParamField path="url" type="string" required={false} default="http://localhost:6333">
+  Qdrant server URL.
+</ParamField>
+
+<ParamField path="apiKey" type="string" required={false}>
+  API key for Qdrant Cloud.
+</ParamField>
+
+<ParamField path="collectionName" type="string" required={false}>
+  Collections are created on first upsert. Pass collection name to `upsert`/`search`.
+</ParamField>
+
+<ParamField path="dimensions" type="number" required={false}>
+  Embedding dimensions. Defaults to embedder or 1536.
+</ParamField>
+
+---
+
+## MongoDBVectorStore
+
+Uses MongoDB. Supports Atlas Vector Search (when index exists) or local in-memory similarity. Requires `mongodb`.
+
+<CodeGroup>
+
+```bash npm
+npm install mongodb
+```
+
+```bash pnpm
+pnpm add mongodb
+```
+
+</CodeGroup>
+
+```typescript
+import { MongoDBVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const store = new MongoDBVectorStore(
+  {
+    uri: process.env.MONGO_URI!,
+    dbName: "radaros_vectors",
+    indexName: "vector_index", // Atlas Search index name
+    dimensions: 1536,
+  },
+  embedder
+);
+
+await store.initialize();
+await store.upsert("docs", { id: "1", content: "..." });
+const results = await store.search("docs", "query", { topK: 5 });
+```
+
+<ParamField path="uri" type="string" required>
+  MongoDB connection URI.
+</ParamField>
+
+<ParamField path="dbName" type="string" required={false} default="radaros_vectors">
+  Database name.
+</ParamField>
+
+<ParamField path="collectionName" type="string" required={false}>
+  Collections are created on first upsert.
+</ParamField>
+
+<ParamField path="indexName" type="string" required={false} default="vector_index">
+  Atlas Search index name for `$vectorSearch`. Must be pre-created for Atlas.
+</ParamField>
+
+<ParamField path="dimensions" type="number" required={false}>
+  Embedding dimensions.
+</ParamField>
+
+---
+
+## EmbeddingProvider
+
+All vector stores accept an optional `EmbeddingProvider` to compute embeddings when documents don't include them. See [Embeddings](/knowledge/embeddings) for OpenAI and Google providers.
+
+```typescript
+// With embedder—documents without embedding get one automatically
+const store = new InMemoryVectorStore(embedder);
+await store.upsert("docs", { id: "1", content: "Hello" }); // embedding computed
+
+// Without embedder—documents must include embedding
+await store.upsert("docs", {
+  id: "1",
+  content: "Hello",
+  embedding: [0.1, -0.2, ...],
+});
+```

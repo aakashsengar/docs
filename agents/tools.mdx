@@ -1,0 +1,187 @@
+---
+title: Tools & Function Calling
+description: Define tools with defineTool(), Zod schemas, and execute function calling in RadarOS agents.
+---
+
+# Tools & Function Calling
+
+RadarOS agents can call external functions (tools) during a run. Tools are defined with `defineTool()`, validated with Zod schemas, and executed automatically when the LLM decides to use them.
+
+---
+
+## defineTool()
+
+Use `defineTool()` to create a type-safe tool definition:
+
+```typescript
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const myTool = defineTool({
+  name: "toolName",
+  description: "What the tool does (used by the LLM to decide when to call it)",
+  parameters: z.object({
+    param1: z.string().describe("Description for the LLM"),
+    param2: z.number().optional(),
+  }),
+  execute: async (args, ctx) => {
+    // args is typed from the Zod schema
+    return "Result string or ToolResult";
+  },
+});
+```
+
+---
+
+## Tool Definition Anatomy
+
+<Accordion title="name">
+  Unique identifier for the tool. The LLM uses this to invoke the tool. Use camelCase (e.g. `getWeather`, `searchDatabase`).
+</Accordion>
+
+<Accordion title="description">
+  Natural language description of what the tool does. The LLM uses this to decide when to call the tool. Be clear and specific.
+</Accordion>
+
+<Accordion title="parameters">
+  A Zod object schema defining the tool's input. Use `.describe()` on fields to help the LLM understand each parameter. The schema is converted to JSON Schema for the provider.
+</Accordion>
+
+<Accordion title="execute">
+  Async function that runs when the tool is called. Receives parsed `args` (typed from the schema) and `RunContext`. Returns a `string` or `ToolResult` (with optional artifacts).
+</Accordion>
+
+---
+
+## Examples
+
+### Weather Tool
+
+```typescript
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get the current weather for a city",
+  parameters: z.object({
+    city: z.string().describe("City name"),
+  }),
+  execute: async ({ city }) => {
+    const conditions = ["sunny", "cloudy", "rainy", "snowy"];
+    const temp = Math.floor(Math.random() * 30) + 5;
+    const condition = conditions[Math.floor(Math.random() * conditions.length)];
+    return `${city}: ${temp}°C, ${condition}`;
+  },
+});
+```
+
+### Calculator Tool
+
+```typescript
+const calculator = defineTool({
+  name: "calculator",
+  description: "Evaluate a math expression",
+  parameters: z.object({
+    expression: z.string().describe("Math expression to evaluate (e.g. 2 + 3 * 4)"),
+  }),
+  execute: async ({ expression }) => {
+    const result = new Function(`return (${expression})`)();
+    return String(result);
+  },
+});
+```
+
+---
+
+## Multiple Tools on an Agent
+
+Pass an array of tools to the agent:
+
+```typescript
+const agent = new Agent({
+  name: "ToolBot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool, calculator],
+  instructions: "You help with weather queries and math. Use tools when needed.",
+});
+```
+
+The LLM receives all tool definitions and can call any of them in a single turn when appropriate.
+
+---
+
+## ToolResult Type
+
+Instead of returning a plain string, return a `ToolResult` to include optional artifacts:
+
+```typescript
+interface ToolResult {
+  content: string;   // The text sent back to the LLM
+  artifacts?: Artifact[];  // Optional structured data for downstream use
+}
+
+interface Artifact {
+  type: string;
+  data: unknown;
+  mimeType?: string;
+}
+```
+
+<CodeGroup>
+
+```typescript String result
+execute: async ({ query }) => {
+  return `Found 3 results for "${query}"`;
+}
+```
+
+```typescript ToolResult with artifacts
+execute: async ({ query }, ctx) => {
+  const results = await searchAPI(query);
+  return {
+    content: `Found ${results.length} results.`,
+    artifacts: [
+      { type: "search_results", data: results, mimeType: "application/json" },
+    ],
+  };
+}
+```
+
+</CodeGroup>
+
+---
+
+## Tool Artifacts
+
+Artifacts are optional metadata attached to a tool result. They are stored in `ToolCallResult` and can be used by your application (e.g., for rendering charts, displaying images, or logging). The LLM only sees the `content` string.
+
+---
+
+## Parallel Tool Execution
+
+When the LLM returns multiple tool calls in a single turn, RadarOS executes them in parallel (batches of up to 5 by default). Each tool call is validated against its schema; invalid arguments produce an error result for that call only.
+
+```typescript
+// Agent can call getWeather("Tokyo") and calculator("42 * 17") in the same turn
+const result = await agent.run("What's the weather in Tokyo? Also, what's 42 * 17?");
+// Both tools run in parallel; results are combined and sent back to the LLM.
+```
+
+---
+
+## Tool Caching
+
+Add a `cache` property to any tool to cache results and avoid redundant executions:
+
+```typescript
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get current weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => { /* ... */ },
+  cache: { ttl: 60_000 }, // Cache for 1 minute
+});
+```
+
+See [Tool Caching](/agents/tool-caching) for full documentation.

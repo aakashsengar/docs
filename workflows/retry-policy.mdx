@@ -1,0 +1,180 @@
+---
+title: Retry & Error Handling
+description: retryPolicy config (maxRetries, backoffMs), StepResult status (done, error, skipped), WorkflowResult.
+---
+
+# Retry & Error Handling
+
+Workflows support configurable retries for failed steps and expose per-step results. Use `retryPolicy` to make pipelines resilient to transient failures.
+
+---
+
+## retryPolicy Config
+
+```typescript
+retryPolicy?: { maxRetries: number; backoffMs: number }
+```
+
+<ParamField path="maxRetries" type="number" required>
+  Maximum retry attempts per step before marking it as failed.
+</ParamField>
+
+<ParamField path="backoffMs" type="number" required>
+  Base delay in milliseconds between retries. Uses exponential backoff (backoffMs * 2^attempt).
+</ParamField>
+
+### Example
+
+```typescript
+const workflow = new Workflow<MyState>({
+  name: "Resilient Pipeline",
+  initialState: {},
+  steps: [...],
+  retryPolicy: {
+    maxRetries: 3,
+    backoffMs: 1000,
+  },
+});
+```
+
+<Accordion title="When retries apply">
+  Retries apply when a step throws an error. The step is re-run up to `maxRetries` times with exponential backoff between attempts.
+</Accordion>
+
+---
+
+## StepResult Status
+
+Each step produces a `StepResult` with a status:
+
+```typescript
+interface StepResult {
+  stepName: string;
+  status: "done" | "error" | "skipped";
+  error?: string;
+  durationMs: number;
+}
+```
+
+| Status | Meaning |
+|--------|----------|
+| `done` | Step completed successfully. |
+| `error` | Step failed (after retries, if configured). |
+| `skipped` | Step was skipped (e.g., condition was false in ConditionStep). |
+
+<ParamField path="stepName" type="string">
+  Name of the step.
+</ParamField>
+
+<ParamField path="status" type="'done' | 'error' | 'skipped'">
+  Outcome of the step.
+</ParamField>
+
+<ParamField path="error" type="string" required={false}>
+  Error message when status is `error`.
+</ParamField>
+
+<ParamField path="durationMs" type="number">
+  Time taken for the step in milliseconds.
+</ParamField>
+
+---
+
+## WorkflowResult
+
+The workflow returns a `WorkflowResult` containing final state and step results:
+
+```typescript
+interface WorkflowResult<TState> {
+  state: TState;
+  stepResults: StepResult[];
+}
+```
+
+<ParamField path="state" type="TState">
+  Final state after all steps. Includes updates from successful steps; failed steps may leave partial updates.
+</ParamField>
+
+<ParamField path="stepResults" type="StepResult[]">
+  One entry per step. Use to check which steps succeeded, failed, or were skipped.
+</ParamField>
+
+---
+
+## Example: Handling Results
+
+```typescript
+const result = await workflow.run();
+
+// Check for failures
+const failed = result.stepResults.filter((s) => s.status === "error");
+if (failed.length > 0) {
+  console.error("Failed steps:", failed.map((s) => s.stepName));
+  failed.forEach((s) => console.error(`  ${s.stepName}: ${s.error}`));
+}
+
+// Use final state
+console.log("Final state:", result.state);
+
+// Inspect timing
+result.stepResults.forEach((s) => {
+  console.log(`${s.stepName}: ${s.status} (${s.durationMs}ms)`);
+});
+```
+
+---
+
+## Full Example with Retry
+
+<CodeGroup>
+  <CodeGroup.Item title="workflow-retry.ts">
+```typescript
+import { Workflow, Agent, openai } from "@radaros/core";
+
+interface FetchState {
+  url: string;
+  content?: string;
+  summarize_output?: string;
+}
+
+const summarizer = new Agent({
+  name: "Summarizer",
+  model: openai("gpt-4o-mini"),
+  instructions: "Summarize the given content concisely.",
+});
+
+const workflow = new Workflow<FetchState>({
+  name: "Fetch and Summarize",
+  initialState: { url: "https://example.com/article" },
+  steps: [
+    {
+      name: "fetch",
+      run: async (state) => {
+        const res = await fetch(state.url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const content = await res.text();
+        return { content };
+      },
+    },
+    {
+      name: "summarize",
+      agent: summarizer,
+      inputFrom: (state) => state.content ?? "",
+    },
+  ],
+  retryPolicy: {
+    maxRetries: 3,
+    backoffMs: 2000,
+  },
+});
+
+try {
+  const result = await workflow.run();
+  console.log(result.state.summarize_output);
+  console.log("Step results:", result.stepResults);
+} catch (err) {
+  console.error("Workflow failed:", err);
+}
+```
+  </CodeGroup.Item>
+</CodeGroup>

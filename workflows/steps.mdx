@@ -1,0 +1,233 @@
+---
+title: Workflow Steps
+description: AgentStep, FunctionStep, ConditionStep, and ParallelStep in RadarOS workflows. Code examples for each.
+---
+
+# Workflow Steps
+
+Workflows are built from four step types. Each step receives the current state and can update it for the next step.
+
+---
+
+## Step Types Overview
+
+| Step | Purpose |
+|------|---------|
+| `AgentStep` | Run an agent; optionally map state to input via `inputFrom`. |
+| `FunctionStep` | Custom logic; `run(state, ctx)` returns partial state update. |
+| `ConditionStep` | Branch: if `condition(state)` then run nested steps. |
+| `ParallelStep` | Run multiple steps concurrently; merge results. |
+
+---
+
+## AgentStep
+
+Runs an agent. Use `inputFrom` to derive the agent's input from state.
+
+```typescript
+interface AgentStep<TState> {
+  name: string;
+  agent: Agent;
+  inputFrom?: (state: TState) => string;
+}
+```
+
+<ParamField path="name" type="string" required>
+  Step identifier. Used in stepResults and logs.
+</ParamField>
+
+<ParamField path="agent" type="Agent" required>
+  The agent to run.
+</ParamField>
+
+<ParamField path="inputFrom" type="(state) => string" required={false}>
+  Maps state to the agent's input string. If omitted, the full state is JSON-stringified. Agent output is stored as <code>state[stepName + "_output"]</code>.
+</ParamField>
+
+### Example
+
+```typescript
+{
+  name: "research",
+  agent: researcher,
+  inputFrom: (state) => `Research: ${state.topic}`,
+}
+```
+
+---
+
+## FunctionStep
+
+Runs custom logic. Return a partial state object to merge into the workflow state.
+
+```typescript
+interface FunctionStep<TState> {
+  name: string;
+  run: (state: TState, ctx: RunContext) => Promise<Partial<TState>>;
+}
+```
+
+<ParamField path="name" type="string" required>
+  Step identifier.
+</ParamField>
+
+<ParamField path="run" type="(state, ctx) => Promise&lt;Partial&lt;TState&gt;&gt;" required>
+  Async function. Receives current state and RunContext. Return partial state to merge.
+</ParamField>
+
+### Example
+
+```typescript
+{
+  name: "validate",
+  run: async (state, ctx) => {
+    if (!state.topic?.trim()) {
+      throw new Error("Topic is required");
+    }
+    return { validated: true };
+  },
+}
+```
+
+---
+
+## ConditionStep
+
+Branches based on a condition. Runs nested steps only when `condition(state)` is true.
+
+```typescript
+interface ConditionStep<TState> {
+  name: string;
+  condition: (state: TState) => boolean;
+  steps: StepDef<TState>[];
+}
+```
+
+<ParamField path="name" type="string" required>
+  Step identifier.
+</ParamField>
+
+<ParamField path="condition" type="(state) => boolean" required>
+  Predicate. If true, nested steps run; otherwise they are skipped.
+</ParamField>
+
+<ParamField path="steps" type="StepDef&lt;TState&gt;[]" required>
+  Nested steps to run when condition is true.
+</ParamField>
+
+### Example
+
+```typescript
+{
+  name: "maybe-review",
+  condition: (state) => state.needsReview === true,
+  steps: [
+    {
+      name: "review",
+      agent: reviewer,
+      inputFrom: (state) => `Review: ${state.draft}`,
+    },
+  ],
+}
+```
+
+---
+
+## ParallelStep
+
+Runs multiple steps concurrently. Results are merged into state.
+
+```typescript
+interface ParallelStep<TState> {
+  name: string;
+  parallel: StepDef<TState>[];
+}
+```
+
+<ParamField path="name" type="string" required>
+  Step identifier.
+</ParamField>
+
+<ParamField path="parallel" type="StepDef&lt;TState&gt;[]" required>
+  Steps to run in parallel. All must complete before the workflow continues.
+</ParamField>
+
+### Example
+
+```typescript
+{
+  name: "parallel-analysis",
+  parallel: [
+    { name: "tech", agent: techAnalyst, inputFrom: (s) => s.proposal },
+    { name: "legal", agent: legalAnalyst, inputFrom: (s) => s.proposal },
+    { name: "finance", agent: financeAnalyst, inputFrom: (s) => s.proposal },
+  ],
+}
+```
+
+---
+
+## Full Example
+
+<CodeGroup>
+  <CodeGroup.Item title="workflow-with-steps.ts">
+```typescript
+import { Workflow, Agent, openai } from "@radaros/core";
+
+interface ProposalState {
+  proposal: string;
+  tech_output?: string;
+  legal_output?: string;
+  write_summary_output?: string;
+}
+
+const techAnalyst = new Agent({
+  name: "Tech",
+  model: openai("gpt-4o-mini"),
+  instructions: "Review from a technical perspective.",
+});
+
+const legalAnalyst = new Agent({
+  name: "Legal",
+  model: openai("gpt-4o-mini"),
+  instructions: "Review from a legal/compliance perspective.",
+});
+
+const writer = new Agent({
+  name: "Writer",
+  model: openai("gpt-4o-mini"),
+  instructions: "Write summaries from review notes.",
+});
+
+const workflow = new Workflow<ProposalState>({
+  name: "Proposal Pipeline",
+  initialState: { proposal: "" },
+  steps: [
+    {
+      name: "parallel-reviews",
+      parallel: [
+        { name: "tech", agent: techAnalyst, inputFrom: (s) => String(s.proposal) },
+        { name: "legal", agent: legalAnalyst, inputFrom: (s) => String(s.proposal) },
+      ],
+    },
+    {
+      name: "maybe-draft",
+      condition: (s) => !!(s.tech_output && s.legal_output),
+      steps: [
+        {
+          name: "write-summary",
+          agent: writer,
+          inputFrom: (s) =>
+            `Tech: ${s.tech_output}\nLegal: ${s.legal_output}\nWrite a summary.`,
+        },
+      ],
+    },
+  ],
+});
+
+const result = await workflow.run({
+  proposal: "Adopt a new data retention policy.",
+});
+```
+  </CodeGroup.Item>
+</CodeGroup>

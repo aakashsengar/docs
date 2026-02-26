@@ -1,0 +1,219 @@
+---
+title: Agents
+description: Core agent concepts, AgentConfig, run/stream methods, and RunOutput in RadarOS.
+---
+
+# Agents
+
+## What is an Agent?
+
+An **Agent** in RadarOS is a conversational AI unit that processes user input, optionally calls tools, and produces text or structured output. Agents are model-agnostic—you plug in any supported LLM provider (OpenAI, Anthropic, Google Gemini, Ollama)—and can be extended with tools, memory, sessions, and guardrails.
+
+<CardGroup cols={2}>
+  <Card title="Synchronous" icon="play">
+    Use `run(input, opts?)` for a single request-response cycle.
+  </Card>
+  <Card title="Streaming" icon="stream">
+    Use `stream(input, opts?)` for token-by-token or chunk-by-chunk output.
+  </Card>
+</CardGroup>
+
+---
+
+## AgentConfig
+
+Configure an agent by passing an `AgentConfig` object to the `Agent` constructor. All properties except `name` and `model` are optional.
+
+<ParamField path="name" type="string" required>
+  Display name for the agent. Used in logs and events.
+</ParamField>
+
+<ParamField path="model" type="ModelProvider" required>
+  The LLM provider instance. Use factory functions like `openai("gpt-4o")`, `anthropic("claude-sonnet-4-20250514")`, or `google("gemini-2.0-flash")`.
+</ParamField>
+
+<ParamField path="instructions" type="string | (ctx) => string" required={false}>
+  System instructions for the agent. Can be a static string or a function that receives `RunContext` and returns a string (useful for dynamic prompts).
+</ParamField>
+
+<ParamField path="tools" type="ToolDef[]" required={false}>
+  Array of tool definitions created with `defineTool()`. Enables function calling.
+</ParamField>
+
+<ParamField path="memory" type="Memory" required={false}>
+  Memory instance for short-term and optional long-term conversation context. See <a href="/agents/memory">Memory</a>.
+</ParamField>
+
+<ParamField path="storage" type="StorageDriver" required={false}>
+  Storage driver for sessions. Defaults to `InMemoryStorage` if not provided.
+</ParamField>
+
+<ParamField path="sessionId" type="string" required={false}>
+  Default session ID for this agent. Can be overridden per-run via `RunOpts`.
+</ParamField>
+
+<ParamField path="userId" type="string" required={false}>
+  Default user ID for this agent. Can be overridden per-run via `RunOpts`.
+</ParamField>
+
+<ParamField path="addHistoryToMessages" type="boolean" required={false} default="true">
+  Whether to include session history in the messages sent to the LLM. Set to `false` to disable.
+</ParamField>
+
+<ParamField path="numHistoryRuns" type="number" required={false}>
+  Limits how many prior turns to include. Each turn = 2 messages (user + assistant). If unset, defaults to 20 messages.
+</ParamField>
+
+<ParamField path="maxToolRoundtrips" type="number" required={false} default="10">
+  Maximum number of tool-call rounds before stopping. Prevents infinite loops.
+</ParamField>
+
+<ParamField path="temperature" type="number" required={false}>
+  Sampling temperature passed to the model (0–2 typically). Lower = more deterministic.
+</ParamField>
+
+<ParamField path="structuredOutput" type="ZodSchema" required={false}>
+  Zod schema to enforce structured JSON output. See <a href="/agents/structured-output">Structured Output</a>.
+</ParamField>
+
+<ParamField path="hooks" type="AgentHooks" required={false}>
+  Lifecycle hooks: `beforeRun`, `afterRun`, `onToolCall`, `onError`. See <a href="/agents/hooks-and-guardrails">Hooks & Guardrails</a>.
+</ParamField>
+
+<ParamField path="guardrails" type="{ input, output }" required={false}>
+  Input and output guardrails. Each is an array of validators. See <a href="/agents/hooks-and-guardrails">Hooks & Guardrails</a>.
+</ParamField>
+
+<ParamField path="eventBus" type="EventBus" required={false}>
+  Custom event bus for emitting agent events. Defaults to a new `EventBus` if not provided.
+</ParamField>
+
+<ParamField path="reasoning" type="ReasoningConfig" required={false}>
+  Enable extended thinking / chain-of-thought reasoning. See <a href="/agents/reasoning">Reasoning</a>.
+</ParamField>
+
+<ParamField path="userMemory" type="UserMemory" required={false}>
+  User memory instance for cross-session personalization. See <a href="/agents/user-memory">User Memory</a>.
+</ParamField>
+
+<ParamField path="logLevel" type="string" required={false} default="silent">
+  Logging level: `"debug"` | `"info"` | `"warn"` | `"error"` | `"silent"`. Default is `"silent"`.
+</ParamField>
+
+<ParamField path="retry" type="Partial&lt;RetryConfig&gt;" required={false}>
+  Retry configuration for transient LLM API failures (429, 5xx, network errors). Default: 3 retries with exponential backoff.
+</ParamField>
+
+<ParamField path="maxContextTokens" type="number" required={false}>
+  Maximum context window tokens. When set, conversation history is automatically trimmed (oldest messages first) to fit within this limit.
+</ParamField>
+
+---
+
+## Methods
+
+### run(input, opts?) → RunOutput
+
+Processes user input and returns the full response.
+
+<CodeGroup>
+
+```typescript Agent.run()
+const result = await agent.run("What is the capital of France?");
+console.log(result.text);
+console.log(result.usage.totalTokens);
+```
+
+```typescript With RunOpts
+const result = await agent.run("Continue our discussion.", {
+  sessionId: "user-123-session",
+  userId: "user-123",
+  metadata: { source: "web" },
+  apiKey: "sk-...", // Per-request API key override
+});
+```
+
+</CodeGroup>
+
+### stream(input, opts?) → AsyncGenerator&lt;StreamChunk&gt;
+
+Streams the response as chunks. Use for real-time UIs or SSE.
+
+```typescript
+for await (const chunk of agent.stream("Tell me a short story.")) {
+  if (chunk.type === "text") process.stdout.write(chunk.text);
+  if (chunk.type === "finish") console.log("\nDone.", chunk.usage);
+}
+```
+
+---
+
+## RunOpts
+
+Options passed to `run()` or `stream()`:
+
+| Property | Type | Description |
+|----------|------|--------------|
+| `sessionId` | `string` | Session ID for multi-turn conversations. Auto-generated if omitted. |
+| `userId` | `string` | User identifier. |
+| `metadata` | `Record<string, unknown>` | Arbitrary metadata available in `RunContext`. |
+| `apiKey` | `string` | Per-request API key override for the model provider. |
+
+---
+
+## RunOutput
+
+The object returned by `run()`:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `text` | `string` | The assistant's text response. |
+| `toolCalls` | `ToolCallResult[]` | Results from any tool calls made during the run. |
+| `usage` | `TokenUsage` | `{ promptTokens, completionTokens, totalTokens, reasoningTokens? }`. |
+| `structured` | `unknown` | Parsed structured output when `structuredOutput` schema is set. |
+| `thinking` | `string` | Model's internal reasoning content (when reasoning is enabled). |
+| `durationMs` | `number` | Wall-clock duration of the run in milliseconds. |
+
+---
+
+## Basic Example
+
+<CodeGroup>
+
+```typescript Minimal agent
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant. Be concise.",
+});
+
+const result = await agent.run("What is the capital of France?");
+console.log(result.text);
+```
+
+```typescript With tools and logging
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => `${city}: 22°C, sunny`,
+});
+
+const agent = new Agent({
+  name: "ToolBot",
+  model: openai("gpt-4o"),
+  tools: [weatherTool],
+  instructions: "Use tools when needed.",
+  logLevel: "info",
+});
+
+const result = await agent.run("What's the weather in Tokyo?");
+console.log(result.text);
+```
+
+</CodeGroup>

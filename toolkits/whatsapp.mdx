@@ -1,0 +1,102 @@
+---
+title: WhatsApp
+description: Send messages via Meta's WhatsApp Business Cloud API.
+---
+
+# WhatsApp
+
+Send text and template messages via [Meta's WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started). No third-party SDKs required — uses native `fetch`.
+
+---
+
+## Prerequisites
+
+<Steps>
+  <Step title="Create Meta Developer Account">
+    Go to [Meta Developer Portal](https://developers.facebook.com/) and create a new app with WhatsApp integration.
+  </Step>
+  <Step title="Get Credentials">
+    From the WhatsApp section of your app dashboard, get your **Access Token** and **Phone Number ID**.
+  </Step>
+  <Step title="Set Environment Variables">
+
+```bash
+export WHATSAPP_ACCESS_TOKEN=your_access_token
+export WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+export WHATSAPP_RECIPIENT_WAID=919876543210    # default recipient (optional)
+export WHATSAPP_VERSION=v22.0                   # API version (optional)
+```
+  </Step>
+</Steps>
+
+<Warning>
+For first-time outreach to a number, you **must** use pre-approved [message templates](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates). Text messages can only be sent within the 24-hour messaging window after a user messages you first.
+</Warning>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, WhatsAppToolkit } from "@radaros/core";
+
+const whatsapp = new WhatsAppToolkit();
+
+const agent = new Agent({
+  name: "whatsapp-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "Send WhatsApp messages. Use template messages for first-time outreach.",
+  tools: [...whatsapp.getTools()],
+});
+
+// Send a template message
+await agent.run(
+  'Send a "hello_world" template in English to +91 9876543210'
+);
+```
+
+---
+
+## Config
+
+<ParamField body="accessToken" type="string">
+  WhatsApp Business API access token. Falls back to `WHATSAPP_ACCESS_TOKEN` env var.
+</ParamField>
+
+<ParamField body="phoneNumberId" type="string">
+  WhatsApp Business phone number ID. Falls back to `WHATSAPP_PHONE_NUMBER_ID` env var.
+</ParamField>
+
+<ParamField body="version" type="string" default="v22.0">
+  API version. Falls back to `WHATSAPP_VERSION` env var.
+</ParamField>
+
+<ParamField body="recipientWaid" type="string">
+  Default recipient WhatsApp ID (e.g. `"919876543210"`). Falls back to `WHATSAPP_RECIPIENT_WAID` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `whatsapp_send_text` | Send a text message. Parameters: `text`, `recipient` (optional), `previewUrl` (optional). |
+| `whatsapp_send_template` | Send a template message. Parameters: `templateName`, `recipient` (optional), `languageCode` (default `"en_US"`), `components` (optional). |
+
+---
+
+## Example: Send a Text Message
+
+```typescript
+await agent.run("Send 'Hello from RadarOS!' to +91 9876543210");
+```
+
+## Example: Send a Template Message
+
+```typescript
+await agent.run(
+  'Send the "order_confirmation" template to +91 9876543210 with order ID 12345'
+);
+```
