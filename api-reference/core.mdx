@@ -1,0 +1,524 @@
+---
+title: "@radaros/core"
+description: "Complete API reference for the core package"
+---
+
+## Agent
+
+```typescript
+import { Agent } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new Agent(config: AgentConfig)
+```
+
+<ParamField body="name" type="string" required>
+  Agent name identifier.
+</ParamField>
+
+<ParamField body="model" type="ModelProvider" required>
+  LLM provider instance, e.g. `openai("gpt-4o")`.
+</ParamField>
+
+<ParamField body="instructions" type="string | (ctx: RunContext) => string">
+  System prompt. Can be static or dynamic based on context.
+</ParamField>
+
+<ParamField body="tools" type="ToolDef[]">
+  Tools the agent can call during execution.
+</ParamField>
+
+<ParamField body="memory" type="Memory">
+  Memory instance for short/long-term message storage.
+</ParamField>
+
+<ParamField body="storage" type="StorageDriver">
+  Persistent storage for sessions. Defaults to `InMemoryStorage`.
+</ParamField>
+
+<ParamField body="sessionId" type="string">
+  Default session ID. Overridden by `RunOpts.sessionId`.
+</ParamField>
+
+<ParamField body="userId" type="string">
+  Default user ID.
+</ParamField>
+
+<ParamField body="addHistoryToMessages" type="boolean" default="true">
+  Include session history in LLM messages.
+</ParamField>
+
+<ParamField body="numHistoryRuns" type="number">
+  Number of past conversation turns to include.
+</ParamField>
+
+<ParamField body="maxToolRoundtrips" type="number" default="10">
+  Maximum tool call iterations per run.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  LLM sampling temperature.
+</ParamField>
+
+<ParamField body="structuredOutput" type="ZodSchema">
+  Zod schema to enforce structured JSON responses.
+</ParamField>
+
+<ParamField body="hooks" type="AgentHooks">
+  Lifecycle hooks: `beforeRun`, `afterRun`, `onToolCall`, `onError`.
+</ParamField>
+
+<ParamField body="guardrails" type="{ input?: InputGuardrail[]; output?: OutputGuardrail[] }">
+  Input/output validation guardrails.
+</ParamField>
+
+<ParamField body="eventBus" type="EventBus">
+  Custom event bus for event-driven workflows.
+</ParamField>
+
+<ParamField body="logLevel" type="LogLevel" default="silent">
+  Log verbosity: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
+</ParamField>
+
+### Methods
+
+#### `run(input, opts?)`
+
+```typescript
+async run(input: MessageContent, opts?: RunOpts): Promise<RunOutput>
+```
+
+Execute the agent and return the complete response.
+
+#### `stream(input, opts?)`
+
+```typescript
+async *stream(input: MessageContent, opts?: RunOpts): AsyncGenerator<StreamChunk>
+```
+
+Stream the agent's response token by token.
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Agent name |
+| `eventBus` | `EventBus` | Event emitter |
+| `tools` | `ToolDef[]` | Configured tools |
+| `modelId` | `string` | Model identifier |
+| `providerId` | `string` | Provider identifier |
+| `hasStructuredOutput` | `boolean` | Whether structured output is enabled |
+
+---
+
+## RunOpts
+
+```typescript
+interface RunOpts {
+  sessionId?: string;
+  userId?: string;
+  metadata?: Record<string, unknown>;
+  apiKey?: string;
+}
+```
+
+## RunOutput
+
+```typescript
+interface RunOutput {
+  text: string;
+  toolCalls: ToolCallResult[];
+  usage: TokenUsage;
+  structured?: unknown;
+  durationMs?: number;
+}
+```
+
+## StreamChunk
+
+```typescript
+type StreamChunk =
+  | { type: "text"; text: string }
+  | { type: "tool_call_start"; toolCall: { id: string; name: string } }
+  | { type: "tool_call_delta"; toolCallId: string; argumentsDelta: string }
+  | { type: "tool_call_end"; toolCallId: string }
+  | { type: "finish"; finishReason: string; usage?: TokenUsage };
+```
+
+---
+
+## Model Providers
+
+### Factory Functions
+
+```typescript
+import { openai, anthropic, google, ollama } from "@radaros/core";
+
+openai(modelId: string, config?: { apiKey?: string; baseURL?: string }): ModelProvider
+anthropic(modelId: string, config?: { apiKey?: string }): ModelProvider
+google(modelId: string, config?: { apiKey?: string }): ModelProvider
+ollama(modelId: string, config?: { baseURL?: string }): ModelProvider
+```
+
+### ModelProvider Interface
+
+```typescript
+interface ModelProvider {
+  readonly providerId: string;
+  readonly modelId: string;
+  generate(messages: ChatMessage[], options?: ModelConfig): Promise<ModelResponse>;
+  stream(messages: ChatMessage[], options?: ModelConfig): AsyncGenerator<StreamChunk>;
+}
+```
+
+### ModelConfig
+
+```typescript
+interface ModelConfig {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  stop?: string[];
+  responseFormat?: "text" | "json" | { type: "json_schema"; schema: object; name?: string };
+  apiKey?: string;
+}
+```
+
+---
+
+## Tools
+
+### defineTool
+
+```typescript
+import { defineTool } from "@radaros/core";
+
+defineTool<T extends z.ZodObject>(config: {
+  name: string;
+  description: string;
+  parameters: T;
+  execute: (args: z.infer<T>, ctx: RunContext) => Promise<string | ToolResult>;
+}): ToolDef
+```
+
+### ToolResult
+
+```typescript
+interface ToolResult {
+  content: string;
+  artifacts?: Artifact[];
+}
+
+interface Artifact {
+  type: string;
+  data: unknown;
+  mimeType?: string;
+}
+```
+
+---
+
+## Team
+
+```typescript
+import { Team, TeamMode } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new Team(config: TeamConfig)
+```
+
+<ParamField body="name" type="string" required>Team name.</ParamField>
+<ParamField body="mode" type="TeamMode" required>Execution mode: `coordinate`, `route`, `broadcast`, `collaborate`.</ParamField>
+<ParamField body="model" type="ModelProvider" required>Orchestrator model.</ParamField>
+<ParamField body="members" type="Agent[]" required>Member agents.</ParamField>
+<ParamField body="instructions" type="string">Team-level instructions.</ParamField>
+<ParamField body="maxRounds" type="number">Max rounds for collaborate mode.</ParamField>
+<ParamField body="storage" type="StorageDriver">Persistent storage.</ParamField>
+
+### Methods
+
+```typescript
+async run(input: string, opts?: RunOpts): Promise<RunOutput>
+async *stream(input: string, opts?: RunOpts): AsyncGenerator<StreamChunk>
+```
+
+### TeamMode
+
+```typescript
+enum TeamMode {
+  Coordinate = "coordinate",
+  Route = "route",
+  Broadcast = "broadcast",
+  Collaborate = "collaborate"
+}
+```
+
+---
+
+## Workflow
+
+```typescript
+import { Workflow } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new Workflow<TState>(config: WorkflowConfig<TState>)
+```
+
+<ParamField body="name" type="string" required>Workflow name.</ParamField>
+<ParamField body="initialState" type="TState" required>Initial state object.</ParamField>
+<ParamField body="steps" type="StepDef<TState>[]" required>Ordered list of steps.</ParamField>
+<ParamField body="retryPolicy" type="{ maxRetries: number; backoffMs: number }">Retry configuration.</ParamField>
+
+### Methods
+
+```typescript
+async run(opts?: { sessionId?: string; userId?: string }): Promise<WorkflowResult<TState>>
+```
+
+### Step Types
+
+```typescript
+// Agent step
+{ name: string; agent: Agent; inputFrom?: (state: TState) => string }
+
+// Function step
+{ name: string; run: (state: TState, ctx: RunContext) => Promise<Partial<TState>> }
+
+// Condition step
+{ name: string; condition: (state: TState) => boolean; steps: StepDef<TState>[] }
+
+// Parallel step
+{ name: string; parallel: StepDef<TState>[] }
+```
+
+---
+
+## Memory
+
+```typescript
+import { Memory } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new Memory(config?: MemoryConfig)
+```
+
+<ParamField body="storage" type="StorageDriver">Storage backend. Defaults to `InMemoryStorage`.</ParamField>
+<ParamField body="maxShortTermMessages" type="number" default="50">Max messages before overflow to long-term.</ParamField>
+<ParamField body="enableLongTerm" type="boolean" default="false">Enable long-term summarization.</ParamField>
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `addMessages(sessionId, messages)` | `Promise<void>` | Add messages to short-term memory |
+| `getMessages(sessionId)` | `Promise<ChatMessage[]>` | Get short-term messages |
+| `getSummaries(sessionId)` | `Promise<string[]>` | Get long-term summaries |
+| `getContextString(sessionId)` | `Promise<string>` | Formatted context string |
+| `clear(sessionId)` | `Promise<void>` | Clear all memory for session |
+
+---
+
+## Storage Drivers
+
+```typescript
+import {
+  InMemoryStorage,
+  SqliteStorage,
+  PostgresStorage,
+  MongoDBStorage,
+} from "@radaros/core";
+```
+
+### StorageDriver Interface
+
+```typescript
+interface StorageDriver {
+  get<T>(namespace: string, key: string): Promise<T | null>;
+  set<T>(namespace: string, key: string, value: T): Promise<void>;
+  delete(namespace: string, key: string): Promise<void>;
+  list<T>(namespace: string, prefix?: string): Promise<Array<{ key: string; value: T }>>;
+  close(): Promise<void>;
+}
+```
+
+| Driver | Constructor | Requires |
+|--------|-------------|----------|
+| `InMemoryStorage` | `new InMemoryStorage()` | None |
+| `SqliteStorage` | `new SqliteStorage(filepath)` | `better-sqlite3` |
+| `PostgresStorage` | `new PostgresStorage(connectionString)` | `pg` |
+| `MongoDBStorage` | `new MongoDBStorage(uri, dbName?, collectionName?)` | `mongodb` |
+
+---
+
+## Vector Stores
+
+```typescript
+import {
+  InMemoryVectorStore,
+  PgVectorStore,
+  QdrantVectorStore,
+  MongoDBVectorStore,
+} from "@radaros/core";
+```
+
+### VectorStore Interface
+
+```typescript
+interface VectorStore {
+  upsert(doc: VectorDocument): Promise<void>;
+  search(embedding: number[], options?: VectorSearchOptions): Promise<VectorSearchResult[]>;
+  get(id: string): Promise<VectorDocument | null>;
+  delete(id: string): Promise<void>;
+  clear(): Promise<void>;
+  close(): Promise<void>;
+}
+```
+
+### Types
+
+```typescript
+interface VectorDocument {
+  id: string;
+  content: string;
+  embedding?: number[];
+  metadata?: Record<string, unknown>;
+}
+
+interface VectorSearchOptions {
+  topK?: number;
+  minScore?: number;
+  filter?: Record<string, unknown>;
+}
+
+interface VectorSearchResult {
+  document: VectorDocument;
+  score: number;
+}
+```
+
+---
+
+## Embeddings
+
+```typescript
+import { OpenAIEmbedding, GoogleEmbedding } from "@radaros/core";
+```
+
+### EmbeddingProvider Interface
+
+```typescript
+interface EmbeddingProvider {
+  embed(text: string): Promise<number[]>;
+  embedBatch(texts: string[]): Promise<number[][]>;
+}
+```
+
+| Provider | Constructor | Default Model |
+|----------|-------------|---------------|
+| `OpenAIEmbedding` | `new OpenAIEmbedding({ apiKey?, model? })` | `text-embedding-3-small` |
+| `GoogleEmbedding` | `new GoogleEmbedding({ apiKey?, model? })` | `text-embedding-004` |
+
+---
+
+## KnowledgeBase
+
+```typescript
+import { KnowledgeBase } from "@radaros/core";
+```
+
+### Constructor
+
+```typescript
+new KnowledgeBase(config: {
+  name: string;
+  vectorStore: VectorStore;
+  collection?: string;
+})
+```
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `initialize()` | `Promise<void>` | Initialize the vector store |
+| `add(doc)` | `Promise<void>` | Add a single document |
+| `addDocuments(docs)` | `Promise<void>` | Add multiple documents |
+| `search(query, options?)` | `Promise<VectorSearchResult[]>` | Semantic search |
+| `get(id)` | `Promise<VectorDocument \| null>` | Get document by ID |
+| `delete(id)` | `Promise<void>` | Delete document |
+| `clear()` | `Promise<void>` | Clear all documents |
+| `close()` | `Promise<void>` | Close connections |
+| `asTool(config?)` | `ToolDef` | Create a tool for RAG |
+
+---
+
+## Message Types
+
+```typescript
+type MessageRole = "system" | "user" | "assistant" | "tool";
+type MessageContent = string | ContentPart[];
+
+interface ChatMessage {
+  role: MessageRole;
+  content: MessageContent | null;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  name?: string;
+}
+
+type ContentPart = TextPart | ImagePart | AudioPart | FilePart;
+
+interface TextPart   { type: "text"; text: string }
+interface ImagePart  { type: "image"; data: string; mimeType?: string }
+interface AudioPart  { type: "audio"; data: string; mimeType?: string }
+interface FilePart   { type: "file"; data: string; mimeType: string; filename?: string }
+```
+
+### Helpers
+
+```typescript
+getTextContent(content: MessageContent | null): string
+isMultiModal(content: MessageContent | null): content is ContentPart[]
+```
+
+---
+
+## EventBus
+
+```typescript
+import { EventBus } from "@radaros/core";
+
+const bus = new EventBus();
+bus.on("run.start", (data) => { /* { runId, agentName, input } */ });
+bus.on("run.complete", (data) => { /* { runId, output } */ });
+bus.on("run.error", (data) => { /* { runId, error } */ });
+bus.on("run.stream.chunk", (data) => { /* { runId, chunk } */ });
+bus.on("tool.call", (data) => { /* { runId, toolName, args } */ });
+bus.on("tool.result", (data) => { /* { runId, toolName, result } */ });
+```
+
+---
+
+## Logger
+
+```typescript
+import { Logger } from "@radaros/core";
+
+const logger = new Logger({
+  level: "info",    // "debug" | "info" | "warn" | "error" | "silent"
+  color: true,      // auto-detect TTY
+  prefix: "myapp",
+});
+```

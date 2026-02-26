@@ -1,0 +1,117 @@
+---
+title: Collaborate Mode
+description: Iterative rounds between agents. maxRounds config. Example with iterative refinement.
+---
+
+# Collaborate Mode
+
+In **Collaborate** mode, agents work in **iterative rounds**. Each agent can build on the previous agent's output. The process continues until a stopping condition or `maxRounds` is reached.
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Round 1">
+    Agent A processes the initial input and produces output.
+  </Step>
+  <Step title="Round 2">
+    Agent B receives A's output, adds its contribution.
+  </Step>
+  <Step title="Subsequent rounds">
+    Agents continue passing work until done or maxRounds.
+  </Step>
+  <Step title="Final output">
+    The team returns the last (or merged) result.
+  </Step>
+</Steps>
+
+---
+
+## maxRounds Config
+
+<ParamField path="maxRounds" type="number" required={false}>
+  Maximum number of collaboration rounds. Prevents infinite loops. Set based on your workflow (e.g., 3–5 for typical pipelines).
+</ParamField>
+
+---
+
+## Example: Iterative Refinement
+
+<CodeGroup>
+  <CodeGroup.Item title="collaborate-team.ts">
+```typescript
+import { Team, TeamMode, Agent, openai } from "@radaros/core";
+
+const drafter = new Agent({
+  name: "Drafter",
+  model: openai("gpt-4o-mini"),
+  instructions: "Create initial drafts. Be creative and comprehensive.",
+});
+
+const editor = new Agent({
+  name: "Editor",
+  model: openai("gpt-4o-mini"),
+  instructions: "Improve drafts: fix clarity, structure, and flow. Keep the core ideas.",
+});
+
+const polisher = new Agent({
+  name: "Polisher",
+  model: openai("gpt-4o-mini"),
+  instructions: "Final pass: tighten language, fix grammar, ensure consistency.",
+});
+
+const writingTeam = new Team({
+  name: "Writing Pipeline",
+  mode: TeamMode.Collaborate,
+  model: openai("gpt-4o"),
+  members: [drafter, editor, polisher],
+  maxRounds: 3,
+  instructions: `
+    Agents collaborate in sequence:
+    1. Drafter creates the initial version.
+    2. Editor refines structure and clarity.
+    3. Polisher does final polish.
+    
+    Each agent builds on the previous output. Stop when the result is publication-ready.
+  `,
+});
+
+const output = await writingTeam.run(
+  "Write a blog post about the benefits of TypeScript for large codebases."
+);
+console.log(output.text);
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## When to Use Collaborate
+
+<CardGroup cols={2}>
+  <Card title="Iterative refinement" icon="rotate">
+    Draft → Edit → Polish pipelines.
+  </Card>
+  <Card title="Peer review" icon="user-check">
+    Agent A proposes, Agent B reviews and suggests changes.
+  </Card>
+  <Card title="Multi-stage generation" icon="layer-group">
+    Each agent adds a layer of value.
+  </Card>
+  <Card title="Convergence" icon="bullseye">
+    Agents iterate until output meets criteria.
+  </Card>
+</CardGroup>
+
+---
+
+## Tips
+
+<Accordion title="Setting maxRounds">
+  Start with 3–5 rounds. Too few may cut off useful iteration; too many increases cost and latency.
+</Accordion>
+
+<Accordion title="Round order">
+  The order of members matters. Place agents in the sequence that matches your workflow (e.g., drafter first, polisher last).
+</Accordion>

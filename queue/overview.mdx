@@ -1,0 +1,126 @@
+---
+title: Queue Overview
+description: Background jobs for agents and workflows. BullMQ and Redis architecture for async processing in RadarOS.
+---
+
+# Queue Overview
+
+RadarOS provides a **queue system** for running agents and workflows as **background jobs**. Use it when you need to process long-running tasks asynchronously, scale workers independently, or retry failed runs.
+
+---
+
+## Architecture
+
+<CardGroup cols={2}>
+  <Card title="AgentQueue" icon="inbox">
+    Producer. Enqueue agent runs and workflows. Returns job IDs for status tracking.
+  </Card>
+  <Card title="AgentWorker" icon="cog">
+    Consumer. Processes jobs from the queue using your agent and workflow registries.
+  </Card>
+</CardGroup>
+
+Both use **BullMQ** backed by **Redis**. You need a running Redis server.
+
+---
+
+## Dependencies
+
+<CodeGroup>
+
+```bash npm
+npm install @radaros/queue bullmq ioredis
+```
+
+```bash pnpm
+pnpm add @radaros/queue bullmq ioredis
+```
+
+</CodeGroup>
+
+**Redis** must be running. BullMQ uses it for job storage, scheduling, and coordination.
+
+```bash
+# Local Redis (macOS)
+brew services start redis
+
+# Or Docker
+docker run -d -p 6379:6379 redis:alpine
+```
+
+---
+
+## Quick Start
+
+```typescript
+import { AgentQueue, AgentWorker } from "@radaros/queue";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Worker",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+});
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+});
+
+const worker = new AgentWorker({
+  connection: { host: "localhost", port: 6379 },
+  agentRegistry: { worker: agent },
+});
+
+// Enqueue a job
+const { jobId } = await queue.enqueueAgentRun({
+  agentName: "worker",
+  input: "Hello!",
+});
+
+// Check status
+const status = await queue.getJobStatus(jobId);
+console.log(status.state); // "waiting" | "active" | "completed" | "failed"
+```
+
+---
+
+## Job Types
+
+| Type | Enqueue Method | Payload |
+|------|----------------|---------|
+| **Agent** | `enqueueAgentRun()` | agentName, input, sessionId?, userId? |
+| **Workflow** | `enqueueWorkflow()` | workflowName, initialState?, sessionId? |
+
+---
+
+## Job Lifecycle
+
+<Steps>
+  <Step title="Enqueue">
+    Producer adds a job to the Redis-backed queue. Returns `jobId`.
+  </Step>
+  <Step title="Wait">
+    Job sits in the queue until a worker picks it up.
+  </Step>
+  <Step title="Process">
+    Worker runs the agent or workflow. Progress can be reported via `job.updateProgress()`.
+  </Step>
+  <Step title="Complete or Fail">
+    Result is stored (or error recorded). `onCompleted` / `onFailed` handlers fire.
+  </Step>
+</Steps>
+
+---
+
+## Scaling
+
+- Run **multiple workers** on different processes or machines. BullMQ distributes jobs across them.
+- Use **concurrency** per worker to process several jobs in parallel.
+- Use **priority** and **delay** for scheduling.
+
+---
+
+## Next Steps
+
+- [Producer](/queue/producer) — AgentQueue, enqueue methods, job status
+- [Worker](/queue/worker) — AgentWorker, concurrency, event bridging

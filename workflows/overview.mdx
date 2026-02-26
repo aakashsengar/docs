@@ -1,0 +1,155 @@
+---
+title: Workflows
+description: Stateful step-based execution in RadarOS. WorkflowConfig, state machine concept, and basic example.
+---
+
+# Workflows
+
+**Workflows** orchestrate multi-step pipelines with shared state. Define steps (agents, functions, conditions, parallel execution), pass state between them, and handle retries and errors—all in a declarative, state-machine style.
+
+---
+
+## Stateful Step-Based Execution
+
+<CardGroup cols={2}>
+  <Card title="Shared State" icon="database">
+    Each step reads from and writes to a typed `TState` object passed through the workflow.
+  </Card>
+  <Card title="Step Types" icon="list-check">
+    AgentStep, FunctionStep, ConditionStep, ParallelStep.
+  </Card>
+  <Card title="Retry & Error Handling" icon="rotate">
+    Configurable retry policy and step result status (done, error, skipped).
+  </Card>
+  <Card title="Event-Driven" icon="bolt">
+    Optional EventBus for workflow lifecycle events.
+  </Card>
+</CardGroup>
+
+---
+
+## WorkflowConfig
+
+```typescript
+interface WorkflowConfig<TState> {
+  name: string;
+  initialState: TState;
+  steps: StepDef<TState>[];
+  storage?: StorageDriver;
+  retryPolicy?: { maxRetries: number; backoffMs: number };
+  eventBus?: EventBus;
+}
+```
+
+<ParamField path="name" type="string" required>
+  Display name for the workflow.
+</ParamField>
+
+<ParamField path="initialState" type="TState" required>
+  Initial state object. Steps read from and merge updates into this state.
+</ParamField>
+
+<ParamField path="steps" type="StepDef&lt;TState&gt;[]" required>
+  Ordered array of steps. See <a href="/workflows/steps">Workflow Steps</a>.
+</ParamField>
+
+<ParamField path="storage" type="StorageDriver" required={false}>
+  Storage for workflow persistence (e.g., resuming, audit).
+</ParamField>
+
+<ParamField path="retryPolicy" type="object" required={false}>
+  `{ maxRetries, backoffMs }` for failed steps. See <a href="/workflows/retry-policy">Retry & Error Handling</a>.
+</ParamField>
+
+<ParamField path="eventBus" type="EventBus" required={false}>
+  Custom event bus for workflow events.
+</ParamField>
+
+---
+
+## State Machine Concept
+
+Workflows behave like state machines:
+
+1. **Initial state** — `initialState` is the starting point.
+2. **Steps** — Each step receives the current state and can return a partial update.
+3. **State merge** — Updates are merged into the state before the next step.
+4. **Result** — `WorkflowResult` contains final state and `stepResults`.
+
+---
+
+## Basic Example
+
+```typescript
+import { Workflow, Agent, openai } from "@radaros/core";
+
+interface ContentState {
+  topic: string;
+  research_output?: string;
+  write_output?: string;
+}
+
+const researcher = new Agent({
+  name: "Researcher",
+  model: openai("gpt-4o-mini"),
+  instructions: "Research topics and provide factual summaries.",
+});
+
+const writer = new Agent({
+  name: "Writer",
+  model: openai("gpt-4o-mini"),
+  instructions: "Write clear content from research notes.",
+});
+
+const workflow = new Workflow<ContentState>({
+  name: "Content Pipeline",
+  initialState: { topic: "Quantum computing basics" },
+  steps: [
+    {
+      name: "research",
+      agent: researcher,
+      inputFrom: (state) => `Research: ${state.topic}`,
+    },
+    {
+      name: "write",
+      agent: writer,
+      inputFrom: (state) => `Write a draft using: ${state.research_output}`,
+    },
+  ],
+});
+
+const result = await workflow.run();
+console.log(result.state.write_output);
+```
+
+---
+
+## WorkflowResult
+
+```typescript
+interface WorkflowResult<TState> {
+  state: TState;
+  stepResults: StepResult[];
+}
+```
+
+<ParamField path="state" type="TState">
+  Final state after all steps (including any updates from steps).
+</ParamField>
+
+<ParamField path="stepResults" type="StepResult[]">
+  Per-step results: `stepName`, `status` (done | error | skipped), `error?`, `durationMs`.
+</ParamField>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Workflow Steps" icon="list-check" href="/workflows/steps">
+    AgentStep, FunctionStep, ConditionStep, ParallelStep.
+  </Card>
+  <Card title="Retry & Error Handling" icon="rotate" href="/workflows/retry-policy">
+    retryPolicy, StepResult status, WorkflowResult.
+  </Card>
+</CardGroup>

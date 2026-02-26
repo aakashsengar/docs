@@ -1,0 +1,201 @@
+---
+title: Hooks & Guardrails
+description: AgentHooks lifecycle, input/output guardrails, and GuardrailResult in RadarOS.
+---
+
+# Hooks & Guardrails
+
+RadarOS agents support **hooks** for lifecycle events and **guardrails** for validating input and output. Use hooks for logging, analytics, or side effects; use guardrails for content moderation, safety, or compliance.
+
+---
+
+## AgentHooks
+
+Hooks are async functions called at specific points in the agent lifecycle:
+
+| Hook | When | Signature |
+|------|------|------------|
+| `beforeRun` | Before the run starts | `(ctx: RunContext) => Promise<void>` |
+| `afterRun` | After the run completes successfully | `(ctx: RunContext, output: RunOutput) => Promise<void>` |
+| `onToolCall` | When a tool is about to be called | `(ctx: RunContext, toolName: string, args: unknown) => Promise<void>` |
+| `onError` | When an error occurs | `(ctx: RunContext, error: Error) => Promise<void>` |
+
+---
+
+## Example: Logging Hook
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(`Run started: ${ctx.runId}`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(`Run completed: ${output.usage.totalTokens} tokens`);
+    },
+    onToolCall: async (ctx, toolName, args) => {
+      console.log(`Tool called: ${toolName}`, args);
+    },
+    onError: async (ctx, error) => {
+      console.error(`Run failed: ${error.message}`);
+    },
+  },
+});
+```
+
+---
+
+## Input Guardrails
+
+Input guardrails validate user input **before** it is sent to the LLM. If any guardrail fails, the run is aborted with an error.
+
+```typescript
+interface InputGuardrail {
+  name: string;
+  validate: (input: MessageContent, ctx: RunContext) => Promise<GuardrailResult>;
+}
+```
+
+---
+
+## Output Guardrails
+
+Output guardrails validate the agent's response **after** the run. If any guardrail fails, the run throws.
+
+```typescript
+interface OutputGuardrail {
+  name: string;
+  validate: (output: RunOutput, ctx: RunContext) => Promise<GuardrailResult>;
+}
+```
+
+---
+
+## GuardrailResult
+
+Each guardrail returns a `GuardrailResult`:
+
+```typescript
+type GuardrailResult =
+  | { pass: true }
+  | { pass: false; reason: string };
+```
+
+- **pass: true** — Validation succeeded; execution continues.
+- **pass: false** — Validation failed; execution stops with an error containing `reason`.
+
+---
+
+## Example: Content Moderation Guardrail
+
+```typescript
+import { getTextContent } from "@radaros/core";
+
+const blockProfanity: InputGuardrail = {
+  name: "profanity-check",
+  validate: async (input) => {
+    const text = typeof input === "string" ? input : getTextContent(input);
+    const badWords = ["spam", "abuse"];
+    const hasBad = badWords.some((w) => text.toLowerCase().includes(w));
+    if (hasBad) {
+      return { pass: false, reason: "Input contains disallowed content." };
+    }
+    return { pass: true };
+  },
+};
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  guardrails: {
+    input: [blockProfanity],
+  },
+});
+```
+
+---
+
+## Example: Output Length Guardrail
+
+```typescript
+const maxLengthGuardrail: OutputGuardrail = {
+  name: "max-length",
+  validate: async (output) => {
+    if (output.text.length > 5000) {
+      return {
+        pass: false,
+        reason: `Response exceeds 5000 characters (${output.text.length}).`,
+      };
+    }
+    return { pass: true };
+  },
+};
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  guardrails: {
+    output: [maxLengthGuardrail],
+  },
+});
+```
+
+---
+
+## Multiple Guardrails
+
+You can use multiple input and output guardrails. **All must pass** for the run to proceed:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  guardrails: {
+    input: [blockProfanity, rateLimitCheck],
+    output: [maxLengthGuardrail, piiRedactionGuardrail],
+  },
+});
+```
+
+Guardrails run in order. The first failure stops execution and throws.
+
+---
+
+## Full Example
+
+<CodeGroup>
+
+```typescript Hooks + Guardrails
+import { Agent, openai, getTextContent } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(`[${ctx.runId}] Starting run`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(`[${ctx.runId}] Done: ${output.usage.totalTokens} tokens`);
+    },
+  },
+  guardrails: {
+    input: [
+      {
+        name: "non-empty",
+        validate: async (input) => {
+          const t = typeof input === "string" ? input : getTextContent(input);
+          if (!t.trim()) return { pass: false, reason: "Input is empty." };
+          return { pass: true };
+        },
+      },
+    ],
+  },
+});
+```
+
+</CodeGroup>

@@ -1,0 +1,80 @@
+---
+title: Introduction
+description: RadarOS is a TypeScript-native agent orchestration framework for Node.js. Model-agnostic, multi-agent teams, workflows, RAG, and more.
+---
+
+# Introduction
+
+## What is RadarOS?
+
+**RadarOS** is a TypeScript-native agent orchestration framework for Node.js. It provides a complete toolkit for building AI-powered applications—from simple chatbots to complex multi-agent systems—with **zero meta-framework dependency**. Write pure TypeScript, plug in your preferred LLM provider, and ship production-ready agent applications.
+
+RadarOS is designed for developers who want:
+
+- **Full control** over their agent architecture
+- **Native TypeScript** without Python runtime or transpilation layers
+- **Flexibility** to swap models, storage, and transport layers without rewriting code
+- **Production readiness** with built-in session management, memory, RAG, and background job queues
+
+---
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Model Agnostic" icon="robot">
+    Use OpenAI, Anthropic, Google Gemini, or Ollama with a unified interface. Switch providers with a single line change.
+  </Card>
+  <Card title="Multi-Agent Teams" icon="users">
+    Coordinate, route, broadcast, and collaborate across multiple agents. Build sophisticated agent hierarchies.
+  </Card>
+  <Card title="Stateful Workflows" icon="workflow">
+    Define agent steps, conditions, and parallel execution. Orchestrate complex multi-step pipelines.
+  </Card>
+  <Card title="Tools & Function Calling" icon="wrench">
+    Zod-validated tool definitions with type-safe execution. Full support for OpenAI-compatible function calling.
+  </Card>
+  <Card title="RAG & Knowledge Base" icon="database">
+    Vector stores, embeddings, and retrieval. Build context-aware agents with your own documents.
+  </Card>
+  <Card title="Multi-Modal" icon="image">
+    Handle images, audio, and files. Pass rich content to vision and audio-capable models.
+  </Card>
+  <Card title="Transport Layer" icon="globe">
+    Express REST API and Socket.IO WebSocket gateway. Expose agents as HTTP or real-time endpoints.
+  </Card>
+  <Card title="Background Jobs" icon="clock">
+    BullMQ queue and worker support. Process long-running tasks asynchronously.
+  </Card>
+  <Card title="Storage Drivers" icon="hard-drive">
+    In-memory, SQLite, PostgreSQL, and MongoDB. Choose the right persistence for your scale.
+  </Card>
+  <Card title="Memory & Sessions" icon="brain">
+    Short-term and long-term memory. Session history with configurable retention.
+  </Card>
+</CardGroup>
+
+---
+
+## Why RadarOS?
+
+<Accordion title="vs. LangGraph (Python)">
+  LangGraph is Python-only. If your stack is Node.js/TypeScript, you'd need to run a separate Python service, manage two runtimes, and deal with inter-process communication. RadarOS keeps everything in TypeScript—same language, same process, same deployment.
+</Accordion>
+
+<Accordion title="vs. Vercel AI SDK">
+  The Vercel AI SDK is tightly coupled to Vercel's streaming and React patterns. RadarOS is framework-agnostic: use it with Express, Fastify, Socket.IO, or headless. No vendor lock-in, no React requirement.
+</Accordion>
+
+<Accordion title="vs. LangChain.js">
+  RadarOS avoids the abstraction overhead of LangChain's chain-based model. You get direct control over the agent loop, tool execution, and session flow—without fighting a complex abstraction layer.
+</Accordion>
+
+---
+
+## Get Started
+
+Ready to build your first agent? Head to the [Quickstart](/quickstart) to install RadarOS and run a simple example in under five minutes.
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Install, configure, and run your first RadarOS agent in minutes.
+</Card>

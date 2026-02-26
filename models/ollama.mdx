@@ -1,0 +1,112 @@
+---
+title: Ollama (Local Models)
+description: Run local LLMs with Ollama and RadarOS. No API key needed. Llama, CodeLlama, Mistral, and more.
+---
+
+# Ollama (Local Models)
+
+Use **Ollama** to run open-source models locally with RadarOS. No API key required—ideal for development, privacy-sensitive workloads, and cost-free experimentation.
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install Ollama from [ollama.ai](https://ollama.ai). Start the Ollama service (it runs on `http://localhost:11434` by default).
+  </Step>
+  <Step title="Pull a model">
+    Pull the model you want to use:
+
+```bash
+ollama pull llama3.1
+ollama pull codellama
+ollama pull mistral
+```
+  </Step>
+  <Step title="Use in RadarOS">
+    Use the `ollama` factory with the model name:
+  </Step>
+</Steps>
+
+```typescript
+import { ollama } from "@radaros/core";
+
+const model = ollama("llama3.1");
+```
+
+---
+
+## Factory
+
+```typescript
+import { ollama } from "@radaros/core";
+
+const model = ollama("llama3.1");
+```
+
+<ParamField path="modelId" type="string" required>
+  The Ollama model name (e.g., `llama3.1`, `codellama`, `mistral`).
+</ParamField>
+
+<ParamField path="config" type="object" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Config
+
+<ParamField path="host" type="string" required={false} default="http://localhost:11434">
+  Ollama server URL. Defaults to `http://localhost:11434`. Use this for remote Ollama instances or custom ports.
+</ParamField>
+
+<Accordion title="No API key needed">
+  Ollama runs locally and does not require an API key. Just ensure the Ollama service is running.
+</Accordion>
+
+### Example
+
+```typescript
+const model = ollama("llama3.1", {
+  host: "http://localhost:11434",
+});
+
+// Remote Ollama instance
+const remoteModel = ollama("mistral", {
+  host: "http://192.168.1.100:11434",
+});
+```
+
+---
+
+## Popular Models
+
+| Model | Use Case |
+|-------|----------|
+| `llama3.1` | General purpose, strong all-around performance |
+| `codellama` | Code generation and understanding |
+| `mistral` | Fast, efficient, good for chat |
+| `mixtral` | Mixture of experts, higher capability |
+| `phi3` | Small, fast, good for edge devices |
+
+<Accordion title="Discover more models">
+  Run `ollama list` to see installed models. Browse [ollama.com/library](https://ollama.com/library) for the full catalog.
+</Accordion>
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Local Assistant",
+  model: ollama("llama3.1"),
+  instructions: "You are a helpful assistant running locally.",
+});
+
+const output = await agent.run("Explain recursion in one sentence.");
+console.log(output.text);
+```

@@ -1,0 +1,138 @@
+---
+title: Google Gemini
+description: Use Google Gemini models (Gemini 2.5 Flash, Gemini 2.5 Pro) with RadarOS. Setup, factory, config, and multi-modal support.
+---
+
+# Google Gemini
+
+Use Google's Gemini models with RadarOS through the unified `ModelProvider` interface. Gemini offers strong multi-modal capabilities—vision, audio, and native file handling.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Install the Google GenAI SDK (required by RadarOS for Gemini support):
+
+```bash
+npm install @google/genai
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your API key via environment variable:
+
+```bash
+export GOOGLE_API_KEY="..."
+```
+
+Or pass it in config (see below).
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { google } from "@radaros/core";
+
+const model = google("gemini-2.5-flash");
+```
+
+<ParamField path="modelId" type="string" required>
+  The Gemini model identifier.
+</ParamField>
+
+<ParamField path="config" type="object" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gemini-2.5-flash` | Fast, efficient. Great for high-throughput and latency-sensitive apps. |
+| `gemini-2.5-pro` | Highest capability. Best for complex reasoning and long-context tasks. |
+
+---
+
+## Config
+
+<ParamField path="apiKey" type="string" required={false}>
+  Google API key. If omitted, uses `GOOGLE_API_KEY` environment variable.
+</ParamField>
+
+### Example
+
+```typescript
+const model = google("gemini-2.5-flash", {
+  apiKey: process.env.GOOGLE_API_KEY,
+});
+```
+
+---
+
+## Multi-Modal Support
+
+Gemini supports **vision**, **audio**, and **file** content. Pass multi-modal content via `ContentPart[]` in messages:
+
+<CodeGroup>
+  <CodeGroup.Item title="Vision (image)">
+```typescript
+const messages: ChatMessage[] = [
+  {
+    role: "user",
+    content: [
+      { type: "text", text: "What's in this image?" },
+      {
+        type: "image",
+        data: base64ImageData,
+        mimeType: "image/png",
+      },
+    ],
+  },
+];
+const response = await model.generate(messages);
+```
+  </CodeGroup.Item>
+  <CodeGroup.Item title="Audio">
+```typescript
+const messages: ChatMessage[] = [
+  {
+    role: "user",
+    content: [
+      { type: "text", text: "Transcribe this audio." },
+      {
+        type: "audio",
+        data: base64AudioData,
+        mimeType: "audio/mp3",
+      },
+    ],
+  },
+];
+const response = await model.generate(messages);
+```
+  </CodeGroup.Item>
+</CodeGroup>
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, google } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Gemini Assistant",
+  model: google("gemini-2.5-flash", {
+    apiKey: process.env.GOOGLE_API_KEY,
+  }),
+  instructions: "You are a helpful assistant with strong multi-modal capabilities.",
+});
+
+const output = await agent.run("Summarize the key points of this document.");
+console.log(output.text);
+```

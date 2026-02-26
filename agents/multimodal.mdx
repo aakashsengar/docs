@@ -1,0 +1,204 @@
+---
+title: Multi-Modal Input
+description: Send images, audio, and files to agents. MessageContent, ContentPart types, and examples.
+---
+
+# Multi-Modal Input
+
+RadarOS agents accept not only text but also **images**, **audio**, and **files**. Use the `MessageContent` type and `ContentPart[]` to send multi-modal input to vision and audio-capable models.
+
+---
+
+## MessageContent Type
+
+Input to `agent.run()` or `agent.stream()` can be:
+
+```typescript
+type MessageContent = string | ContentPart[];
+```
+
+- **string** — Plain text (most common)
+- **ContentPart[]** — Array of text, image, audio, or file parts
+
+---
+
+## ContentPart Types
+
+<CardGroup cols={2}>
+  <Card title="TextPart" icon="text">
+    `{ type: "text", text: string }`
+  </Card>
+  <Card title="ImagePart" icon="image">
+    `{ type: "image", data: string, mimeType? }`
+  </Card>
+  <Card title="AudioPart" icon="audio">
+    `{ type: "audio", data: string, mimeType? }`
+  </Card>
+  <Card title="FilePart" icon="file">
+    `{ type: "file", data: string, mimeType, filename? }`
+  </Card>
+</CardGroup>
+
+---
+
+## Image Input
+
+Images can be provided as **base64** or **URL**:
+
+```typescript
+import { Agent, openai, type ContentPart } from "@radaros/core";
+
+const agent = new Agent({
+  name: "VisionAgent",
+  model: openai("gpt-4o"),
+  instructions: "Describe and analyze images in detail.",
+});
+
+// Image via URL
+const input: ContentPart[] = [
+  { type: "text", text: "What's in this image?" },
+  {
+    type: "image",
+    data: "https://example.com/image.png",
+    mimeType: "image/png",
+  },
+];
+
+// Image via base64
+const base64Image = "data:image/png;base64,iVBORw0KGgo...";
+const inputBase64: ContentPart[] = [
+  { type: "text", text: "Analyze this." },
+  { type: "image", data: base64Image, mimeType: "image/png" },
+];
+
+const result = await agent.run(input);
+```
+
+Supported `mimeType` values: `image/png`, `image/jpeg`, `image/gif`, `image/webp`.
+
+---
+
+## Audio Input
+
+Audio is provided as **base64**-encoded data:
+
+```typescript
+import { Agent, google, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "AudioAnalyzer",
+  model: google("gemini-2.5-flash"),
+  instructions: "Transcribe and analyze audio content.",
+  structuredOutput: AudioAnalysisSchema,
+});
+
+const audioData = readFileSync("sample.mp3");
+const base64Audio = audioData.toString("base64");
+
+const result = await agent.run([
+  { type: "text", text: "Transcribe and summarize this audio." },
+  { type: "audio", data: base64Audio, mimeType: "audio/mp3" },
+] as ContentPart[]);
+```
+
+Supported `mimeType` values: `audio/mp3`, `audio/wav`, `audio/ogg`, `audio/webm`.
+
+---
+
+## File Input
+
+Generic files (PDFs, documents, etc.) use `FilePart`:
+
+```typescript
+const input: ContentPart[] = [
+  { type: "text", text: "Summarize this document." },
+  {
+    type: "file",
+    data: "https://example.com/doc.pdf",
+    mimeType: "application/pdf",
+    filename: "document.pdf",
+  },
+];
+```
+
+`data` can be a URL or base64-encoded content.
+
+---
+
+## Example: Vision Agent Analyzing an Image
+
+```typescript
+import { Agent, openai, type ContentPart } from "@radaros/core";
+import { z } from "zod";
+
+const ImageAnalysis = z.object({
+  description: z.string().describe("Detailed description of the image"),
+  objects: z.array(z.string()).describe("Objects detected"),
+  dominantColors: z.array(z.string()).describe("Dominant colors"),
+  mood: z.string().describe("Overall mood"),
+});
+
+const analyzer = new Agent({
+  name: "ImageAnalyzer",
+  model: openai("gpt-4o"),
+  instructions: "Analyze images and return structured JSON.",
+  structuredOutput: ImageAnalysis,
+});
+
+const multiModalInput: ContentPart[] = [
+  { type: "text", text: "Analyze this image in detail." },
+  {
+    type: "image",
+    data: "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+    mimeType: "image/png",
+  },
+];
+
+const result = await analyzer.run(multiModalInput);
+console.log(result.structured);
+```
+
+---
+
+## Example: Audio Analysis with Gemini
+
+```typescript
+import { Agent, google, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+import { z } from "zod";
+
+const AudioAnalysis = z.object({
+  transcription: z.string(),
+  language: z.string(),
+  speakerCount: z.number(),
+  summary: z.string(),
+  mood: z.string(),
+  topics: z.array(z.string()),
+});
+
+const agent = new Agent({
+  name: "AudioAnalyzer",
+  model: google("gemini-2.5-flash"),
+  instructions: "Analyze audio: transcribe, detect language, summarize.",
+  structuredOutput: AudioAnalysis,
+});
+
+const audioData = readFileSync("audio/sample.mp3");
+const base64Audio = audioData.toString("base64");
+
+const result = await agent.run([
+  { type: "text", text: "Analyze this audio clip in detail." },
+  { type: "audio", data: base64Audio, mimeType: "audio/mp3" },
+] as ContentPart[]);
+
+console.log(result.structured);
+```
+
+---
+
+## Multi-Modal via HTTP File Upload
+
+When exposing agents via Express, you can accept file uploads and convert them to `ContentPart[]`. The transport layer provides `buildMultiModalInput` for this:
+
+See <a href="/transport/file-upload">File Upload</a> for how to handle `multipart/form-data` and build multi-modal input from uploaded files.

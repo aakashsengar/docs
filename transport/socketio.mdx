@@ -1,0 +1,212 @@
+---
+title: Socket.IO Gateway
+description: createAgentGateway for real-time agent streaming. Events, namespace, auth, and a chat example.
+---
+
+# Socket.IO Gateway
+
+`createAgentGateway()` attaches real-time handlers to a Socket.IO server. Clients emit `agent.run` or `team.run` and receive streaming chunks, tool events, and final output over WebSockets.
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install @radaros/transport socket.io
+```
+
+```bash pnpm
+pnpm add @radaros/transport socket.io
+```
+
+</CodeGroup>
+
+---
+
+## Basic Setup
+
+```typescript
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { createAgentGateway } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+});
+
+const httpServer = createServer();
+const io = new Server(httpServer);
+
+createAgentGateway({
+  io,
+  agents: { assistant: agent },
+  namespace: "/radaros", // default
+});
+
+httpServer.listen(3000);
+```
+
+---
+
+## GatewayOptions
+
+<ParamField path="io" type="Server" required>
+  Socket.IO server instance.
+</ParamField>
+
+<ParamField path="agents" type="Record<string, Agent>" required={false}>
+  Map of agent names to Agent instances.
+</ParamField>
+
+<ParamField path="teams" type="Record<string, Team>" required={false}>
+  Map of team names to Team instances.
+</ParamField>
+
+<ParamField path="namespace" type="string" required={false} default="/radaros">
+  Socket.IO namespace. Clients connect to `http://host/radaros` (or your namespace).
+</ParamField>
+
+<ParamField path="authMiddleware" type="(socket, next) => void" required={false}>
+  Socket.IO middleware for authentication. Call `next()` to allow, or `next(new Error("Unauthorized"))` to reject.
+</ParamField>
+
+---
+
+## Events
+
+### Client → Server
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `agent.run` | `{ name, input, sessionId?, apiKey? }` | Run agent and stream response |
+| `team.run` | `{ name, input, sessionId?, apiKey? }` | Run team (non-streaming) |
+
+### Server → Client
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `agent.chunk` | `{ chunk: string }` | Streamed text chunk |
+| `agent.tool.call` | `{ toolName, args }` | Tool call started |
+| `agent.tool.done` | `{ toolCallId }` | Tool call finished |
+| `agent.done` | `{ output: { text } }` | Run complete |
+| `agent.error` | `{ error: string }` | Error occurred |
+
+---
+
+## Real-Time Chat Example
+
+**Server:**
+
+```typescript
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { createAgentGateway } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "ChatBot",
+  model: openai("gpt-4o"),
+  instructions: "You are a friendly chat assistant.",
+});
+
+const httpServer = createServer();
+const io = new Server(httpServer, {
+  cors: { origin: "*" },
+});
+
+createAgentGateway({
+  io,
+  agents: { chatbot: agent },
+  namespace: "/chat",
+});
+
+httpServer.listen(3000);
+```
+
+**Client (browser):**
+
+```html
+<script src="https://cdn.socket.io/4.8.3/socket.io.min.js"></script>
+<script>
+  const socket = io("http://localhost:3000/chat");
+
+  socket.on("agent.chunk", ({ chunk }) => {
+    process.stdout.write(chunk);
+  });
+
+  socket.on("agent.done", ({ output }) => {
+    console.log("\nDone:", output.text);
+  });
+
+  socket.on("agent.error", ({ error }) => {
+    console.error("Error:", error);
+  });
+
+  socket.emit("agent.run", {
+    name: "chatbot",
+    input: "Tell me a joke.",
+    sessionId: "user-123",
+  });
+</script>
+```
+
+---
+
+## With Authentication
+
+```typescript
+createAgentGateway({
+  io,
+  agents: { assistant: agent },
+  authMiddleware: (socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token || !validateToken(token)) {
+      return next(new Error("Unauthorized"));
+    }
+    socket.userId = decodeToken(token).userId;
+    next();
+  },
+});
+```
+
+Clients can pass `apiKey` in the event payload or in `handshake.auth`:
+
+```javascript
+const socket = io("http://localhost:3000/radaros", {
+  auth: { apiKey: "sk-..." },
+});
+
+socket.emit("agent.run", {
+  name: "assistant",
+  input: "Hello",
+  apiKey: "sk-...", // or use handshake.auth.apiKey
+});
+```
+
+---
+
+## Session Continuity
+
+Use `sessionId` to maintain conversation context across multiple `agent.run` calls:
+
+```javascript
+const sessionId = `user-${userId}-${Date.now()}`;
+
+socket.emit("agent.run", {
+  name: "assistant",
+  input: "My name is Alice.",
+  sessionId,
+});
+
+// Later, same session
+socket.emit("agent.run", {
+  name: "assistant",
+  input: "What's my name?",
+  sessionId,
+});
+```

@@ -1,0 +1,142 @@
+---
+title: SQLite Storage
+description: SqliteStorage driver for file-based persistence. Requires better-sqlite3. No initialize() needed.
+---
+
+# SQLite Storage
+
+**SqliteStorage** persists key-value data to a local SQLite database file. It requires the `better-sqlite3` package and is ideal for single-node deployments, embedded applications, or lightweight production setups.
+
+---
+
+## Installation
+
+<CodeGroup>
+
+```bash npm
+npm install better-sqlite3
+```
+
+```bash pnpm
+pnpm add better-sqlite3
+```
+
+```bash yarn
+yarn add better-sqlite3
+```
+
+</CodeGroup>
+
+<Accordion title="Native module note">
+  `better-sqlite3` is a native Node.js addon. If you encounter build errors, ensure you have build tools installed (e.g., `node-gyp`, Python, Visual Studio Build Tools on Windows).
+</Accordion>
+
+---
+
+## Setup
+
+```typescript
+import { SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("./data/radaros.db");
+
+// No initialize() required—table is created on first use
+await storage.set("sessions", "user-123", { lastActive: Date.now() });
+const session = await storage.get("sessions", "user-123");
+```
+
+---
+
+## Constructor
+
+<ParamField path="filepath" type="string" required>
+  Path to the SQLite database file. The file is created if it doesn't exist. Use `:memory:` for an in-process in-memory database (still uses SQLite, but no disk).
+</ParamField>
+
+```typescript
+// Persistent file
+const storage = new SqliteStorage("./data/radaros.db");
+
+// In-memory (useful for tests)
+const memoryStorage = new SqliteStorage(":memory:");
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, Memory, SqliteStorage, openai } from "@radaros/core";
+
+const storage = new SqliteStorage("./data/agent.db");
+
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: true,
+});
+
+const agent = new Agent({
+  name: "Assistant",
+  model: openai("gpt-4o"),
+  storage,
+  memory,
+});
+
+const result = await agent.run("Remember: my favorite color is blue.", {
+  sessionId: "user-456",
+});
+
+// Data persists across restarts
+await agent.run("What's my favorite color?", { sessionId: "user-456" });
+```
+
+---
+
+## Schema
+
+SqliteStorage creates a single table `kv_store`:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `namespace` | TEXT | Namespace (e.g., `memory:short`, `session`) |
+| `key` | TEXT | Key within the namespace |
+| `value` | TEXT | JSON-serialized value |
+| `updated_at` | TEXT | Last update timestamp |
+
+Primary key: `(namespace, key)`. WAL mode is enabled for better concurrent read performance.
+
+---
+
+## Prefix Listing
+
+```typescript
+// List all keys in namespace
+const all = await storage.list("sessions");
+
+// List keys with prefix
+const userSessions = await storage.list("sessions", "user-");
+```
+
+---
+
+## Graceful Shutdown
+
+```typescript
+process.on("SIGTERM", async () => {
+  await storage.close();
+  process.exit(0);
+});
+```
+
+---
+
+## API Reference
+
+| Method | Description |
+|--------|-------------|
+| `get<T>(namespace, key)` | Get value. Returns `null` if not found. |
+| `set<T>(namespace, key, value)` | Store value (JSON-serialized). Upserts on conflict. |
+| `delete(namespace, key)` | Remove key. |
+| `list<T>(namespace, prefix?)` | List keys. Prefix uses SQL `LIKE` pattern. |
+| `close()` | Close the database connection. |

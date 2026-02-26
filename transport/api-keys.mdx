@@ -1,0 +1,102 @@
+---
+title: API Keys
+description: Per-request API keys via headers and request body for OpenAI, Google, and Anthropic in RadarOS transport.
+---
+
+# API Keys
+
+RadarOS supports **per-request API key overrides** so clients can pass their own API keys instead of relying on server-side environment variables. Useful for multi-tenant apps, user-provided keys, and development.
+
+---
+
+## Supported Headers
+
+| Header | Provider | Use Case |
+|--------|----------|----------|
+| `x-openai-api-key` | OpenAI | GPT, embeddings |
+| `x-google-api-key` | Google | Gemini, embeddings |
+| `x-anthropic-api-key` | Anthropic | Claude |
+| `x-api-key` | Generic | Fallback when provider-specific key not set |
+
+---
+
+## How It Works
+
+1. Client sends a request with one of the headers (or `apiKey` in body).
+2. Transport layer extracts the key via `extractApiKey()`.
+3. Key is passed to `agent.run(input, { apiKey })` or `agent.stream(input, { apiKey })`.
+4. The model provider uses the per-request key instead of `process.env.*`.
+
+---
+
+## REST (Express)
+
+```bash
+# OpenAI agent
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -H "Content-Type: application/json" \
+  -H "x-openai-api-key: sk-..." \
+  -d '{"input": "Hello!"}'
+
+# In body (alternative)
+curl -X POST http://localhost:3000/api/agents/assistant/run \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Hello!", "apiKey": "sk-..."}'
+```
+
+---
+
+## Socket.IO
+
+```javascript
+// Via handshake
+const socket = io("http://localhost:3000/radaros", {
+  auth: { apiKey: "sk-..." },
+});
+
+socket.emit("agent.run", {
+  name: "assistant",
+  input: "Hello",
+  // Uses handshake.auth.apiKey if apiKey not in payload
+});
+
+// Per-request override
+socket.emit("agent.run", {
+  name: "assistant",
+  input: "Hello",
+  apiKey: "sk-...",
+});
+```
+
+---
+
+## Provider Matching
+
+For `x-api-key` (generic), the transport may match it to the agent's provider. For provider-specific headers:
+
+- `x-openai-api-key` → used when agent uses OpenAI
+- `x-google-api-key` → used when agent uses Google
+- `x-anthropic-api-key` → used when agent uses Anthropic
+
+This allows a single request to carry keys for multiple providers if needed (e.g., agent + embedding provider).
+
+---
+
+## Security Notes
+
+<CardGroup cols={2}>
+  <Card title="HTTPS" icon="lock">
+    Always use HTTPS in production so API keys are not sent in cleartext.
+  </Card>
+  <Card title="Logging" icon="warning">
+    Avoid logging request headers or bodies that may contain API keys.
+  </Card>
+</CardGroup>
+
+Consider middleware to strip or redact API key headers before logging.
+
+---
+
+## Swagger UI
+
+When Swagger is enabled, the OpenAPI spec includes security schemes for these headers. Users can click "Authorize" and enter their key; it will be sent with each request.

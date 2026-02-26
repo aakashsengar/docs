@@ -1,0 +1,177 @@
+---
+title: Sessions
+description: SessionManager, session storage, multi-turn conversations, and state management in RadarOS.
+---
+
+# Sessions
+
+Sessions in RadarOS track conversation history and arbitrary state per user or connection. Use `SessionManager` (or the built-in agent session handling) to persist messages and state across turns.
+
+---
+
+## SessionManager Class
+
+`SessionManager` is used internally by agents but can also be used standalone:
+
+```typescript
+import { SessionManager, InMemoryStorage } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+const sessionManager = new SessionManager(storage);
+```
+
+---
+
+## Session Object
+
+A session has the following shape:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sessionId` | `string` | Unique identifier for the session. |
+| `userId` | `string?` | Optional user identifier. |
+| `messages` | `ChatMessage[]` | Conversation history (user + assistant messages). |
+| `state` | `Record<string, unknown>` | Arbitrary key-value state. |
+| `createdAt` | `Date` | When the session was created. |
+| `updatedAt` | `Date` | When the session was last updated. |
+
+---
+
+## How Sessions Work
+
+<Steps>
+  <Step title="getOrCreate">
+    Call `getOrCreate(sessionId, userId?)` to fetch an existing session or create a new one.
+  </Step>
+  <Step title="appendMessages">
+    Add messages after each agent run. The agent does this automatically when you pass `sessionId` in `RunOpts`.
+  </Step>
+  <Step title="getHistory">
+    Retrieve history for a session, optionally with a `limit` (e.g., last N messages).
+  </Step>
+  <Step title="updateState">
+    Merge arbitrary key-value data into `session.state` for persistence across turns.
+  </Step>
+</Steps>
+
+---
+
+## Passing sessionId in RunOpts
+
+For multi-turn conversations, pass the same `sessionId` in `RunOpts`:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  storage: new InMemoryStorage(),
+});
+
+// First turn
+await agent.run("My name is Bob.", { sessionId: "conv-1" });
+
+// Second turn — agent has context from the first message
+const result = await agent.run("What's my name?", { sessionId: "conv-1" });
+console.log(result.text); // "Your name is Bob."
+```
+
+If `sessionId` is omitted, a new UUID is generated per run, so each call is effectively a new conversation.
+
+---
+
+## Session State
+
+Sessions support arbitrary `state` that you can read and update. Use `RunContext.sessionState` in hooks or tools to mutate state; it is persisted via `updateState` after each run.
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  storage: new InMemoryStorage(),
+  hooks: {
+    beforeRun: async (ctx) => {
+      ctx.sessionState.preferences = ctx.sessionState.preferences ?? {};
+    },
+    afterRun: async (ctx) => {
+      // ctx.sessionState is merged back into session.state
+    },
+  },
+});
+```
+
+---
+
+## Storage Drivers for Session Persistence
+
+Use different storage drivers depending on your deployment:
+
+<CardGroup cols={2}>
+  <Card title="InMemoryStorage" icon="memory">
+    Default. Sessions live in process memory. Lost on restart.
+  </Card>
+  <Card title="MongoDBStorage" icon="database">
+    Persistent sessions in MongoDB. Use for production.
+  </Card>
+  <Card title="SqliteStorage" icon="storage">
+    Persistent sessions in SQLite. Good for single-node deployments.
+  </Card>
+  <Card title="PostgresStorage" icon="storage">
+    Persistent sessions in PostgreSQL. Use for scalable deployments.
+  </Card>
+</CardGroup>
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage(
+  process.env.MONGO_URI ?? "mongodb://localhost:27017",
+  "myapp",
+  "sessions"
+);
+await storage.initialize();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  storage,
+});
+```
+
+---
+
+## Example: Socket.IO with socket.id as sessionId
+
+When using Socket.IO, each connection has a unique `socket.id`. Use it as `sessionId` for per-connection state:
+
+```typescript
+import { createAgentGateway } from "@radaros/transport";
+import { Agent, openai, Memory, MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage(MONGO_URI, "radaros_realtime", "agent_data");
+await storage.initialize();
+
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: true,
+});
+
+const assistant = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful real-time assistant.",
+  storage,
+  memory,
+  logLevel: "info",
+});
+
+createAgentGateway({
+  agents: { assistant },
+  io,
+  namespace: "/radaros",
+});
+```
+
+The gateway automatically passes `socket.id` as `sessionId` when handling messages, so each WebSocket connection maintains its own conversation and session state.

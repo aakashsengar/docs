@@ -1,0 +1,136 @@
+---
+title: Knowledge Base Overview
+description: RAG concept, KnowledgeBase class, and asTool() for equipping agents with document retrieval in RadarOS.
+---
+
+# Knowledge Base Overview
+
+RadarOS provides a **KnowledgeBase** abstraction for **Retrieval-Augmented Generation (RAG)**. Store documents in a vector store, search by semantic similarity, and expose retrieval as a tool so agents can answer questions using your private data.
+
+---
+
+## What is RAG?
+
+<CardGroup cols={2}>
+  <Card title="Retrieve" icon="search">
+    Convert documents to embeddings, store in a vector database, and search by semantic similarity.
+  </Card>
+  <Card title="Augment" icon="plus">
+    Inject retrieved chunks into the LLM context before generating a response.
+  </Card>
+  <Card title="Generate" icon="message">
+    The model produces answers grounded in the retrieved content instead of relying only on its training data.
+  </Card>
+</CardGroup>
+
+RAG reduces hallucinations and keeps responses aligned with your documents—ideal for internal docs, support knowledge bases, and domain-specific Q&A.
+
+---
+
+## KnowledgeBase Class
+
+```typescript
+import { KnowledgeBase } from "@radaros/core";
+
+const kb = new KnowledgeBase({
+  name: "Product Docs",
+  vectorStore: myVectorStore,
+  collection: "product_docs", // optional, defaults to sanitized name
+});
+
+await kb.initialize();
+await kb.add({ id: "doc-1", content: "Our API supports webhooks..." });
+const results = await kb.search("How do I set up webhooks?");
+```
+
+<ParamField path="name" type="string" required>
+  Display name for the knowledge base. Used in tool descriptions.
+</ParamField>
+
+<ParamField path="vectorStore" type="VectorStore" required>
+  A vector store implementation (InMemory, PgVector, Qdrant, MongoDB).
+</ParamField>
+
+<ParamField path="collection" type="string" required={false}>
+  Collection/index name inside the vector store. Defaults to a sanitized version of `name`.
+</ParamField>
+
+---
+
+## asTool() — Expose KB to Agents
+
+The most powerful feature: turn a KnowledgeBase into a **ToolDef** that agents can call automatically.
+
+```typescript
+const kb = new KnowledgeBase({
+  name: "Support KB",
+  vectorStore: vectorStore,
+});
+
+await kb.initialize();
+await kb.addDocuments(docs);
+
+const agent = new Agent({
+  name: "SupportBot",
+  model: openai("gpt-4o"),
+  tools: [kb.asTool({ toolName: "search_kb", topK: 5 })],
+  instructions: "Answer using the knowledge base when relevant.",
+});
+
+const result = await agent.run("How do I reset my password?");
+// Agent calls search_kb internally and uses retrieved docs in its answer
+```
+
+<ParamField path="toolName" type="string" required={false}>
+  Tool name exposed to the LLM. Default: `search_<collection>`.
+</ParamField>
+
+<ParamField path="description" type="string" required={false}>
+  Custom tool description. Default: auto-generated from KB name.
+</ParamField>
+
+<ParamField path="topK" type="number" required={false} default="5">
+  Number of results to return per search.
+</ParamField>
+
+<ParamField path="minScore" type="number" required={false}>
+  Minimum similarity score to include a result.
+</ParamField>
+
+<ParamField path="filter" type="Record<string, unknown>" required={false}>
+  Metadata filter applied to every search.
+</ParamField>
+
+<ParamField path="formatResults" type="(results) => string" required={false}>
+  Custom formatter for search results. Default: numbered list with scores.
+</ParamField>
+
+---
+
+## Flow Diagram
+
+<Steps>
+  <Step title="Create KnowledgeBase">
+    Configure name, vector store, and optional collection.
+  </Step>
+  <Step title="Initialize">
+    Call `kb.initialize()` to ensure the vector store is ready.
+  </Step>
+  <Step title="Add Documents">
+    Use `add()` or `addDocuments()` to ingest content. Embeddings are computed if not provided.
+  </Step>
+  <Step title="Expose as Tool">
+    Call `kb.asTool()` and pass the result to `Agent({ tools: [...] })`.
+  </Step>
+  <Step title="Query">
+    When the user asks a question, the agent calls the search tool and uses results in its response.
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+- [Vector Stores](/knowledge/vector-stores) — InMemory, PgVector, Qdrant, MongoDB
+- [Embeddings](/knowledge/embeddings) — OpenAI and Google embedding providers
+- [RAG Example](/knowledge/rag-example) — End-to-end walkthrough

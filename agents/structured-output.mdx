@@ -1,0 +1,154 @@
+---
+title: Structured Output
+description: Enforce JSON schema on LLM responses with Zod. RunOutput.structured and provider support.
+---
+
+# Structured Output
+
+Structured output lets you enforce a JSON schema on the LLM's response. Instead of free-form text, the agent returns validated, typed data—ideal for sentiment analysis, entity extraction, form filling, and API integrations.
+
+---
+
+## What is Structured Output?
+
+With structured output, you define a **Zod schema** that describes the expected shape of the response. RadarOS:
+
+1. Converts the schema to a provider-specific format (e.g., `json_schema` for OpenAI)
+2. Instructs the LLM to respond in that format
+3. Parses and validates the response against the schema
+4. Exposes the result in `RunOutput.structured`
+
+---
+
+## Using Zod Schemas
+
+Set `structuredOutput` in `AgentConfig`:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { z } from "zod";
+
+const SentimentSchema = z.object({
+  sentiment: z.enum(["positive", "negative", "neutral"]),
+  confidence: z.number().min(0).max(1),
+  keywords: z.array(z.string()),
+});
+
+const agent = new Agent({
+  name: "SentimentAnalyzer",
+  model: openai("gpt-4o"),
+  instructions: "Analyze the sentiment of the given text.",
+  structuredOutput: SentimentSchema,
+});
+
+const result = await agent.run("This product is amazing! Best purchase ever.");
+console.log(result.structured);
+// { sentiment: "positive", confidence: 0.95, keywords: ["amazing", "best"] }
+```
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Schema">
+    Define a Zod schema (object, array, nested, etc.).
+  </Step>
+  <Step title="responseFormat">
+    RadarOS converts the schema to the provider's `responseFormat` (e.g., `{ type: "json_schema", schema: {...} }`).
+  </Step>
+  <Step title="LLM">
+    The model is instructed to return valid JSON matching the schema.
+  </Step>
+  <Step title="Parse & Validate">
+    The raw response is parsed and validated with `schema.safeParse()`. Invalid output may throw or be handled by the provider.
+  </Step>
+</Steps>
+
+---
+
+## RunOutput.structured
+
+When `structuredOutput` is set, the parsed and validated result is available on `RunOutput.structured`:
+
+```typescript
+const result = await agent.run("Tell me about Paris.");
+
+// result.text — raw text from the model (may be JSON string)
+console.log(result.text);
+
+// result.structured — parsed, validated object
+console.log(result.structured);
+// { name: "Paris", country: "France", population: 2161000, ... }
+```
+
+---
+
+## Example: Sentiment Analysis Agent
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { z } from "zod";
+
+const SentimentSchema = z.object({
+  sentiment: z.enum(["positive", "negative", "neutral"]),
+  confidence: z.number().min(0).max(1).describe("Confidence score 0-1"),
+  keywords: z.array(z.string()).describe("Key phrases that influenced the sentiment"),
+});
+
+const agent = new Agent({
+  name: "SentimentAnalyzer",
+  model: openai("gpt-4o"),
+  instructions: `Analyze the sentiment of the given text.
+Return valid JSON matching the schema.`,
+  structuredOutput: SentimentSchema,
+  logLevel: "info",
+});
+
+const result = await agent.run(
+  "The service was slow and the staff was rude. Very disappointed."
+);
+
+console.log(result.structured);
+// {
+//   sentiment: "negative",
+//   confidence: 0.92,
+//   keywords: ["slow", "rude", "disappointed"]
+// }
+```
+
+---
+
+## Example: City Info with Rich Schema
+
+```typescript
+const CityInfoSchema = z.object({
+  name: z.string(),
+  country: z.string(),
+  population: z.number().describe("Approximate population"),
+  landmarks: z.array(z.string()).describe("Famous landmarks"),
+  bestTimeToVisit: z.string(),
+});
+
+const agent = new Agent({
+  name: "CityInfo",
+  model: openai("gpt-4o"),
+  instructions: "Provide city information. Always respond with valid JSON.",
+  structuredOutput: CityInfoSchema,
+});
+
+const result = await agent.run("Tell me about Paris, France.");
+console.log(JSON.stringify(result.structured, null, 2));
+```
+
+---
+
+## Provider Support
+
+| Provider | Support |
+|----------|---------|
+| **OpenAI** | `responseFormat: { type: "json_schema", schema: {...} }` |
+| **Google Gemini** | `responseFormat: "json"` with `json_schema` |
+| **Anthropic** | Structured output via tool use or response format where supported |
+
+RadarOS abstracts provider differences. Use a Zod schema and the framework handles the rest.

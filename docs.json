@@ -1,68 +1,117 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "RadarOS",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#2563EB",
+    "light": "#3B82F6",
+    "dark": "#1E40AF"
   },
   "favicon": "/favicon.svg",
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Agents",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "agents/overview",
+              "agents/tools",
+              "agents/memory",
+              "agents/sessions",
+              "agents/structured-output",
+              "agents/multimodal",
+              "agents/hooks-and-guardrails",
+              "agents/logging"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Models",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "models/overview",
+              "models/openai",
+              "models/anthropic",
+              "models/google",
+              "models/ollama",
+              "models/custom-provider"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Teams",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "teams/overview",
+              "teams/coordinate",
+              "teams/route",
+              "teams/broadcast",
+              "teams/collaborate"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "workflows/overview",
+              "workflows/steps",
+              "workflows/retry-policy"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "storage/overview",
+              "storage/in-memory",
+              "storage/sqlite",
+              "storage/postgres",
+              "storage/mongodb"
+            ]
+          },
+          {
+            "group": "Knowledge & RAG",
+            "pages": [
+              "knowledge/overview",
+              "knowledge/vector-stores",
+              "knowledge/embeddings",
+              "knowledge/rag-example"
+            ]
+          },
+          {
+            "group": "Transport",
+            "pages": [
+              "transport/overview",
+              "transport/express",
+              "transport/swagger",
+              "transport/file-upload",
+              "transport/socketio",
+              "transport/api-keys"
+            ]
+          },
+          {
+            "group": "Queue",
+            "pages": [
+              "queue/overview",
+              "queue/producer",
+              "queue/worker"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Packages",
             "pages": [
-              "api-reference/introduction"
-            ]
-          },
-          {
-            "group": "Endpoint examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api-reference/core",
+              "api-reference/transport",
+              "api-reference/queue"
             ]
           }
         ]
@@ -71,14 +120,14 @@
     "global": {
       "anchors": [
         {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
+          "anchor": "GitHub",
+          "href": "https://github.com/aakashsengar/agentOs",
+          "icon": "github"
         },
         {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
+          "anchor": "npm",
+          "href": "https://www.npmjs.com/org/radaros",
+          "icon": "npm"
         }
       ]
     }
@@ -90,33 +139,23 @@
   "navbar": {
     "links": [
       {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
+        "label": "GitHub",
+        "href": "https://github.com/aakashsengar/agentOs"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
+    ]
   },
   "contextual": {
     "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "cursor"
+    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/aakashsengar/agentOs"
     }
   }
 }
