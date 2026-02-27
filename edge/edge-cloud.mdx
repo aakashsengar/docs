@@ -1,0 +1,104 @@
+---
+title: Edge-Cloud Sync
+description: Heartbeat, config pull, event push, and offline-first queue for edge-cloud hybrid architectures.
+---
+
+# Edge-Cloud Sync
+
+Connect edge devices to a cloud RadarOS instance with heartbeats, remote configuration, event streaming, and an offline-first event queue.
+
+---
+
+## Quick Start
+
+```typescript
+import { EdgeCloudSync } from "@radaros/edge";
+
+const sync = new EdgeCloudSync({
+  cloudUrl: "https://api.example.com",
+  deviceId: "pi-office-01",
+  authToken: "your-api-token",
+  heartbeatIntervalMs: 30_000,
+});
+
+sync.start();
+
+// Push agent run events to the cloud
+sync.pushEvent("agent.run", {
+  agent: "pi-agent",
+  input: "Check temperature",
+  output: "Temperature is 22.5°C",
+});
+
+// Pull blueprints from cloud admin API
+const config = await sync.pullConfig();
+console.log(config.agents); // agent blueprints from cloud
+
+// Events are queued locally when offline and flushed on reconnect
+sync.on("connected", () => console.log("Cloud connection restored"));
+sync.on("disconnected", () => console.log("Working offline"));
+```
+
+---
+
+## Config
+
+<ParamField body="cloudUrl" type="string" required>
+  Cloud server base URL.
+</ParamField>
+
+<ParamField body="deviceId" type="string" required>
+  Unique identifier for this edge device.
+</ParamField>
+
+<ParamField body="authToken" type="string">
+  Bearer token for cloud API authentication.
+</ParamField>
+
+<ParamField body="heartbeatIntervalMs" type="number" default="30000">
+  Heartbeat frequency in milliseconds.
+</ParamField>
+
+<ParamField body="queueDir" type="string" default="/tmp/radaros-edge-queue">
+  Directory for the offline event queue.
+</ParamField>
+
+<ParamField body="maxQueueSize" type="number" default="10000">
+  Maximum queued events before oldest are dropped.
+</ParamField>
+
+<ParamField body="flushIntervalMs" type="number" default="60000">
+  How often to attempt flushing queued events.
+</ParamField>
+
+---
+
+## Features
+
+### Heartbeat
+
+Periodic `POST /edge/heartbeat` to the cloud with device status, resource metrics, and queue depth.
+
+### Config Pull
+
+`pullConfig()` fetches agent, team, and workflow blueprints from the cloud admin API (`GET /admin/agents`, `/admin/teams`, `/admin/workflows`), allowing remote deployment of agent configurations.
+
+### Event Push
+
+`pushEvent(type, payload)` streams agent run results and telemetry back to the cloud for logging and monitoring.
+
+### Offline-First Queue
+
+Events are persisted to a local JSONL file when the cloud is unreachable. On reconnect, the entire queue is flushed in a single batch. The queue respects `maxQueueSize` — oldest events are dropped when the limit is reached.
+
+---
+
+## Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `connected` | — | Cloud connection established or restored |
+| `disconnected` | — | Cloud connection lost |
+| `config-pulled` | `{ agents, teams, workflows }` | Successfully pulled remote config |
+| `config-pull-error` | `{ error }` | Failed to pull remote config |
+| `queue-loaded` | `{ count }` | Loaded persisted events from disk on startup |

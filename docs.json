@@ -189,6 +189,19 @@
             ]
           },
           {
+            "group": "Edge & IoT",
+            "pages": [
+              "edge/overview",
+              "edge/gpio",
+              "edge/sensor",
+              "edge/camera",
+              "edge/ble",
+              "edge/runtime",
+              "edge/ollama-edge",
+              "edge/edge-cloud"
+            ]
+          },
+          {
             "group": "Transport",
             "pages": [
               "transport/overview",

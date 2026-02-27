@@ -1,0 +1,115 @@
+---
+title: Edge & IoT
+description: Deploy AI agents on Raspberry Pi and edge devices with IoT toolkits, local LLM inference, and cloud sync.
+---
+
+# RadarOS Edge
+
+Run AI agents on constrained hardware like Raspberry Pi — with IoT toolkits, local LLM inference via Ollama, and optional cloud synchronization.
+
+No other Node.js/TypeScript agent framework has native edge/IoT support. RadarOS can run on a Pi 4 with 2 GB RAM using a 1B-parameter model.
+
+---
+
+## Why Edge?
+
+- **Local inference** — keep data on-device with Ollama and small models
+- **Hardware control** — GPIO pins, I2C sensors, camera, BLE from your agent
+- **Offline-first** — queue events locally, sync when cloud is available
+- **Resource-aware** — automatic throttling when CPU is hot or memory is low
+
+---
+
+## Quick Start
+
+```bash
+npm install @radaros/edge
+```
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import {
+  SystemToolkit,
+  GpioToolkit,
+  EdgeRuntime,
+  edgePreset,
+  ensureOllama,
+  registerEdgeToolkits,
+} from "@radaros/edge";
+
+// Register edge toolkits in the catalog (for Admin UI)
+registerEdgeToolkits();
+
+// Ensure Ollama is running
+await ensureOllama();
+
+const preset = edgePreset("pi5-8gb");
+
+const system = new SystemToolkit();
+const gpio = new GpioToolkit({ chipNumber: 4, allowedPins: [17, 27, 22] });
+
+const agent = new Agent({
+  name: "pi-agent",
+  model: ollama(preset.recommendedModel),
+  instructions: "You control a Raspberry Pi. Monitor system health and control GPIO pins.",
+  tools: [...system.getTools(), ...gpio.getTools()],
+});
+
+const runtime = new EdgeRuntime({ preset, agent });
+await runtime.start();
+
+const result = await agent.run("What is the CPU temperature and memory usage?");
+console.log(result.finalOutput);
+```
+
+---
+
+## Supported Devices
+
+| Device | RAM | Recommended Model | Preset ID |
+|--------|-----|-------------------|-----------|
+| Pi 4 (2 GB) | 2 GB | TinyLlama 1.1B | `pi4-2gb` |
+| Pi 4 (4 GB) | 4 GB | TinyLlama 1.1B | `pi4-4gb` |
+| Pi 4 (8 GB) | 8 GB | Llama 3.2 1B | `pi4-8gb` |
+| Pi 5 (4 GB) | 4 GB | Llama 3.2 1B | `pi5-4gb` |
+| Pi 5 (8 GB) | 8 GB | Phi-3 Mini 3.8B | `pi5-8gb` |
+
+---
+
+## Package Structure
+
+```
+@radaros/edge
+├── Toolkits
+│   ├── SystemToolkit     — CPU, memory, disk, network (zero deps)
+│   ├── GpioToolkit       — GPIO read/write/watch/PWM
+│   ├── CameraToolkit     — libcamera capture/record/stream
+│   ├── SensorToolkit     — I2C sensors (BME280, BMP180)
+│   ├── BleToolkit        — Bluetooth Low Energy
+│   └── ServoToolkit      — Hobby servo control
+├── Runtime
+│   ├── EdgeRuntime       — Watchdog, resource monitor, health endpoint
+│   ├── edgePreset()      — Device-specific configuration
+│   └── Ollama helpers    — ensureOllama, pullModel, recommendModel
+└── Sync
+    └── EdgeCloudSync     — Heartbeat, config pull, offline queue
+```
+
+---
+
+## Hardware Dependencies
+
+All hardware libraries are **optional peer dependencies**. Install only what you need:
+
+```bash
+# GPIO (Pi 5 compatible)
+npm install node-libgpiod
+
+# I2C sensors
+npm install i2c-bus
+
+# Bluetooth BLE
+npm install @stoprocent/noble
+```
+
+The `SystemToolkit` and `CameraToolkit` have **zero native dependencies** — they read from `/proc/`, `/sys/`, and shell out to `libcamera-still`.

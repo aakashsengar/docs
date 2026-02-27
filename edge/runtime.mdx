@@ -1,0 +1,138 @@
+---
+title: Edge Runtime
+description: Watchdog, resource monitoring, health checks, and graceful degradation for edge devices.
+---
+
+# Edge Runtime
+
+The `EdgeRuntime` manages an agent on constrained hardware with automatic watchdog restarts, resource monitoring, health endpoints, and graceful degradation.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { EdgeRuntime, SystemToolkit, edgePreset } from "@radaros/edge";
+
+const preset = edgePreset("pi5-8gb");
+
+const agent = new Agent({
+  name: "pi-agent",
+  model: ollama(preset.recommendedModel),
+  instructions: "You are a Raspberry Pi assistant.",
+  tools: [...new SystemToolkit().getTools()],
+});
+
+const runtime = new EdgeRuntime({
+  preset,
+  agent,
+  healthPort: 9090,
+});
+
+await runtime.start();
+
+// Signal agent activity to prevent watchdog restarts
+runtime.heartbeat();
+
+// Check status
+const status = runtime.getStatus();
+console.log(status.state); // "running" | "degraded" | "stopped"
+
+// Shutdown
+await runtime.stop();
+```
+
+---
+
+## Presets
+
+Use `edgePreset(id)` to get optimized defaults for your device:
+
+```typescript
+import { edgePreset, listEdgePresets, customEdgePreset } from "@radaros/edge";
+
+const presets = listEdgePresets();
+// [{ id: "pi4-2gb", label: "..." }, { id: "pi4-4gb", label: "..." }, ...]
+
+const preset = edgePreset("pi5-8gb");
+// { recommendedModel: "phi3:mini", maxTokens: 2048, contextWindow: 16384, ... }
+
+// Customize a preset
+const custom = customEdgePreset("pi5-8gb", { maxTokens: 4096 });
+```
+
+| Preset | Model | Max Tokens | Context | Memory Limit |
+|--------|-------|-----------|---------|-------------|
+| `pi4-2gb` | tinyllama:1.1b | 256 | 2048 | 512 MB |
+| `pi4-4gb` | tinyllama:1.1b | 512 | 4096 | 1024 MB |
+| `pi4-8gb` | llama3.2:1b | 1024 | 8192 | 2048 MB |
+| `pi5-4gb` | llama3.2:1b | 1024 | 8192 | 1536 MB |
+| `pi5-8gb` | phi3:mini | 2048 | 16384 | 3072 MB |
+
+---
+
+## Features
+
+### Watchdog
+
+Automatically detects unresponsive agents. If no `heartbeat()` call is received within the timeout window, the runtime emits a `watchdog-restart` event.
+
+```typescript
+runtime.on("watchdog-restart", ({ reason, restarts }) => {
+  console.log(`Watchdog triggered: ${reason} (${restarts} total)`);
+  // Recreate or restart your agent here
+});
+```
+
+### Resource Monitor
+
+Periodically checks CPU temperature, memory, and disk usage. Emits warnings when thresholds are exceeded.
+
+```typescript
+runtime.on("thermal-warning", ({ temperature, threshold }) => {
+  console.log(`CPU at ${temperature}°C (threshold: ${threshold}°C)`);
+});
+
+runtime.on("memory-warning", ({ usage_percent, threshold }) => {
+  console.log(`Memory at ${usage_percent}% (threshold: ${threshold}%)`);
+});
+
+runtime.on("recovered", () => {
+  console.log("Resources back to normal");
+});
+```
+
+### Health Endpoint
+
+A lightweight HTTP server on port 9090 (configurable) responds to `GET /health`:
+
+```json
+{
+  "state": "running",
+  "uptime_ms": 3600000,
+  "watchdog_restarts": 0,
+  "resources": { "cpu": { ... }, "memory": { ... }, "disk": { ... } },
+  "degraded_reason": null
+}
+```
+
+---
+
+## Config
+
+<ParamField body="preset" type="string | EdgePreset" required>
+  Device preset ID or custom preset object.
+</ParamField>
+
+<ParamField body="agent" type="Agent" required>
+  The agent instance to manage.
+</ParamField>
+
+<ParamField body="healthPort" type="number" default="9090">
+  Port for the health check HTTP server.
+</ParamField>
+
+<ParamField body="disableHealthCheck" type="boolean" default="false">
+  Disable the health endpoint entirely.
+</ParamField>

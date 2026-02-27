@@ -1,0 +1,63 @@
+---
+title: I2C Sensors
+description: Read temperature, humidity, and pressure from I2C sensors like BME280.
+---
+
+# Sensor Toolkit
+
+Read I2C sensors on Raspberry Pi — temperature, humidity, and barometric pressure from BME280 and similar sensors.
+
+Requires `i2c-bus` as an optional peer dependency.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { SensorToolkit } from "@radaros/edge";
+
+const sensor = new SensorToolkit({ busNumber: 1 });
+
+const agent = new Agent({
+  name: "weather-station",
+  model: ollama("llama3.2:1b"),
+  instructions: "Read environmental data from sensors and report conditions.",
+  tools: [...sensor.getTools()],
+});
+
+const result = await agent.run("What's the current temperature and humidity?");
+```
+
+---
+
+## Config
+
+<ParamField body="busNumber" type="number" default="1">
+  I2C bus number. Standard on all Raspberry Pi models is bus 1.
+</ParamField>
+
+<ParamField body="addresses.bme280" type="number" default="0x76">
+  I2C address for the BME280 sensor.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `sensor_list` | Scan the I2C bus and discover connected devices |
+| `sensor_read_temperature` | Read temperature in Celsius from BME280 |
+| `sensor_read_humidity` | Read relative humidity as a percentage |
+| `sensor_read_pressure` | Read barometric pressure in hPa |
+| `sensor_read_all` | Read all measurements at once |
+
+---
+
+## Supported Sensors
+
+| Sensor | Measurements | Default Address |
+|--------|-------------|----------------|
+| BME280 | Temperature, humidity, pressure | 0x76 |
+| BMP180 | Temperature, pressure | 0x77 |

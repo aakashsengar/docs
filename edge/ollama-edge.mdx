@@ -1,0 +1,88 @@
+---
+title: Ollama on Edge
+description: Model recommendations, auto-start, and pull helpers for running Ollama on Raspberry Pi.
+---
+
+# Ollama Edge Helpers
+
+Utilities for running Ollama on resource-constrained edge devices — ensure it's running, pull models, and get hardware-appropriate recommendations.
+
+---
+
+## Quick Start
+
+```typescript
+import { ensureOllama, pullModel, recommendModel } from "@radaros/edge";
+import * as os from "node:os";
+
+// Ensure Ollama is running (starts it if needed)
+const status = await ensureOllama();
+console.log(status);
+// { running: true, version: "0.1.0", models: ["tinyllama:1.1b"] }
+
+// Get the best model for available RAM
+const ramMb = os.totalmem() / 1024 / 1024;
+const rec = recommendModel(ramMb);
+console.log(rec);
+// { model: "phi3:mini", label: "capable", parameterSize: "3.8B", ramRequired: 4000 }
+
+// Pull the model if not cached
+await pullModel(rec.model);
+```
+
+---
+
+## Functions
+
+### `ensureOllama(baseUrl?)`
+
+Check if Ollama is running. If not, spawn `ollama serve` and wait up to 10 seconds for it to become available.
+
+```typescript
+const status = await ensureOllama();
+// { running: boolean, version?: string, models?: string[], error?: string }
+```
+
+### `checkOllama(baseUrl?)`
+
+Read-only check — does not attempt to start Ollama.
+
+### `pullModel(model, opts?)`
+
+Pull a model from the Ollama registry if not cached locally.
+
+```typescript
+const result = await pullModel("tinyllama:1.1b");
+// { success: true, model: "tinyllama:1.1b" }
+```
+
+### `recommendModel(ramMb)`
+
+Pick the largest model that fits comfortably in available RAM (with 30% headroom for OS and Node.js).
+
+| RAM | Recommended Model | Label |
+|-----|-------------------|-------|
+| 1 GB | tinyllama:1.1b | fast |
+| 2 GB | tinyllama:1.1b | fast |
+| 3 GB | llama3.2:1b | balanced |
+| 6 GB | phi3:mini | capable |
+| 8+ GB | mistral:7b | powerful |
+
+### `hasModel(model, baseUrl?)`
+
+Check if a specific model is cached locally.
+
+### `listModelTiers()`
+
+Get all known model tiers with their RAM requirements.
+
+---
+
+## Installing Ollama on Raspberry Pi
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull tinyllama:1.1b
+```
+
+For Pi 4 with 2 GB RAM, `tinyllama:1.1b` is the only viable option. Pi 5 with 8 GB can comfortably run `phi3:mini` (3.8B parameters).

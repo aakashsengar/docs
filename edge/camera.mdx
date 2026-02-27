@@ -1,0 +1,77 @@
+---
+title: Camera
+description: Capture photos and video from the Raspberry Pi camera module.
+---
+
+# Camera Toolkit
+
+Capture photos, record video clips, and start MJPEG streams using `libcamera-still` and `libcamera-vid`. Works with Pi Camera Module 3 on Pi 5 and earlier models.
+
+Zero native dependencies — shells out to system commands.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { CameraToolkit } from "@radaros/edge";
+
+const camera = new CameraToolkit({
+  width: 1280,
+  height: 720,
+  rotation: 0,
+  format: "jpg",
+});
+
+const agent = new Agent({
+  name: "camera-agent",
+  model: ollama("llama3.2:1b"),
+  instructions: "Capture photos when asked. Report file paths.",
+  tools: [...camera.getTools()],
+});
+```
+
+---
+
+## Config
+
+<ParamField body="width" type="number" default="1280">
+  Default image/video width in pixels.
+</ParamField>
+
+<ParamField body="height" type="number" default="720">
+  Default image/video height in pixels.
+</ParamField>
+
+<ParamField body="rotation" type="number" default="0">
+  Image rotation in degrees: 0, 90, 180, or 270.
+</ParamField>
+
+<ParamField body="outputDir" type="string" default="/tmp/radaros-camera">
+  Directory for saved images and videos.
+</ParamField>
+
+<ParamField body="format" type="string" default="jpg">
+  Image format: `"jpg"` or `"png"`.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `camera_capture` | Take a photo (file path or base64) |
+| `camera_record` | Record a video clip (up to 60 seconds) |
+| `camera_stream_url` | Start an MJPEG stream on a local port |
+
+---
+
+## Prerequisites
+
+Make sure `libcamera-apps` is installed on your Pi:
+
+```bash
+sudo apt install libcamera-apps
+```

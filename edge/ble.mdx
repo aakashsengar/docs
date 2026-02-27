@@ -1,0 +1,65 @@
+---
+title: Bluetooth BLE
+description: Scan, connect, and communicate with Bluetooth Low Energy devices.
+---
+
+# BLE Toolkit
+
+Bluetooth Low Energy scanning and communication — discover devices, connect, read/write characteristics, and subscribe to notifications.
+
+Requires `@stoprocent/noble` as an optional peer dependency.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { BleToolkit } from "@radaros/edge";
+
+const ble = new BleToolkit({
+  scanTimeout: 5000,
+  serviceUuidFilter: ["180f"], // Battery Service
+});
+
+const agent = new Agent({
+  name: "ble-agent",
+  model: ollama("llama3.2:1b"),
+  instructions: "Discover nearby BLE devices and read their data.",
+  tools: [...ble.getTools()],
+});
+
+const result = await agent.run("Scan for nearby Bluetooth devices");
+```
+
+---
+
+## Config
+
+<ParamField body="scanTimeout" type="number" default="5000">
+  Default scan duration in milliseconds.
+</ParamField>
+
+<ParamField body="serviceUuidFilter" type="string[]" default="[]">
+  Only discover devices advertising these service UUIDs.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `ble_scan` | Discover nearby BLE peripherals |
+| `ble_connect` | Connect to a device by ID |
+| `ble_read` | Read a characteristic value |
+| `ble_write` | Write data to a characteristic |
+| `ble_notify` | Subscribe to characteristic notifications |
+
+---
+
+## Workflow
+
+1. **Scan** for devices with `ble_scan`
+2. **Connect** to a device using its ID from the scan results
+3. **Read/Write** characteristics or **subscribe** to notifications

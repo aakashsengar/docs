@@ -1,0 +1,65 @@
+---
+title: GPIO
+description: Control Raspberry Pi GPIO pins — read, write, watch edges, and software PWM.
+---
+
+# GPIO Toolkit
+
+Control Raspberry Pi GPIO pins with read, write, edge watching, and software PWM. Compatible with Pi 5 (chip 4) and Pi 4 (chip 0).
+
+Requires `node-libgpiod` as an optional peer dependency.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { GpioToolkit } from "@radaros/edge";
+
+const gpio = new GpioToolkit({
+  chipNumber: 4,         // Pi 5
+  allowedPins: [17, 27, 22],
+  maxPwmFrequency: 1000,
+});
+
+const agent = new Agent({
+  name: "gpio-agent",
+  model: ollama("llama3.2:1b"),
+  instructions: "Control GPIO pins on the Raspberry Pi. Only use pins 17, 27, and 22.",
+  tools: [...gpio.getTools()],
+});
+```
+
+---
+
+## Config
+
+<ParamField body="chipNumber" type="number" default="0">
+  GPIO chip number. Use `4` for Pi 5, `0` for Pi 4 and earlier.
+</ParamField>
+
+<ParamField body="allowedPins" type="number[]" default="[]">
+  Allowlist of pin numbers. Empty array = all pins allowed.
+</ParamField>
+
+<ParamField body="maxPwmFrequency" type="number" default="1000">
+  Maximum software PWM frequency in Hz.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `gpio_read` | Read the current state (0 or 1) of a pin |
+| `gpio_write` | Set a pin to HIGH (1) or LOW (0) |
+| `gpio_watch` | Watch for rising/falling edge changes |
+| `gpio_pwm` | Software PWM for LEDs, buzzers, or servos |
+
+---
+
+## Safety
+
+The `allowedPins` config restricts which pins the agent can access, preventing accidental writes to system-critical pins.
