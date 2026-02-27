@@ -27,6 +27,8 @@ pnpm add @radaros/transport socket.io
 
 ## Basic Setup
 
+### Explicit wiring
+
 ```typescript
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -51,6 +53,36 @@ createAgentGateway({
 httpServer.listen(3000);
 ```
 
+### Auto-discovery (zero-wiring)
+
+Agents and teams auto-register into a global `registry`. The gateway reads from it dynamically — entities created after the gateway starts are immediately reachable.
+
+```typescript
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { createAgentGateway } from "@radaros/transport";
+import { Agent, openai } from "@radaros/core";
+
+const httpServer = createServer();
+const io = new Server(httpServer);
+
+createAgentGateway({ io }); // no agents/teams needed
+
+// Created later — immediately available via Socket.IO
+new Agent({ name: "assistant", model: openai("gpt-4o") });
+
+httpServer.listen(3000);
+```
+
+You can also pass a mixed array via `serve`:
+
+```typescript
+createAgentGateway({
+  io,
+  serve: [assistant, analyst, researchTeam],
+});
+```
+
 ---
 
 ## GatewayOptions
@@ -65,6 +97,14 @@ httpServer.listen(3000);
 
 <ParamField path="teams" type="Record<string, Team>" required={false}>
   Map of team names to Team instances.
+</ParamField>
+
+<ParamField path="serve" type="Servable[]" required={false}>
+  Mixed array of Agent and Team instances. Automatically classified. An alternative to passing `agents` and `teams` separately.
+</ParamField>
+
+<ParamField path="registry" type="Registry | false" required={false}>
+  Controls live auto-discovery. Defaults to the global `registry` — all auto-registered entities are available. Pass a custom `Registry` instance, or `false` to disable auto-discovery and only serve explicitly passed entities.
 </ParamField>
 
 <ParamField path="namespace" type="string" required={false} default="/radaros">

@@ -44,6 +44,8 @@ pnpm add @radaros/transport express socket.io
 
 ## Quick Start
 
+Agents auto-register into a global `registry` on construction. The transport layer discovers them dynamically — no need to wire agents into router or gateway options manually.
+
 ```typescript
 import express from "express";
 import { createServer } from "http";
@@ -51,21 +53,25 @@ import { Server } from "socket.io";
 import { createAgentRouter, createAgentGateway } from "@radaros/transport";
 import { Agent, openai } from "@radaros/core";
 
-const agent = new Agent({
-  name: "Assistant",
-  model: openai("gpt-4o"),
-  instructions: "You are helpful.",
-});
+// Agents auto-register on construction
+new Agent({ name: "assistant", model: openai("gpt-4o"), instructions: "You are helpful." });
 
 const app = express();
 app.use(express.json());
-app.use("/api", createAgentRouter({ agents: { assistant: agent } }));
+app.use("/api", createAgentRouter());  // discovers all registered agents
 
 const httpServer = createServer(app);
 const io = new Server(httpServer);
-createAgentGateway({ io, agents: { assistant: agent } });
+createAgentGateway({ io });  // discovers all registered agents
 
 httpServer.listen(3000);
+```
+
+You can still pass agents explicitly if you prefer:
+
+```typescript
+app.use("/api", createAgentRouter({ agents: { assistant: agent } }));
+createAgentGateway({ io, agents: { assistant: agent } });
 ```
 
 ---
@@ -79,6 +85,10 @@ httpServer.listen(3000);
 | POST | `/teams/:name/run` | Run team |
 | POST | `/teams/:name/stream` | Stream team via SSE |
 | POST | `/workflows/:name/run` | Run workflow |
+| GET | `/agents` | List registered agents with metadata |
+| GET | `/teams` | List registered teams |
+| GET | `/workflows` | List registered workflows |
+| GET | `/registry` | List all registered entity names |
 | GET | `/docs` | Swagger UI (if enabled) |
 | GET | `/docs/spec.json` | OpenAPI spec (if enabled) |
 
@@ -98,6 +108,10 @@ httpServer.listen(3000);
 ---
 
 ## Features
+
+<Accordion title="Auto-Discovery">
+  Agents, teams, and workflows auto-register into a global `Registry` when created. Transport layers discover them at request time — entities created after server start are immediately available. Set `registry: false` to disable and only serve explicitly passed entities.
+</Accordion>
 
 <Accordion title="File Upload">
   Enable `fileUpload` in router options to accept multipart form data. Files are converted to multi-modal content parts (images, audio, documents) and passed to agents.

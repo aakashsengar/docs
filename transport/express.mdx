@@ -27,6 +27,10 @@ The `@radaros/transport` package provides `createAgentRouter()` to generate a fu
 
 ## Quick Start
 
+### Explicit wiring
+
+Pass agents, teams, and workflows by name:
+
 ```typescript
 import express from "express";
 import { Agent, openai } from "@radaros/core";
@@ -49,12 +53,49 @@ app.use("/api", router);
 app.listen(3000);
 ```
 
+### Auto-discovery (zero-wiring)
+
+Agents, teams, and workflows auto-register into a global `registry` when instantiated. The transport layer reads from this registry dynamically — entities created *after* the server starts are immediately available.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter());  // no agents/teams/workflows needed
+
+// Agents created anywhere auto-register and become available
+new Agent({ name: "assistant", model: openai("gpt-4o") });
+new Agent({ name: "analyst", model: openai("gpt-4o-mini") });
+
+app.listen(3000);
+// POST /api/agents/assistant/run  ✓
+// POST /api/agents/analyst/run    ✓
+```
+
+You can also pass a mixed array via `serve`:
+
+```typescript
+const router = createAgentRouter({
+  serve: [assistant, analyst, researchTeam, pipeline],
+});
+```
+
 This creates the following endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/agents/assistant/run` | Run agent, return JSON response |
-| POST | `/api/agents/assistant/stream` | Stream response via Server-Sent Events |
+| POST | `/api/agents/:name/run` | Run agent, return JSON response |
+| POST | `/api/agents/:name/stream` | Stream response via Server-Sent Events |
+| POST | `/api/teams/:name/run` | Run team |
+| POST | `/api/teams/:name/stream` | Stream team via SSE |
+| POST | `/api/workflows/:name/run` | Run workflow |
+| GET | `/api/agents` | List registered agents with metadata |
+| GET | `/api/teams` | List registered teams |
+| GET | `/api/workflows` | List registered workflows |
+| GET | `/api/registry` | List all registered names |
 
 ## RouterOptions
 
@@ -68,6 +109,14 @@ This creates the following endpoints:
 
 <ParamField body="workflows" type="Record<string, Workflow>">
   Map of named workflows. Each gets `/workflows/:name/run` endpoint.
+</ParamField>
+
+<ParamField body="serve" type="Servable[]">
+  Mixed array of Agent, Team, and Workflow instances. Automatically classified and registered. An alternative to passing `agents`, `teams`, and `workflows` separately.
+</ParamField>
+
+<ParamField body="registry" type="Registry | false">
+  Controls live auto-discovery. Defaults to the global `registry` (all auto-registered entities are available). Pass a custom `Registry` instance, or `false` to disable auto-discovery and only serve explicitly passed entities.
 </ParamField>
 
 <ParamField body="middleware" type="RequestHandler[]">
@@ -168,6 +217,42 @@ data: {"type":"text","text":" the"}
 data: {"type":"finish","finishReason":"stop"}
 ```
 
+## List Endpoints
+
+When auto-discovery is enabled (default), the router exposes list endpoints with rich metadata:
+
+```bash
+# List all agents with model, provider, tools
+curl http://localhost:3000/api/agents
+```
+
+```json
+[
+  {
+    "name": "assistant",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "tools": ["calculate"],
+    "hasStructuredOutput": false
+  }
+]
+```
+
+```bash
+# List all registered names
+curl http://localhost:3000/api/registry
+```
+
+```json
+{
+  "agents": ["assistant", "analyst"],
+  "teams": ["research"],
+  "workflows": ["pipeline"]
+}
+```
+
+---
+
 ## Full Example with Multiple Agents
 
 ```typescript
@@ -183,6 +268,7 @@ const calculator = defineTool({
   execute: async ({ expression }) => String(eval(expression)),
 });
 
+// Agents auto-register into the global registry
 const assistant = new Agent({
   name: "assistant",
   model: openai("gpt-4o"),
@@ -210,8 +296,8 @@ const vision = new Agent({
 const app = express();
 app.use(express.json());
 
+// Auto-discovery: no need to pass agents explicitly
 const router = createAgentRouter({
-  agents: { assistant, analyst, vision },
   swagger: {
     enabled: true,
     title: "My AI API",

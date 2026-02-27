@@ -17,50 +17,70 @@ All benchmarks use `gpt-4o-mini`, identical prompts, and 5 runs per scenario. Ra
 
 | Metric | RadarOS | LangChain | Agno |
 |--------|---------|-----------|------|
-| Startup (ms) | **151** | 269 | 2712 |
-| Avg Response (ms) | **718** | 742 | 2390 |
+| Startup (ms) | **171** | 301 | 2730 |
+| Avg Response (ms) | 769 | **737** | 2077 |
 | Avg Prompt Tokens | **28** | **28** | **28** |
+| Avg Total Tokens | **35** | **35** | **35** |
 | Avg Cost / Run | **$0.000008** | **$0.000008** | **$0.000008** |
 
 ### Tool Calling
 
 | Metric | RadarOS | LangChain | Agno |
 |--------|---------|-----------|------|
-| Avg Response (ms) | 1884 | **1758** | 2824 |
-| Avg Prompt Tokens | 167 | **101** | 173 |
-| Avg Cost / Run | $0.000042 | **$0.000024** | $0.000043 |
+| Avg Response (ms) | **1617** | 1678 | 3064 |
+| Avg Prompt Tokens | **167** | **167** | 173 |
+| Avg Total Tokens | **196** | **196** | 202 |
+| Avg Cost / Run | **$0.000042** | **$0.000042** | $0.000043 |
+
+RadarOS and LangChain produce identical tool schemas (167 prompt tokens). RadarOS strips verbose JSON Schema metadata (`$schema`, `additionalProperties`) to keep schemas compact.
 
 ### Multi-turn Memory
 
 | Metric | RadarOS | LangChain | Agno |
 |--------|---------|-----------|------|
-| Avg Response (ms) | **2328** | 3129 | 6197 |
-| Avg Prompt Tokens | 184 | 181 | **94** |
-| Avg Cost / Run | $0.000044 | **$0.000042** | $0.000054 |
+| Avg Response (ms) | 2408 | **2324** | 5892 |
+| Avg Prompt Tokens | 189 | 309 | **94** |
+| Avg Completion Tokens | **30** | 57 | 66 |
+| Avg Total Tokens | 219 | 366 | **160** |
+| Avg Cost / Run | **$0.000046** | $0.000081 | $0.000054 |
+
+RadarOS uses 39% fewer prompt tokens and 43% less cost than LangChain for multi-turn conversations. LangChain injects heavier system prompts and history formatting overhead.
 
 ### Summary
 
 | Scenario | Fastest | Fewest Tokens | Cheapest |
 |----------|---------|---------------|----------|
-| Simple Completion | **RadarOS** | Tied | Tied |
-| Tool Calling | LangChain | LangChain | LangChain |
-| Multi-turn Memory | **RadarOS** | Agno | LangChain |
+| Simple Completion | LangChain (737ms) | Tied (35) | Tied |
+| Tool Calling | **RadarOS** (1617ms) | **RadarOS** (196) | Tied |
+| Multi-turn Memory | LangChain (2324ms) | Agno (160) | **RadarOS** ($0.000046) |
 
-RadarOS is the fastest for simple completions and multi-turn conversations. Token usage is on par with LangChain for multi-turn scenarios.
+RadarOS is the fastest for tool calling, the cheapest for multi-turn conversations, and matches LangChain on tool schema efficiency. Response latency is within noise across simple completions.
 
 ---
 
 ## Optimizations
 
-### Tool Schema Caching
+### Tool Schema Caching & Optimization
 
-Tool definitions (Zod-to-JSON Schema conversion) are computed once at agent construction and cached. They are not re-converted on every LLM roundtrip.
+Tool definitions (Zod-to-JSON Schema conversion) are computed once at agent construction and cached. Verbose JSON Schema metadata (`$schema`, `additionalProperties`, `description` on the root object) is stripped automatically — reducing token overhead without losing semantic information.
 
 ```typescript
 const agent = new Agent({
   name: "bot",
   model: openai("gpt-4o"),
   tools: [weatherTool, searchTool],
+});
+```
+
+For OpenAI models, tools can opt into **strict mode** for guaranteed valid JSON output:
+
+```typescript
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => `Sunny in ${city}`,
+  strict: true, // enables OpenAI Structured Outputs on this tool
 });
 ```
 

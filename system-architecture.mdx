@@ -42,9 +42,11 @@ RadarOS is built in layers. Higher layers depend on lower ones and infrastructur
 
 6. **Infrastructure** — Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, and Embeddings. All pluggable.
 
-7. **Transport (Optional)** — Express REST, Socket.IO WebSocket, Voice Gateway (real-time audio streaming), Browser Gateway (live browser observation), and A2A Server.
+7. **Registry & Auto-Discovery** — Agents, Teams, and Workflows auto-register into a global `Registry` on construction. Transport layers read from the registry dynamically, so entities created at any time are immediately available over HTTP and WebSocket without restart or re-wiring.
 
-8. **Queue (Optional)** — BullMQ workers for background job processing.
+8. **Transport (Optional)** — Express REST, Socket.IO WebSocket, Voice Gateway (real-time audio streaming), Browser Gateway (live browser observation), and A2A Server. Uses the Registry for live auto-discovery of agents, teams, and workflows.
+
+9. **Queue (Optional)** — BullMQ workers for background job processing.
 
 ---
 
@@ -211,12 +213,38 @@ Skills are pre-packaged tool bundles loaded from local directories, npm packages
 
 ---
 
+## Registry & Auto-Discovery
+
+RadarOS includes a global `Registry` singleton. Every `Agent`, `Team`, and `Workflow` automatically registers itself on construction (unless `register: false` is set).
+
+```typescript
+import { Agent, openai, registry } from "@radaros/core";
+
+new Agent({ name: "bot", model: openai("gpt-4o") });
+
+registry.list();
+// { agents: ["bot"], teams: [], workflows: [] }
+```
+
+The Express router and Socket.IO gateway read from this registry at request time. Agents created *after* the transport layer starts become available immediately — no restart or re-wiring needed.
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-register** | Instances register on construction. Opt out with `register: false`. |
+| **`kind` discriminant** | Each class has a `readonly kind` (`"agent"`, `"team"`, `"workflow"`) for reliable runtime type identification. |
+| **Dynamic routing** | Transport routes resolve by name from the registry on each request. |
+| **List endpoints** | `GET /agents`, `GET /teams`, `GET /workflows` return metadata. `GET /registry` returns all names. |
+| **Custom registries** | Pass a custom `Registry` instance to `createAgentRouter()` or `createAgentGateway()` for isolated scoping. |
+
+---
+
 ## Performance Optimizations
 
 | Optimization | Impact |
 |-------------|--------|
 | **Tool schema caching** | Tool definitions are converted to JSON Schema once at construction, not on every LLM roundtrip. |
-| **Minimal schema serialization** | Uses compact JSON Schema 7 output, stripping metadata that inflate token counts. |
+| **Minimal schema serialization** | Strips verbose JSON Schema fields (`$schema`, `additionalProperties`) to reduce token overhead. |
+| **Strict mode** | Optional `strict: true` on tools enables OpenAI Structured Outputs for guaranteed valid JSON. |
 | **Session read deduplication** | Session data is loaded once per run/stream call and reused for both context and history. |
 | **Non-blocking memory extraction** | All memory extraction (facts, profile, entities, learnings) runs in background without blocking. |
 | **Token-based history trimming** | maxContextTokens auto-trims history (oldest first) to prevent context window overflow. |
