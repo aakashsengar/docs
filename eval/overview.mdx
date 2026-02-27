@@ -1,0 +1,86 @@
+---
+title: Eval Framework
+description: Automated agent quality testing with configurable scorers
+---
+
+# Eval Framework
+
+The `@radaros/eval` package provides automated quality testing for agents. Define test cases, run them against your agent, and score the outputs using built-in or custom scorers.
+
+```bash
+npm install @radaros/eval
+```
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EvalSuite, contains, regexMatch, ConsoleReporter } from "@radaros/eval";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o-mini"),
+  instructions: "Be factual and concise.",
+});
+
+const suite = new EvalSuite({
+  name: "Quality Suite",
+  agent,
+  cases: [
+    { name: "Capital", input: "What is the capital of France?", expected: "Paris" },
+    { name: "Math", input: "What is 15 * 7?", expected: "105" },
+  ],
+  scorers: [
+    contains("Paris"),
+    regexMatch(/\d+/),
+  ],
+  threshold: 0.7,
+  concurrency: 2,
+});
+
+const result = await suite.run([new ConsoleReporter()]);
+console.log(`${result.passed}/${result.total} passed`);
+```
+
+## Built-in Scorers
+
+| Scorer | Description |
+|--------|-------------|
+| `contains(text)` | Output contains the expected string |
+| `regexMatch(pattern)` | Output matches a regex pattern |
+| `semanticSimilarity({ expected, embedding })` | Cosine similarity above threshold |
+| `llmJudge({ model, criteria })` | LLM rates output on criteria (relevance, helpfulness, etc.) |
+| `jsonMatch(fields)` | Structured output fields match expected values |
+| `custom(name, fn)` | User-defined scoring function |
+
+## LLM-as-Judge
+
+Use another model to evaluate the output:
+
+```typescript
+import { llmJudge } from "@radaros/eval";
+
+llmJudge({
+  model: openai("gpt-4o"),
+  criteria: ["faithfulness", "relevance", "helpfulness"],
+});
+```
+
+## Reporters
+
+| Reporter | Output |
+|----------|--------|
+| `ConsoleReporter` | Pretty-printed table in the terminal |
+| `JsonReporter` | JSON file with detailed results |
+
+## Custom Scorer
+
+```typescript
+import { custom } from "@radaros/eval";
+
+custom("word-count", async (input, output) => {
+  const count = output.text.split(/\s+/).length;
+  const pass = count >= 10 && count <= 200;
+  return { score: pass ? 1 : 0, pass, reason: `${count} words` };
+});
+```

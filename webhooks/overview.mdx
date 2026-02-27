@@ -1,0 +1,107 @@
+---
+title: Webhooks & Event Destinations
+description: Push agent events to external systems like HTTP endpoints, Slack, and email
+---
+
+# Webhooks & Event Destinations
+
+Push agent events to external systems automatically. The webhook system listens to the agent's `EventBus` and forwards events to configured destinations with retry and batching.
+
+## Quick Start
+
+```typescript
+import { Agent, openai, httpWebhook, slackWebhook } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  webhooks: {
+    destinations: [
+      httpWebhook({
+        url: "https://your-api.com/webhooks",
+        secret: "my-hmac-secret",
+      }),
+      slackWebhook({
+        webhookUrl: "https://hooks.slack.com/services/T.../B.../...",
+      }),
+    ],
+    events: ["run.complete", "run.error"],
+    retries: 3,
+  },
+});
+```
+
+## Destinations
+
+### HTTP
+
+```typescript
+httpWebhook({
+  url: "https://api.example.com/events",
+  headers: { "X-API-Key": "..." },
+  method: "POST",        // or "PUT"
+  secret: "hmac-secret", // Signs payload with HMAC-SHA256
+});
+```
+
+The payload is JSON: `{ event, payload, timestamp }`. With a `secret`, the `X-Webhook-Signature` header contains `sha256=<hex>`.
+
+### Slack
+
+```typescript
+slackWebhook({
+  webhookUrl: "https://hooks.slack.com/services/...",
+  channel: "#alerts",
+  formatMessage: (event, payload) => `Custom: ${event}`,
+});
+```
+
+Default format:
+```
+[RadarOS] run.complete
+Agent: assistant
+Run: abc12345
+Tokens: 450 prompt + 128 completion
+Duration: 1.2s
+```
+
+### Email (SendGrid)
+
+```typescript
+emailWebhook({
+  transport: "sendgrid",
+  apiKey: process.env.SENDGRID_API_KEY!,
+  to: ["team@example.com"],
+  from: "alerts@example.com",
+  subject: (event) => `[RadarOS] ${event}`,
+});
+```
+
+### Custom Destination
+
+```typescript
+const myDestination: WebhookDestination = {
+  name: "my-system",
+  async send(event, payload) {
+    // Your custom logic
+  },
+};
+```
+
+## Configuration
+
+```typescript
+interface WebhookConfig {
+  destinations: WebhookDestination[];
+  events?: string[];         // Filter events (default: all)
+  batchInterval?: number;    // Batch events before sending (ms)
+  retries?: number;          // Retry on failure (default: 2)
+  onError?: "log" | "throw"; // Error handling (default: "log")
+}
+```
+
+## Supported Events
+
+All events from the `AgentEventMap` are supported, including:
+
+`run.start`, `run.complete`, `run.error`, `tool.call`, `tool.result`, `team.delegate`, `handoff.transfer`, `handoff.complete`, `cost.tracked`, `cache.hit`, `cache.miss`, `memory.stored`, `skill.loaded`, and more.

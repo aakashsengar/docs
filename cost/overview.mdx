@@ -1,0 +1,87 @@
+---
+title: Cost Tracking
+description: Track token usage, compute costs, and enforce budgets
+---
+
+# Cost Tracking
+
+The `CostTracker` tracks token usage and costs across agent runs. It supports budget enforcement, per-model pricing, and detailed summaries.
+
+## Quick Start
+
+```typescript
+import { Agent, openai, CostTracker } from "@radaros/core";
+
+const tracker = new CostTracker({
+  budget: {
+    maxCostPerSession: 1.0,   // $1 per session
+    maxCostPerUser: 10.0,     // $10 per user
+    onBudgetExceeded: "throw",
+  },
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+await agent.run("Hello!", { sessionId: "s1", userId: "user-42" });
+
+const summary = tracker.getSummary();
+console.log(`Total cost: $${summary.totalCost.toFixed(4)}`);
+```
+
+## Built-in Pricing
+
+Pricing is included for major models:
+
+| Model | Prompt / 1K | Completion / 1K |
+|-------|------------|-----------------|
+| gpt-4o | $0.0025 | $0.01 |
+| gpt-4o-mini | $0.00015 | $0.0006 |
+| claude-3.5-sonnet | $0.003 | $0.015 |
+| gemini-2.0-flash | $0.0001 | $0.0004 |
+
+Override or extend pricing:
+
+```typescript
+const tracker = new CostTracker({
+  pricing: {
+    "my-custom-model": { promptPer1k: 0.005, completionPer1k: 0.02 },
+  },
+});
+```
+
+## Budget Enforcement
+
+Budgets are checked before each LLM call:
+
+```typescript
+interface CostBudget {
+  maxCostPerRun?: number;      // Per individual run
+  maxCostPerSession?: number;  // Across all runs in a session
+  maxCostPerUser?: number;     // Across all sessions for a user
+  maxTokensPerRun?: number;    // Token limit per run
+  onBudgetExceeded?: "throw" | "warn";
+}
+```
+
+## Cost Summary
+
+```typescript
+const summary = tracker.getSummary({ userId: "user-42" });
+
+summary.totalCost;              // Total USD
+summary.totalTokens;            // Aggregated TokenUsage
+summary.byAgent["assistant"];   // { cost, tokens, runs }
+summary.byModel["gpt-4o"];     // { cost, tokens }
+summary.byUser["user-42"];     // { cost, tokens }
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `cost.tracked` | `{ runId, agentName, modelId, usage }` |
+| `cost.budget.exceeded` | `{ runId, agentName, budget, current, limit }` |

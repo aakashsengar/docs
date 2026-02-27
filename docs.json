@@ -53,6 +53,36 @@
             ]
           },
           {
+            "group": "Handoff",
+            "pages": [
+              "handoff/overview"
+            ]
+          },
+          {
+            "group": "Cost Tracking",
+            "pages": [
+              "cost/overview"
+            ]
+          },
+          {
+            "group": "Semantic Cache",
+            "pages": [
+              "cache/overview"
+            ]
+          },
+          {
+            "group": "Eval Framework",
+            "pages": [
+              "eval/overview"
+            ]
+          },
+          {
+            "group": "Webhooks",
+            "pages": [
+              "webhooks/overview"
+            ]
+          },
+          {
             "group": "Voice Agents",
             "pages": [
               "voice/overview"
@@ -169,7 +199,8 @@
               "api-reference/core",
               "api-reference/transport",
               "api-reference/queue",
-              "api-reference/browser"
+              "api-reference/browser",
+              "api-reference/eval"
             ]
           }
         ]

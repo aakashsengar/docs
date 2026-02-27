@@ -1,0 +1,71 @@
+---
+title: Semantic Cache
+description: Cache LLM responses by semantic similarity to reduce costs and latency
+---
+
+# Semantic Cache
+
+Semantic caching stores LLM responses indexed by the semantic meaning of the input. When a similar query arrives, the cached response is returned without calling the LLM — reducing costs and latency.
+
+## Quick Start
+
+```typescript
+import { Agent, openai, InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  semanticCache: {
+    vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+    embedding: new OpenAIEmbedding(),
+    similarityThreshold: 0.92,
+    scope: "agent",
+  },
+});
+
+// First call: LLM call, result cached
+await agent.run("What is the capital of France?");
+
+// Second call: returns from cache (no LLM call)
+await agent.run("What's the capital of France?");
+```
+
+## Configuration
+
+```typescript
+interface SemanticCacheConfig {
+  vectorStore: VectorStore;        // Any vector store backend
+  embedding: EmbeddingProvider;    // Embedding model for similarity
+  similarityThreshold?: number;    // 0-1, default 0.92
+  ttl?: number;                    // Cache expiry in ms
+  collection?: string;             // Vector collection name
+  scope?: "global" | "agent" | "session";
+}
+```
+
+## Scope
+
+| Scope | Behavior |
+|-------|----------|
+| `global` | All agents share one cache |
+| `agent` | Each agent has its own cache partition |
+| `session` | Each session has its own cache partition |
+
+## How It Works
+
+1. Before calling the LLM, the input is embedded and searched against the vector store
+2. If a result exceeds the `similarityThreshold`, it's returned as a cache hit
+3. Output guardrails still run on cached responses
+4. After an LLM call, the input + output are stored in the vector store (fire-and-forget)
+5. TTL is enforced on lookup — expired entries are evicted lazily
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `cache.hit` | `{ agentName, input, cachedId }` |
+| `cache.miss` | `{ agentName, input }` |
+
+## Supported Backends
+
+Any `VectorStore` implementation works: `InMemoryVectorStore`, `QdrantVectorStore`, `MongoDBVectorStore`, `PgVectorStore`.
