@@ -69,16 +69,46 @@ RadarOS is designed for developers who want:
 
 ## Why RadarOS?
 
-<Accordion title="vs. LangGraph (Python)">
-  LangGraph is Python-only. If your stack is Node.js/TypeScript, you'd need to run a separate Python service, manage two runtimes, and deal with inter-process communication. RadarOS keeps everything in TypeScript—same language, same process, same deployment.
+<Accordion title="vs. LangGraph.js">
+  LangGraph.js is a powerful low-level orchestration framework, but it requires you to model everything as a directed state graph — defining nodes, edges, reducers, and conditional routing. It's explicitly described as "very low-level, focused entirely on agent orchestration." RadarOS takes a higher-level, declarative approach: define an Agent with tools, a Team with members, or a Workflow with steps — no graph theory required.
+
+  Both frameworks support human-in-the-loop, streaming, and state persistence. Where they diverge:
+  - **Voice agents**: LangGraph has no built-in voice support — you'd need to integrate LiveKit or another real-time layer yourself. RadarOS ships `VoiceAgent` with OpenAI Realtime and Google Live providers out of the box.
+  - **Browser automation**: Not part of LangGraph. RadarOS includes `BrowserAgent` with Playwright, stealth mode, credential vaulting, and video recording.
+  - **Multi-agent teams**: LangGraph supports multi-agent via handoffs and supervisor patterns, but you wire the graph manually. RadarOS provides `Team` with four built-in modes (coordinate, route, broadcast, collaborate) — one config object.
+  - **Transport**: LangGraph relies on LangGraph Platform (paid) for deployment. RadarOS ships free Express, Socket.IO, and A2A transport out of the box.
 </Accordion>
 
 <Accordion title="vs. Vercel AI SDK">
-  The Vercel AI SDK is tightly coupled to Vercel's streaming and React patterns. RadarOS is framework-agnostic: use it with Express, Fastify, Socket.IO, or headless. No vendor lock-in, no React requirement.
+  The Vercel AI SDK (v6) is a solid choice for single-agent tool-calling loops, especially if you're already on Vercel. It has good model provider support, tool validation via Zod, and a `ToolLoopAgent` class. However, it's designed primarily for individual agents inside Vercel's ecosystem.
+
+  Where RadarOS goes further:
+  - **Multi-agent teams**: The AI SDK has no built-in team coordination. RadarOS provides `Team` with coordinator, router, broadcast, and collaborate modes.
+  - **Workflows**: The AI SDK offers workflow "patterns" (docs examples), but no first-class `Workflow` class with typed state, parallel steps, retry policies, and conditions. RadarOS does.
+  - **Voice agents**: The AI SDK has `speech` and `transcription` utilities, but no real-time bidirectional voice agent. RadarOS has `VoiceAgent` with OpenAI Realtime and Google Live.
+  - **Browser agents**: Not part of the AI SDK. RadarOS includes `BrowserAgent`.
+  - **Background jobs**: The AI SDK relies on Vercel's Fluid Compute (`waitUntil`). RadarOS provides a standalone `@radaros/queue` package with BullMQ — runs anywhere, not just Vercel.
+  - **Framework lock-in**: The AI SDK is optimized for Vercel + React. RadarOS is framework-agnostic — Express, Fastify, Socket.IO, or headless.
 </Accordion>
 
 <Accordion title="vs. LangChain.js">
-  RadarOS avoids the abstraction overhead of LangChain's chain-based model. You get direct control over the agent loop, tool execution, and session flow—without fighting a complex abstraction layer.
+  LangChain.js is a large ecosystem with integrations for nearly every vector store, memory backend, and LLM provider. It's great if you need breadth. However, the chain-based abstraction layer sits between you and the LLM, and the framework is actively steering users toward LangGraph for anything beyond simple chains (`AgentExecutor` is deprecated, sunset December 2026).
+
+  RadarOS takes a different philosophy:
+  - **Direct control**: You work with `Agent`, `Team`, and `Workflow` directly — no chain composition or `AgentExecutor` to reason about.
+  - **Batteries-included**: Session management, user memory, hybrid RAG (BM25 + vector), voice agents, browser automation, sandbox execution, and human-in-the-loop are all first-class — not spread across `langchain`, `@langchain/community`, and `langgraph`.
+  - **Simpler mental model**: One framework, one set of docs. LangChain.js users currently need to decide between LangChain, LangGraph, LangSmith, and LangServe — each with its own API surface.
+</Accordion>
+
+<Accordion title="vs. CrewAI / Autogen">
+  CrewAI is Python-only (98% Python on GitHub). Autogen supports Python and .NET, with more languages "coming." Neither has native TypeScript support. If your stack is Node.js, you'd need to run a separate Python service, manage two runtimes, and deal with inter-process communication.
+
+  RadarOS keeps everything in TypeScript — same language, same process, same deployment. It also provides capabilities that these frameworks don't:
+  - **Real-time voice agents** with OpenAI Realtime and Google Live
+  - **Autonomous browser agents** with Playwright and stealth mode
+  - **Transport gateways** (Express REST, Socket.IO, Voice Gateway, Browser Gateway)
+  - **Background job queues** with BullMQ
+  - **Sandbox execution** for isolated tool running
 </Accordion>
 
 ---
