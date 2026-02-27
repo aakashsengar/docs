@@ -1,11 +1,11 @@
 ---
 title: Toolkits
-description: Pre-built tool collections for common integrations — web search, email, messaging, and more.
+description: Pre-built tool collections for common integrations — web search, email, messaging, databases, and more.
 ---
 
 # Toolkits
 
-A **Toolkit** is a collection of related tools that share configuration and can be added to any Agent. RadarOS provides pre-built toolkits for common integrations so you don't have to write boilerplate.
+A **Toolkit** is a collection of related tools that share configuration and can be added to any Agent. RadarOS ships with 18 pre-built toolkits for common integrations so you don't have to write boilerplate.
 
 ```typescript
 import { Agent, openai, DuckDuckGoToolkit } from "@radaros/core";
@@ -23,23 +23,109 @@ const agent = new Agent({
 
 ## Available Toolkits
 
+### Utility (No API Key)
+
+<CardGroup cols={2}>
+  <Card title="Calculator" icon="calculator" href="/toolkits/calculator">
+    Evaluate math expressions safely — arithmetic and Math functions.
+  </Card>
+  <Card title="File System" icon="folder-open" href="/toolkits/filesystem">
+    Read, write, list, and inspect local files with path sandboxing.
+  </Card>
+  <Card title="Shell" icon="terminal" href="/toolkits/shell">
+    Execute shell commands with timeout and command allowlisting.
+  </Card>
+  <Card title="Wikipedia" icon="book" href="/toolkits/wikipedia">
+    Search and read Wikipedia articles — no API key required.
+  </Card>
+</CardGroup>
+
+### Web & Search
+
 <CardGroup cols={2}>
   <Card title="DuckDuckGo" icon="magnifying-glass" href="/toolkits/duckduckgo">
     Web search and news — no API key required.
   </Card>
-  <Card title="Hacker News" icon="newspaper" href="/toolkits/hackernews">
-    Top stories and user details from HN — no API key required.
-  </Card>
   <Card title="Web Search" icon="globe" href="/toolkits/websearch">
     Tavily or SerpAPI-powered web search with AI-optimized results.
   </Card>
+  <Card title="HTTP / REST" icon="code" href="/toolkits/http">
+    Make arbitrary HTTP requests — call any API.
+  </Card>
+  <Card title="Web Scraper" icon="spider-web" href="/toolkits/scraper">
+    Extract text content and links from web pages.
+  </Card>
+  <Card title="Hacker News" icon="newspaper" href="/toolkits/hackernews">
+    Top stories and user details from HN — no API key required.
+  </Card>
+  <Card title="YouTube" icon="youtube" href="/toolkits/youtube">
+    Search videos and extract transcripts/captions.
+  </Card>
+</CardGroup>
+
+### Data
+
+<CardGroup cols={2}>
+  <Card title="SQL Database" icon="database" href="/toolkits/sql">
+    Query SQLite, PostgreSQL, or MySQL databases.
+  </Card>
+</CardGroup>
+
+### Communication
+
+<CardGroup cols={2}>
   <Card title="Gmail" icon="envelope" href="/toolkits/gmail">
     Send, search, and read emails via Gmail API.
   </Card>
   <Card title="WhatsApp" icon="message" href="/toolkits/whatsapp">
     Send messages via Meta's WhatsApp Business Cloud API.
   </Card>
+  <Card title="Slack" icon="slack" href="/toolkits/slack">
+    Send/read messages, list channels, and reply in threads.
+  </Card>
 </CardGroup>
+
+### Project Management & Productivity
+
+<CardGroup cols={2}>
+  <Card title="GitHub" icon="github" href="/toolkits/github">
+    Repositories, issues, PRs, and file content.
+  </Card>
+  <Card title="Jira" icon="jira" href="/toolkits/jira">
+    Search, create, update issues and add comments.
+  </Card>
+  <Card title="Notion" icon="n" href="/toolkits/notion">
+    Search pages, read content, create pages, and query databases.
+  </Card>
+  <Card title="Google Calendar" icon="calendar" href="/toolkits/calendar">
+    List, create, get, and delete calendar events.
+  </Card>
+</CardGroup>
+
+---
+
+## Quick Reference
+
+| Toolkit | Tools | Auth Required |
+|---------|-------|---------------|
+| Calculator | `calculate` | None |
+| File System | `fs_read_file`, `fs_write_file`, `fs_list_directory`, `fs_file_info` | None |
+| Shell | `shell_exec` | None |
+| Wikipedia | `wikipedia_search`, `wikipedia_summary` | None |
+| DuckDuckGo | `duckduckgo_search`, `duckduckgo_news` | None |
+| Hacker News | `hackernews_top_stories`, `hackernews_user` | None |
+| Web Search | `web_search` | Tavily or SerpAPI key |
+| HTTP / REST | `http_request` | Depends on target API |
+| Web Scraper | `scrape_url`, `scrape_links` | None |
+| YouTube | `youtube_transcript`, `youtube_search` | YouTube API key (search only) |
+| SQL Database | `sql_query`, `sql_tables`, `sql_describe` | DB connection string |
+| Gmail | `gmail_send`, `gmail_search`, `gmail_read` | Google OAuth2 |
+| WhatsApp | `whatsapp_send_text`, `whatsapp_send_template` | Meta access token |
+| Slack | `slack_send_message`, `slack_list_channels`, `slack_read_messages`, `slack_reply_thread` | Slack Bot token |
+| GitHub | `github_search_repos`, `github_list_issues`, `github_get_issue`, `github_create_issue`, `github_list_prs`, `github_get_file_content` | GitHub token |
+| Jira | `jira_search_issues`, `jira_get_issue`, `jira_create_issue`, `jira_update_issue`, `jira_add_comment` | Jira API token |
+| Notion | `notion_search`, `notion_get_page`, `notion_create_page`, `notion_query_database` | Notion token |
+| Google Calendar | `calendar_list_events`, `calendar_create_event`, `calendar_get_event`, `calendar_delete_event` | Google OAuth2 |
 
 ---
 
@@ -67,6 +153,68 @@ const agent = new Agent({
 
 ---
 
+## Building a Tool Library
+
+Use `collectToolkitTools()` to combine multiple toolkit instances into a named tool library — useful for the Admin API and dynamic agent creation:
+
+```typescript
+import { collectToolkitTools, CalculatorToolkit, DuckDuckGoToolkit, GitHubToolkit } from "@radaros/core";
+
+const toolLibrary = collectToolkitTools([
+  new CalculatorToolkit(),
+  new DuckDuckGoToolkit(),
+  new GitHubToolkit({ token: process.env.GITHUB_TOKEN }),
+]);
+// { calculate: ToolDef, duckduckgo_search: ToolDef, github_list_repos: ToolDef, ... }
+```
+
+Use `describeToolLibrary()` to get a serializable summary for API responses:
+
+```typescript
+import { describeToolLibrary } from "@radaros/core";
+
+const descriptions = describeToolLibrary(toolLibrary);
+// [{ name: "calculate", description: "...", parameters: ["expression"] }, ...]
+```
+
+---
+
+## Toolkit Catalog
+
+RadarOS includes a built-in `toolkitCatalog` that knows about all 18 toolkit types and their configuration requirements. This powers the Admin UI's toolkit browser.
+
+```typescript
+import { toolkitCatalog } from "@radaros/core";
+
+// List all available toolkit types
+const all = toolkitCatalog.list();
+// [{ id: "github", name: "GitHub", configFields: [...], requiresCredentials: true }, ...]
+
+// Check what a toolkit needs
+const github = toolkitCatalog.get("github");
+// { id: "github", configFields: [{ name: "token", secret: true, envVar: "GITHUB_TOKEN" }], ... }
+
+// Instantiate from a config object
+const tk = toolkitCatalog.create("github", { token: "ghp_..." });
+```
+
+Each catalog entry includes:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Machine ID (e.g. `"github"`, `"slack"`) |
+| `name` | Display name (e.g. `"GitHub"`, `"Slack"`) |
+| `description` | What the toolkit does |
+| `category` | `utility`, `search`, `api`, `enterprise`, or `communication` |
+| `requiresCredentials` | Whether the toolkit needs API keys |
+| `configFields` | Array of fields with `name`, `label`, `type`, `required`, `secret`, `envVar`, `hint` |
+
+<Tip>
+The `@radaros/admin` package uses the toolkit catalog to let users configure toolkit credentials from a UI — see [Admin: Toolkit Configuration](/admin/overview#toolkit-configuration-dynamic-credentials).
+</Tip>
+
+---
+
 ## Creating Custom Toolkits
 
 Extend the `Toolkit` base class:
@@ -89,4 +237,25 @@ export class MyToolkit extends Toolkit {
     ];
   }
 }
+```
+
+### Registering in the Catalog
+
+To make a custom toolkit available in the admin UI's toolkit browser, register it in the catalog:
+
+```typescript
+import { toolkitCatalog } from "@radaros/core";
+import { MyToolkit } from "./my-toolkit.js";
+
+toolkitCatalog.register({
+  id: "my-toolkit",
+  name: "My Toolkit",
+  description: "Does useful things",
+  category: "utility",
+  requiresCredentials: false,
+  configFields: [
+    { name: "input", label: "Input", type: "string" },
+  ],
+  factory: (config) => new MyToolkit(config),
+});
 ```

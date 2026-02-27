@@ -75,15 +75,20 @@ The admin package persists entity blueprints to a `StorageDriver`, ensuring they
 
 ## How It Works
 
-The `ConfigStore` uses three namespaces to organize data:
+The admin layer uses four namespaces to organize data:
 
 | Namespace | Contents |
 |-----------|----------|
 | `radaros:admin:agents` | `AgentBlueprint` objects |
 | `radaros:admin:teams` | `TeamBlueprint` objects |
 | `radaros:admin:workflows` | `WorkflowBlueprint` objects |
+| `radaros:admin:toolkit-configs` | `ToolkitConfig` objects (credentials, settings) |
 
-Each blueprint is stored as a plain JSON object keyed by the entity's `name`. No class instances or functions are persisted — only serializable configuration.
+Each record is stored as a plain JSON object keyed by the entity's `name` (or `instanceName` for toolkit configs). No class instances or functions are persisted — only serializable configuration.
+
+<Warning>
+Toolkit configs may contain sensitive values (API keys, tokens). These are stored as-is in the storage driver. Use an encrypted-at-rest storage backend (e.g., PostgreSQL with disk encryption) for production deployments. API responses always mask secret fields.
+</Warning>
 
 ---
 
@@ -96,15 +101,16 @@ Server starts
     │
 hydrate()
     │
-ConfigStore.listAgents()  →  EntityFactory.createAgent()  →  registry.add()
-ConfigStore.listTeams()   →  EntityFactory.createTeam()   →  registry.add()
+ToolkitManager.hydrate()  →  Instantiate enabled toolkit configs  →  Tools available
+ConfigStore.listAgents()   →  EntityFactory.createAgent()          →  registry.add()
+ConfigStore.listTeams()    →  EntityFactory.createTeam()           →  registry.add()
     │
 Transport layer discovers all entities via registry
     │
 Ready to serve requests
 ```
 
-Agents are hydrated first, then teams (since teams reference agents as members). Entities already in the registry (e.g., from code-defined agents) are skipped.
+Toolkit configs are hydrated first (so their tools are available), then agents (which may reference those tools), then teams (which reference agents). Entities already in the registry are skipped.
 
 ---
 

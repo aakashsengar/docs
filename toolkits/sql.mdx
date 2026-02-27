@@ -1,0 +1,85 @@
+---
+title: SQL Database
+description: Query databases (SQLite, PostgreSQL, MySQL) from your agent.
+---
+
+# SQL Database
+
+Query databases directly from your agent. Supports SQLite, PostgreSQL, and MySQL with read-only safety mode.
+
+<Info>
+  Requires the appropriate database driver as a peer dependency: `better-sqlite3`, `pg`, or `mysql2`.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, SqlToolkit } from "@radaros/core";
+
+const sql = new SqlToolkit({
+  dialect: "sqlite",
+  connectionString: "./analytics.db",
+});
+
+const agent = new Agent({
+  name: "data-analyst",
+  model: openai("gpt-4o"),
+  instructions: "Query the database to answer questions about the data.",
+  tools: [...sql.getTools()],
+});
+
+const result = await agent.run("What are the top 10 users by order count?");
+```
+
+---
+
+## Config
+
+<ParamField body="dialect" type="'sqlite' | 'postgres' | 'mysql'" required>
+  Database dialect.
+</ParamField>
+
+<ParamField body="connectionString" type="string" required>
+  Connection string (for postgres/mysql) or file path (for sqlite).
+</ParamField>
+
+<ParamField body="readOnly" type="boolean" default="true">
+  Restrict to read-only queries (SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA, WITH).
+</ParamField>
+
+<ParamField body="maxRows" type="number" default="100">
+  Max rows to return per query.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `sql_query` | Execute a SQL query. Returns formatted table results. |
+| `sql_tables` | List all tables in the database. |
+| `sql_describe` | Describe the schema (columns, types) of a table. |
+
+---
+
+## Peer Dependencies
+
+Install the driver for your database:
+
+```bash
+# SQLite
+npm install better-sqlite3
+
+# PostgreSQL
+npm install pg
+
+# MySQL
+npm install mysql2
+```
+
+<Warning>
+  Read-only mode is enabled by default. Set `readOnly: false` only if your agent needs to write data.
+</Warning>

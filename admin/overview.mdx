@@ -63,7 +63,13 @@ app.use(express.json());
 
 const { router, hydrate } = createAdminRouter({
   storage: new SqliteStorage("radaros.db"),
-  toolLibrary: { webSearch: webSearchTool, calculator: calcTool },
+  toolkits: [
+    new CalculatorToolkit(),
+    new DuckDuckGoToolkit(),
+    new GitHubToolkit({ token: process.env.GITHUB_TOKEN }),
+  ],
+  // explicit entries override toolkit tools with the same name
+  toolLibrary: { customTool: myCustomTool },
 });
 
 await hydrate(); // re-create persisted entities on startup
@@ -87,7 +93,7 @@ const io = new Server(httpServer);
 const { hydrate } = createAdminGateway({
   io,
   storage: new SqliteStorage("radaros.db"),
-  toolLibrary: { webSearch: webSearchTool, calculator: calcTool },
+  toolkits: [new CalculatorToolkit(), new DuckDuckGoToolkit()],
   namespace: "/radaros-admin",
 });
 
@@ -106,6 +112,14 @@ createAgentGateway({ io }); // auto-discovers from registry
 
 <ParamField body="toolLibrary" type="Record<string, ToolDef>">
   Named tools available for agent creation. Users reference tools by key name in blueprints.
+  Explicit entries override any toolkit tools with the same name.
+</ParamField>
+
+<ParamField body="toolkits" type="Toolkit[]">
+  Toolkit instances whose tools are automatically registered in the tool library.
+  Pass any built-in toolkit (e.g., `CalculatorToolkit`, `GitHubToolkit`) and all their tools become
+  available for agent creation. A `GET /tools` endpoint and `admin.tools.list` event are provided
+  for the UI to discover available tools.
 </ParamField>
 
 <ParamField body="middleware" type="RequestHandler[]">
@@ -125,3 +139,122 @@ console.log(counts);
 ```
 
 This reads all saved blueprints from storage, resolves them via `EntityFactory` (model providers, tools, team members), and creates live instances that auto-register into the global registry. Existing entities with the same name are skipped.
+
+---
+
+## Tool Discovery
+
+The admin layer exposes endpoints and events so the UI can list all available tools before creating agents.
+
+### REST
+
+```bash
+# List all available tools
+curl http://localhost:3000/admin/tools
+```
+
+```json
+[
+  { "name": "calculate", "description": "Evaluate a math expression", "parameters": ["expression"] },
+  { "name": "duckduckgo_search", "description": "Search the web", "parameters": ["query", "maxResults"] },
+  { "name": "github_list_repos", "description": "List repositories", "parameters": ["owner"] }
+]
+```
+
+```bash
+# Get a single tool's detail
+curl http://localhost:3000/admin/tools/calculate
+```
+
+### Socket.IO
+
+```typescript
+socket.emit("admin.tools.list", {}, (res) => {
+  console.log(res.data);
+  // [{ name: "calculate", description: "...", parameters: [...] }, ...]
+});
+
+socket.emit("admin.tools.get", { name: "calculate" }, (res) => {
+  console.log(res.data);
+  // { name: "calculate", description: "...", parameters: ["expression"] }
+});
+```
+
+### Using `collectToolkitTools`
+
+You can also manually build a tool library from toolkits:
+
+```typescript
+import { collectToolkitTools, CalculatorToolkit, DuckDuckGoToolkit } from "@radaros/core";
+
+const toolLibrary = collectToolkitTools([
+  new CalculatorToolkit(),
+  new DuckDuckGoToolkit(),
+]);
+// { calculate: ToolDef, duckduckgo_search: ToolDef }
+```
+
+---
+
+## Toolkit Configuration (Dynamic Credentials)
+
+The admin layer includes a complete toolkit configuration system. Users can configure toolkit
+credentials (API keys, tokens, connection strings) through the UI without restarting the server.
+
+### How it works
+
+1. **Toolkit Catalog** — Lists all available toolkit types and what config fields they need
+2. **Toolkit Configs** — CRUD operations to save/update/delete credentials per toolkit instance
+3. **Secret Masking** — API keys are never returned in plain text; responses mask secret fields
+4. **Dynamic Instantiation** — When a config is saved with `enabled: true`, the toolkit is
+   immediately created and its tools become available for agent creation
+5. **Hydration** — On startup, `hydrate()` re-creates all enabled toolkit instances from storage
+
+### REST Example
+
+```bash
+# 1. Browse available toolkit types
+curl http://localhost:3000/admin/toolkit-catalog
+# [{ id: "github", name: "GitHub", configFields: [{ name: "token", secret: true, ... }], ... }]
+
+# 2. Configure a toolkit with credentials
+curl -X POST http://localhost:3000/admin/toolkit-configs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "toolkitId": "github",
+    "instanceName": "my-github",
+    "config": { "token": "ghp_your_real_token_here" },
+    "enabled": true
+  }'
+# Response: { toolkitId: "github", instanceName: "my-github", config: { token: "ghp_****..." }, enabled: true }
+
+# 3. Tools are now available — create an agent that uses them
+curl -X POST http://localhost:3000/admin/agents \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "coder", "provider": "openai", "model": "gpt-4o", "tools": ["github_list_repos", "github_get_issue"] }'
+```
+
+### Socket.IO Example
+
+```typescript
+// Browse the catalog
+socket.emit("admin.toolkit-catalog.list", {}, (res) => {
+  console.log(res.data);
+  // [{ id: "github", name: "GitHub", configFields: [...], requiresCredentials: true }]
+});
+
+// Save credentials
+socket.emit("admin.toolkit-config.create", {
+  toolkitId: "slack",
+  instanceName: "my-slack",
+  config: { token: "xoxb-your-bot-token" },
+  enabled: true,
+}, (res) => {
+  console.log(res.data.config.token); // "xoxb**************"
+});
+
+// List configured toolkits (secrets masked)
+socket.emit("admin.toolkit-config.list", {}, (res) => {
+  console.log(res.data);
+});
+```

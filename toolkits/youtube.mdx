@@ -1,0 +1,64 @@
+---
+title: YouTube
+description: Search YouTube videos and extract transcripts/captions.
+---
+
+# YouTube
+
+Search YouTube videos and extract transcripts/captions. Transcript extraction works without an API key; search requires a YouTube Data API v3 key.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, YouTubeToolkit } from "@radaros/core";
+
+const yt = new YouTubeToolkit();
+
+const agent = new Agent({
+  name: "video-researcher",
+  model: openai("gpt-4o"),
+  instructions: "Extract and summarize YouTube video transcripts.",
+  tools: [...yt.getTools()],
+});
+
+const result = await agent.run(
+  "Get the transcript of https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+);
+```
+
+---
+
+## Config
+
+<ParamField body="apiKey" type="string">
+  YouTube Data API v3 key for search. Falls back to `YOUTUBE_API_KEY` env var.
+</ParamField>
+
+<ParamField body="enableSearch" type="boolean" default="true">
+  Enable the `youtube_search` tool (requires API key).
+</ParamField>
+
+<ParamField body="enableTranscript" type="boolean" default="true">
+  Enable the `youtube_transcript` tool (no API key needed).
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `youtube_transcript` | Get captions/transcript for a YouTube video by URL or ID. No API key needed. |
+| `youtube_search` | Search YouTube for videos. Returns titles, channels, and URLs. Requires API key. |
+
+---
+
+## Environment Variables
+
+```bash
+export YOUTUBE_API_KEY="AIza..."
+```
+
+Get an API key from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials).

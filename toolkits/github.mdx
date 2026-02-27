@@ -1,0 +1,63 @@
+---
+title: GitHub
+description: Interact with GitHub repos, issues, PRs, and file content.
+---
+
+# GitHub
+
+Interact with GitHub repositories, issues, pull requests, and file content via the GitHub REST API.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GitHubToolkit } from "@radaros/core";
+
+const gh = new GitHubToolkit();
+// Uses GITHUB_TOKEN env var
+
+const agent = new Agent({
+  name: "github-assistant",
+  model: openai("gpt-4o"),
+  instructions: "Help manage GitHub repositories and issues.",
+  tools: [...gh.getTools()],
+});
+
+const result = await agent.run("List open issues in xhipment/radar-os");
+```
+
+---
+
+## Config
+
+<ParamField body="token" type="string">
+  GitHub personal access token. Falls back to `GITHUB_TOKEN` env var.
+</ParamField>
+
+<ParamField body="apiBase" type="string" default="https://api.github.com">
+  GitHub API base URL. Override for GitHub Enterprise.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `github_search_repos` | Search repositories by query. Returns names, stars, descriptions. |
+| `github_list_issues` | List issues for a repository (excludes PRs). |
+| `github_get_issue` | Get full details of a specific issue. |
+| `github_create_issue` | Create a new issue with title, body, and labels. |
+| `github_list_prs` | List pull requests for a repository. |
+| `github_get_file_content` | Get file content from a repo (auto-decodes base64). |
+
+---
+
+## Environment Variables
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+```
+
+Create a token at [github.com/settings/tokens](https://github.com/settings/tokens). Required scopes depend on your use case — `repo` for private repos, `public_repo` for public only.

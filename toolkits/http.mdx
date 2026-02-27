@@ -1,0 +1,58 @@
+---
+title: HTTP / REST
+description: Make arbitrary HTTP requests from your agent — call any API.
+---
+
+# HTTP / REST
+
+Make arbitrary HTTP requests from your agent. Call any REST API with configurable headers, base URL, timeout, and response truncation.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, HttpToolkit } from "@radaros/core";
+
+const http = new HttpToolkit({
+  baseUrl: "https://api.example.com",
+  headers: { Authorization: "Bearer sk-..." },
+});
+
+const agent = new Agent({
+  name: "api-agent",
+  model: openai("gpt-4o"),
+  instructions: "Call the API to fetch data and answer questions.",
+  tools: [...http.getTools()],
+});
+
+const result = await agent.run("Get the list of users from the API");
+```
+
+---
+
+## Config
+
+<ParamField body="baseUrl" type="string">
+  Base URL prepended to relative paths (e.g. `"https://api.example.com"`).
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Default headers included in every request.
+</ParamField>
+
+<ParamField body="timeout" type="number" default="30000">
+  Request timeout in milliseconds.
+</ParamField>
+
+<ParamField body="maxResponseSize" type="number" default="20000">
+  Max response body characters to return. Larger responses are truncated.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `http_request` | Make an HTTP request (GET, POST, PUT, PATCH, DELETE). Returns status, headers, and body. |

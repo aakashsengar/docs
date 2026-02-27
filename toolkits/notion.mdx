@@ -1,0 +1,63 @@
+---
+title: Notion
+description: Search, read, and create pages in Notion databases.
+---
+
+# Notion
+
+Search pages, read content, create new pages, and query databases in Notion.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, NotionToolkit } from "@radaros/core";
+
+const notion = new NotionToolkit();
+// Uses NOTION_API_KEY env var
+
+const agent = new Agent({
+  name: "notion-assistant",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Notion pages and databases.",
+  tools: [...notion.getTools()],
+});
+
+const result = await agent.run("Search for meeting notes from last week");
+```
+
+---
+
+## Config
+
+<ParamField body="token" type="string">
+  Notion internal integration token. Falls back to `NOTION_API_KEY` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `notion_search` | Search Notion for pages and databases by title/content. |
+| `notion_get_page` | Get content of a page by ID (returns text blocks). |
+| `notion_create_page` | Create a page in a database or as a child of a page. |
+| `notion_query_database` | Query a database with optional Notion filters. |
+
+---
+
+## Setup
+
+1. Create an [internal integration](https://www.notion.so/my-integrations)
+2. Copy the integration token
+3. Share your pages/databases with the integration (click "..." > "Connections" > add your integration)
+
+---
+
+## Environment Variables
+
+```bash
+export NOTION_API_KEY="ntn_..."
+```

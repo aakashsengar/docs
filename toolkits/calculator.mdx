@@ -1,0 +1,59 @@
+---
+title: Calculator
+description: Evaluate math expressions safely — no API key required.
+---
+
+# Calculator
+
+Evaluate math expressions safely using a sandboxed math environment. Supports arithmetic, exponentiation, and common Math functions — no `eval()` used internally.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, CalculatorToolkit } from "@radaros/core";
+
+const calc = new CalculatorToolkit();
+
+const agent = new Agent({
+  name: "math-assistant",
+  model: openai("gpt-4o"),
+  instructions: "Help users with calculations. Always show your work.",
+  tools: [...calc.getTools()],
+});
+
+const result = await agent.run("What is the square root of 144 plus 2^10?");
+```
+
+---
+
+## Config
+
+<ParamField body="precision" type="number" default="10">
+  Decimal precision for results (number of significant digits).
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `calculate` | Evaluate a math expression. Supports `+`, `-`, `*`, `/`, `^`, `%`, parentheses, and functions like `sqrt`, `pow`, `sin`, `cos`, `log`, `abs`, `ceil`, `floor`, `round`, `min`, `max`. Constants: `PI`, `E`. |
+
+---
+
+## Supported Functions
+
+| Function | Example |
+|----------|---------|
+| `sqrt(x)` | `sqrt(144)` → `12` |
+| `pow(x, y)` | `pow(2, 10)` → `1024` |
+| `abs(x)` | `abs(-5)` → `5` |
+| `sin(x)`, `cos(x)`, `tan(x)` | Trigonometric functions (radians) |
+| `log(x)`, `log2(x)`, `log10(x)` | Logarithmic functions |
+| `ceil(x)`, `floor(x)`, `round(x)` | Rounding |
+| `min(a, b)`, `max(a, b)` | Min/max |
+| `exp(x)` | `e^x` |
+| `cbrt(x)` | Cube root |

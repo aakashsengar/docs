@@ -96,6 +96,8 @@ This creates the following endpoints:
 | GET | `/api/teams` | List registered teams |
 | GET | `/api/workflows` | List registered workflows |
 | GET | `/api/registry` | List all registered names |
+| GET | `/api/tools` | List available tools (when toolkits/toolLibrary configured) |
+| GET | `/api/tools/:name` | Get single tool detail |
 
 ## RouterOptions
 
@@ -129,6 +131,14 @@ This creates the following endpoints:
 
 <ParamField body="fileUpload" type="boolean | FileUploadOptions">
   Enable multipart file upload for multi-modal input. See [File Upload docs](/transport/file-upload).
+</ParamField>
+
+<ParamField body="toolkits" type="Toolkit[]">
+  Toolkit instances whose tools are exposed via `GET /tools`. Useful for UI tool discovery.
+</ParamField>
+
+<ParamField body="toolLibrary" type="Record<string, ToolDef>">
+  Named tools exposed via `GET /tools`. Merged with toolkit tools (explicit entries take precedence).
 </ParamField>
 
 ## Request Format

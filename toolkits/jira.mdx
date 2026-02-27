@@ -1,0 +1,69 @@
+---
+title: Jira
+description: Search, create, and update Jira issues from your agent.
+---
+
+# Jira
+
+Search, create, update issues, and add comments in Jira using the Jira REST API v3.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, JiraToolkit } from "@radaros/core";
+
+const jira = new JiraToolkit({
+  baseUrl: "https://yourcompany.atlassian.net",
+  // Uses JIRA_EMAIL and JIRA_API_TOKEN env vars
+});
+
+const agent = new Agent({
+  name: "project-manager",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Jira issues and sprints.",
+  tools: [...jira.getTools()],
+});
+
+const result = await agent.run("Find all open bugs in the PROJ project");
+```
+
+---
+
+## Config
+
+<ParamField body="baseUrl" type="string" required>
+  Jira instance base URL (e.g. `"https://yourcompany.atlassian.net"`).
+</ParamField>
+
+<ParamField body="email" type="string">
+  Atlassian account email. Falls back to `JIRA_EMAIL` env var.
+</ParamField>
+
+<ParamField body="apiToken" type="string">
+  Jira API token. Falls back to `JIRA_API_TOKEN` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `jira_search_issues` | Search issues using JQL (Jira Query Language). |
+| `jira_get_issue` | Get full details of an issue by key (e.g. `PROJ-123`). |
+| `jira_create_issue` | Create a new issue with project, summary, type, and priority. |
+| `jira_update_issue` | Update fields or transition status on an existing issue. |
+| `jira_add_comment` | Add a comment to an issue. |
+
+---
+
+## Environment Variables
+
+```bash
+export JIRA_EMAIL="you@company.com"
+export JIRA_API_TOKEN="ATATT..."
+```
+
+Create an API token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).

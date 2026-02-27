@@ -41,6 +41,30 @@ The `createAdminRouter()` function returns an Express router with full CRUD endp
 | GET | `/workflows/:name` | Get single workflow config |
 | DELETE | `/workflows/:name` | Remove from registry + storage |
 
+### Tools
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/tools` | List all available tools (static + dynamic toolkit configs) |
+| GET | `/tools/:name` | Get single tool detail (name, description, parameters) |
+
+### Toolkit Catalog
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/toolkit-catalog` | List all available toolkit types with config requirements |
+| GET | `/toolkit-catalog/:id` | Get single toolkit type detail |
+
+### Toolkit Configs (Credentials Management)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/toolkit-configs` | Save toolkit config (credentials + settings) |
+| GET | `/toolkit-configs` | List all saved configs (secrets masked) |
+| GET | `/toolkit-configs/:name` | Get single config (secrets masked) |
+| PUT | `/toolkit-configs/:name` | Update config (secrets preserved if masked values sent) |
+| DELETE | `/toolkit-configs/:name` | Remove config and deactivate toolkit |
+
 ---
 
 ## Create Agent

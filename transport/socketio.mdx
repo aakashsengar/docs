@@ -115,6 +115,14 @@ createAgentGateway({
   Socket.IO middleware for authentication. Call `next()` to allow, or `next(new Error("Unauthorized"))` to reject.
 </ParamField>
 
+<ParamField path="toolkits" type="Toolkit[]" required={false}>
+  Toolkit instances whose tools are exposed via `tools.list` event. Useful for UI tool discovery.
+</ParamField>
+
+<ParamField path="toolLibrary" type="Record<string, ToolDef>" required={false}>
+  Named tools exposed via `tools.list`. Merged with toolkit tools (explicit entries take precedence).
+</ParamField>
+
 ---
 
 ## Events
@@ -129,6 +137,8 @@ createAgentGateway({
 | `teams.list` | `{}` | List registered teams (callback) |
 | `workflows.list` | `{}` | List registered workflows (callback) |
 | `registry.list` | `{}` | List all registered entity names (callback) |
+| `tools.list` | `{}` | List available tools (when toolkits configured) |
+| `tools.get` | `{ name }` | Get single tool detail |
 
 ### Server → Client
 

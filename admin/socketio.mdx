@@ -22,7 +22,7 @@ const io = new Server(httpServer);
 const { hydrate } = createAdminGateway({
   io,
   storage: new SqliteStorage("radaros.db"),
-  toolLibrary: { webSearch: webSearchTool, calculator: calcTool },
+  toolkits: [new CalculatorToolkit(), new DuckDuckGoToolkit()],
   namespace: "/radaros-admin",
   authMiddleware: (socket, next) => {
     const token = socket.handshake.auth?.token;
@@ -47,7 +47,11 @@ await hydrate();
 </ParamField>
 
 <ParamField body="toolLibrary" type="Record<string, ToolDef>">
-  Named tools available for agent creation.
+  Named tools available for agent creation. Explicit entries override toolkit tools.
+</ParamField>
+
+<ParamField body="toolkits" type="Toolkit[]">
+  Toolkit instances whose tools are automatically collected into the tool library.
 </ParamField>
 
 <ParamField body="namespace" type="string" default="/radaros-admin">
@@ -90,6 +94,30 @@ await hydrate();
 | `admin.workflow.list` | `{}` | `{ ok, data: WorkflowBlueprint[] }` |
 | `admin.workflow.delete` | `{ name }` | `{ ok, data: { deleted } }` |
 
+### Tools
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.tools.list` | `{}` | `{ ok, data: [{ name, description, parameters }] }` |
+| `admin.tools.get` | `{ name }` | `{ ok, data: { name, description, parameters } }` |
+
+### Toolkit Catalog
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.toolkit-catalog.list` | `{}` | `{ ok, data: ToolkitMeta[] }` |
+| `admin.toolkit-catalog.get` | `{ id }` | `{ ok, data: ToolkitMeta }` |
+
+### Toolkit Configs (Credentials)
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.toolkit-config.create` | `{ toolkitId, instanceName, config, enabled? }` | `{ ok, data: MaskedConfig }` |
+| `admin.toolkit-config.list` | `{}` | `{ ok, data: MaskedConfig[] }` |
+| `admin.toolkit-config.get` | `{ instanceName }` | `{ ok, data: MaskedConfig }` |
+| `admin.toolkit-config.update` | `{ instanceName, config?, enabled? }` | `{ ok, data: MaskedConfig }` |
+| `admin.toolkit-config.delete` | `{ instanceName }` | `{ ok, data: { deleted } }` |
+
 ### Registry
 
 | Event | Payload | Response |
@@ -112,6 +140,9 @@ When entities are created, updated, or deleted, the gateway broadcasts to **all 
 | `admin.team.deleted` | `{ name }` |
 | `admin.workflow.created` | `WorkflowBlueprint` |
 | `admin.workflow.deleted` | `{ name }` |
+| `admin.toolkit-config.created` | `MaskedToolkitConfig` |
+| `admin.toolkit-config.updated` | `MaskedToolkitConfig` |
+| `admin.toolkit-config.deleted` | `{ instanceName }` |
 
 This enables real-time UI updates — when one user creates an agent, all other connected users see it appear immediately.
 
@@ -142,6 +173,12 @@ socket.emit("admin.agent.create", {
 // List all agents
 socket.emit("admin.agent.list", {}, (res) => {
   console.log("Agents:", res.data);
+});
+
+// Discover available tools (for agent builder UI)
+socket.emit("admin.tools.list", {}, (res) => {
+  console.log("Available tools:", res.data);
+  // [{ name: "calculate", description: "...", parameters: ["expression"] }, ...]
 });
 
 // Listen for real-time updates from other users

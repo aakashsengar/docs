@@ -154,11 +154,24 @@
             "group": "Toolkits",
             "pages": [
               "toolkits/overview",
+              "toolkits/calculator",
+              "toolkits/filesystem",
+              "toolkits/shell",
+              "toolkits/wikipedia",
               "toolkits/duckduckgo",
               "toolkits/hackernews",
               "toolkits/websearch",
+              "toolkits/http",
+              "toolkits/scraper",
+              "toolkits/youtube",
+              "toolkits/sql",
               "toolkits/gmail",
-              "toolkits/whatsapp"
+              "toolkits/whatsapp",
+              "toolkits/slack",
+              "toolkits/github",
+              "toolkits/jira",
+              "toolkits/notion",
+              "toolkits/calendar"
             ]
           },
           {

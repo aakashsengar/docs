@@ -1,0 +1,76 @@
+---
+title: Google Calendar
+description: List, create, get, and delete Google Calendar events.
+---
+
+# Google Calendar
+
+List, create, get, and delete events on Google Calendar. Uses the same OAuth2 pattern as the Gmail toolkit.
+
+<Info>
+  Requires: `npm install googleapis`
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GoogleCalendarToolkit } from "@radaros/core";
+
+const calendar = new GoogleCalendarToolkit({
+  credentialsPath: "./credentials.json",
+  tokenPath: "./token.json",
+});
+
+const agent = new Agent({
+  name: "scheduler",
+  model: openai("gpt-4o"),
+  instructions: "Help manage the user's calendar. Schedule and look up events.",
+  tools: [...calendar.getTools()],
+});
+
+const result = await agent.run("What meetings do I have today?");
+```
+
+---
+
+## Config
+
+<ParamField body="credentialsPath" type="string">
+  Path to OAuth2 credentials JSON. Falls back to `GOOGLE_CALENDAR_CREDENTIALS_PATH` env var.
+</ParamField>
+
+<ParamField body="tokenPath" type="string">
+  Path to saved token JSON. Falls back to `GOOGLE_CALENDAR_TOKEN_PATH` env var.
+</ParamField>
+
+<ParamField body="authClient" type="any">
+  Pre-authenticated OAuth2 client (if you handle auth yourself).
+</ParamField>
+
+<ParamField body="calendarId" type="string" default="primary">
+  Calendar ID to operate on.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `calendar_list_events` | List upcoming events. Supports time range filters. |
+| `calendar_create_event` | Create a new event with title, time, location, description, and attendees. |
+| `calendar_get_event` | Get details of a specific event by ID. |
+| `calendar_delete_event` | Delete an event by ID. |
+
+---
+
+## Environment Variables
+
+```bash
+export GOOGLE_CALENDAR_CREDENTIALS_PATH="./credentials.json"
+export GOOGLE_CALENDAR_TOKEN_PATH="./token.json"
+```
+
+See the [Gmail toolkit setup guide](/toolkits/gmail) for OAuth2 credential instructions — the process is identical.

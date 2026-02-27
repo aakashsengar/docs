@@ -1,0 +1,66 @@
+---
+title: Shell
+description: Execute shell commands with timeout, output limits, and command allowlisting.
+---
+
+# Shell
+
+Execute shell commands from your agent. Supports timeouts, output truncation, and an optional command allowlist for safety.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, ShellToolkit } from "@radaros/core";
+
+const shell = new ShellToolkit({
+  timeout: 10_000,
+  allowedCommands: ["ls", "cat", "grep", "find", "wc"],
+});
+
+const agent = new Agent({
+  name: "devops-agent",
+  model: openai("gpt-4o"),
+  instructions: "Help users inspect their system and files.",
+  tools: [...shell.getTools()],
+});
+
+const result = await agent.run("How many TypeScript files are in the src directory?");
+```
+
+---
+
+## Config
+
+<ParamField body="shell" type="string">
+  Shell to use (default: platform default, e.g. `/bin/sh`).
+</ParamField>
+
+<ParamField body="timeout" type="number" default="30000">
+  Command timeout in milliseconds.
+</ParamField>
+
+<ParamField body="maxOutput" type="number" default="10000">
+  Max output characters to return. Long output is truncated from the start.
+</ParamField>
+
+<ParamField body="cwd" type="string">
+  Working directory for commands.
+</ParamField>
+
+<ParamField body="allowedCommands" type="string[]">
+  Allowlist of command prefixes. If set, only commands starting with one of these are permitted.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `shell_exec` | Execute a shell command. Returns stdout, stderr, and exit code. |
+
+<Warning>
+  Use `allowedCommands` in production to restrict which commands agents can run.
+</Warning>

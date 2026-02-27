@@ -89,6 +89,8 @@ createAgentGateway({ io, agents: { assistant: agent } });
 | GET | `/teams` | List registered teams |
 | GET | `/workflows` | List registered workflows |
 | GET | `/registry` | List all registered entity names |
+| GET | `/tools` | List available tools (when toolkits configured) |
+| GET | `/tools/:name` | Get single tool detail |
 | GET | `/docs` | Swagger UI (if enabled) |
 | GET | `/docs/spec.json` | OpenAPI spec (if enabled) |
 
@@ -104,6 +106,8 @@ createAgentGateway({ io, agents: { assistant: agent } });
 | `teams.list` | Client → Server | List teams (acknowledgement callback) |
 | `workflows.list` | Client → Server | List workflows (acknowledgement callback) |
 | `registry.list` | Client → Server | List all registered names (acknowledgement callback) |
+| `tools.list` | Client → Server | List available tools (acknowledgement callback) |
+| `tools.get` | Client → Server | Get single tool detail (acknowledgement callback) |
 | `agent.chunk` | Server → Client | Streamed text chunk |
 | `agent.tool.call` | Server → Client | Tool call started |
 | `agent.tool.done` | Server → Client | Tool call finished |
@@ -128,6 +132,10 @@ createAgentGateway({ io, agents: { assistant: agent } });
 
 <Accordion title="Swagger UI">
   Enable `swagger.enabled` to serve interactive API docs at `/docs` and the OpenAPI spec at `/docs/spec.json`.
+</Accordion>
+
+<Accordion title="Tool Discovery">
+  Pass `toolkits` or `toolLibrary` in router/gateway options to expose `GET /tools` and `tools.list` endpoints. The UI can discover available tools before creating agents.
 </Accordion>
 
 ---

@@ -1,0 +1,52 @@
+---
+title: Web Scraper
+description: Extract text content and links from web pages — no dependencies.
+---
+
+# Web Scraper
+
+Extract text content and links from any web page. Uses native `fetch` and lightweight HTML stripping — no browser or heavy dependencies needed.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, ScraperToolkit } from "@radaros/core";
+
+const scraper = new ScraperToolkit({ maxLength: 10_000 });
+
+const agent = new Agent({
+  name: "reader",
+  model: openai("gpt-4o"),
+  instructions: "Read web pages and summarize their content.",
+  tools: [...scraper.getTools()],
+});
+
+const result = await agent.run("Summarize the content of https://radaros.dev");
+```
+
+---
+
+## Config
+
+<ParamField body="maxLength" type="number" default="15000">
+  Max characters of extracted text to return.
+</ParamField>
+
+<ParamField body="userAgent" type="string">
+  Custom User-Agent header for requests.
+</ParamField>
+
+<ParamField body="timeout" type="number" default="15000">
+  Request timeout in milliseconds.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `scrape_url` | Fetch a URL and extract text content. Scripts, styles, nav, and footer are stripped. |
+| `scrape_links` | Extract all links from a page. Returns link text and absolute URLs. |

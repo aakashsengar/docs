@@ -1,0 +1,63 @@
+---
+title: Wikipedia
+description: Search and read Wikipedia articles — no API key required.
+---
+
+# Wikipedia
+
+Search articles and get summaries from Wikipedia using the free MediaWiki REST API. No API key required.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, WikipediaToolkit } from "@radaros/core";
+
+const wiki = new WikipediaToolkit();
+
+const agent = new Agent({
+  name: "knowledge-agent",
+  model: openai("gpt-4o"),
+  instructions: "Look up facts on Wikipedia to answer questions accurately.",
+  tools: [...wiki.getTools()],
+});
+
+const result = await agent.run("Tell me about the history of TypeScript");
+```
+
+---
+
+## Config
+
+<ParamField body="language" type="string" default="en">
+  Wikipedia language code (e.g. `"en"`, `"fr"`, `"de"`, `"es"`).
+</ParamField>
+
+<ParamField body="maxResults" type="number" default="5">
+  Default maximum search results per query.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `wikipedia_search` | Search Wikipedia for articles. Returns titles, URLs, and snippets. |
+| `wikipedia_summary` | Get a summary of a Wikipedia article by exact title. |
+
+---
+
+## Example: Multilingual Research
+
+```typescript
+const wiki = new WikipediaToolkit({ language: "fr" });
+
+const agent = new Agent({
+  name: "french-researcher",
+  model: openai("gpt-4o"),
+  instructions: "Recherchez des informations sur Wikipedia en français.",
+  tools: [...wiki.getTools()],
+});
+```

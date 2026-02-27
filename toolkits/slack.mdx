@@ -1,0 +1,64 @@
+---
+title: Slack
+description: Send and read messages, list channels, and reply in threads.
+---
+
+# Slack
+
+Send and read Slack messages, list channels, and reply in threads using the Slack Web API.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, SlackToolkit } from "@radaros/core";
+
+const slack = new SlackToolkit();
+// Uses SLACK_BOT_TOKEN env var
+
+const agent = new Agent({
+  name: "slack-bot",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Slack communications.",
+  tools: [...slack.getTools()],
+});
+
+const result = await agent.run("Send 'Hello team!' to #general");
+```
+
+---
+
+## Config
+
+<ParamField body="token" type="string">
+  Slack Bot User OAuth Token (`xoxb-...`). Falls back to `SLACK_BOT_TOKEN` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `slack_send_message` | Send a message to a channel. |
+| `slack_list_channels` | List channels the bot has access to. |
+| `slack_read_messages` | Read recent messages from a channel. |
+| `slack_reply_thread` | Reply to a message thread. |
+
+---
+
+## Required Bot Scopes
+
+- `chat:write` — Send messages
+- `channels:read` — List public channels
+- `channels:history` — Read public channel messages
+- `groups:history` — Read private channel messages
+
+---
+
+## Environment Variables
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-..."
+```
