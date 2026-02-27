@@ -1,0 +1,77 @@
+---
+title: Learned Skills
+description: Agent-learned multi-step workflows saved for future replay.
+---
+
+# Learned Skills
+
+The `LearnedSkillStore` allows agents to save successful multi-step tool call patterns as reusable skills that can be replayed later.
+
+## How It Works
+
+1. An agent completes a complex multi-step task successfully
+2. The agent (or your code) saves the sequence of tool calls as a learned skill
+3. Future runs can search and replay the saved skill
+
+## Setup
+
+```typescript
+import { LearnedSkillStore, InMemoryStorage } from "@radaros/core";
+
+const store = new LearnedSkillStore(new MongoDBStorage({ uri: "..." }));
+```
+
+## Saving a Skill
+
+```typescript
+const skill = await store.saveSkill({
+  name: "deploy-to-production",
+  description: "Build, test, and deploy a service to production",
+  steps: [
+    { toolName: "run_tests", args: { suite: "all" } },
+    { toolName: "build", args: { target: "prod" } },
+    { toolName: "deploy", args: { env: "production" } },
+    { toolName: "notify_team", args: { channel: "#deployments" } },
+  ],
+});
+```
+
+## Searching Skills
+
+```typescript
+const results = await store.searchSkills("deploy");
+// [{ id: "...", name: "deploy-to-production", ... }]
+```
+
+## Replaying a Skill
+
+```typescript
+const results = await store.replaySkill(
+  skill.id,
+  runContext,
+  async (toolName, args, ctx) => {
+    return toolExecutor.execute(toolName, args, ctx);
+  },
+);
+```
+
+## Agentic Tools
+
+The store exposes tools that agents can use directly:
+
+```typescript
+const tools = store.getTools();
+// Provides: save_skill, search_skills
+```
+
+These tools let the agent autonomously save and search learned skills during conversations.
+
+## Success Tracking
+
+Each skill tracks `successCount` and `failCount`. After replaying a skill, the outcome is automatically recorded:
+
+```typescript
+const skill = await store.getSkill(id);
+console.log(skill.successCount); // 5
+console.log(skill.failCount);    // 1
+```

@@ -1,0 +1,97 @@
+---
+title: Memory Overview
+description: Unified memory system for persistent, cross-session agent intelligence.
+---
+
+# Unified Memory
+
+RadarOS provides a single unified `memory` config that works identically across `Agent`, `VoiceAgent`, and `BrowserAgent`. All memory subsystems share one storage backend.
+
+## Quick Start
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+  },
+});
+```
+
+With just `storage`, you get:
+- **Session persistence** — message history saved across runs
+- **Summaries** — overflow messages automatically summarized
+
+## Full Configuration
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    maxMessages: 20,          // messages in session history (default: 50)
+    maxTokens: 128_000,       // auto-trim history to fit context window
+
+    summaries: true,          // ON by default — long-term conversation context
+    userFacts: true,          // OFF by default — "prefers dark mode", "lives in Mumbai"
+    userProfile: true,        // OFF by default — structured: name, role, timezone
+    entities: true,           // OFF by default — companies, people, projects
+    decisions: true,          // OFF by default — audit trail of agent choices
+
+    learnings: {              // OFF by default — needs a vector store
+      vectorStore: qdrant(...),
+    },
+
+    model: openai("gpt-4o-mini"), // cheaper model for background extraction
+  },
+});
+```
+
+## How It Works
+
+1. **Before each run** — `MemoryManager.buildContext()` assembles a context string from all enabled stores and injects it into the system prompt.
+2. **After each run** — `MemoryManager.afterRun()` fires background extraction for all enabled stores. This is non-blocking (fire-and-forget) so it never adds latency.
+3. **Session overflow** — When the session exceeds `maxMessages`, overflow messages are automatically summarized.
+
+## Works Everywhere
+
+The same `memory` config works across all agent types:
+
+```typescript
+// Text Agent
+new Agent({ model, memory: { storage } });
+
+// Voice Agent
+new VoiceAgent({ provider, memory: { storage } });
+
+// Browser Agent
+new BrowserAgent({ model, memory: { storage } });
+```
+
+## Default Feature States
+
+| Feature | Default | Requires |
+|---------|---------|----------|
+| Sessions | ON | `storage` |
+| Summaries | ON | `storage` |
+| User Facts | OFF | `userFacts: true` |
+| User Profile | OFF | `userProfile: true` |
+| Entities | OFF | `entities: true` |
+| Decisions | OFF | `decisions: true` |
+| Learnings | OFF | `learnings: { vectorStore }` |
+
+## Accessing Stores Directly
+
+You can access individual stores via the `MemoryManager`:
+
+```typescript
+const mm = agent.memory; // MemoryManager | null
+
+const facts = await mm?.getUserFacts()?.getFacts("user-123");
+const profile = await mm?.getUserProfile()?.getProfile("user-123");
+const entities = await mm?.getEntityMemory()?.listEntities();
+```

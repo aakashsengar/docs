@@ -1,0 +1,114 @@
+---
+title: Memory Stores
+description: Deep dive into each memory subsystem — summaries, user facts, user profile, entities, decisions, and learnings.
+---
+
+# Memory Stores
+
+Each memory subsystem is a separate store class that handles a specific type of information.
+
+## Summaries
+
+Long-term conversation memory. When session history overflows, the overflow messages are summarized by an LLM and stored.
+
+```typescript
+memory: {
+  storage,
+  summaries: {
+    maxCount: 10,     // max summaries per session (default: 10)
+    maxTokens: 2000,  // token budget for context injection (default: 2000)
+  },
+}
+```
+
+## User Facts
+
+Extracts and stores discrete facts about users: preferences, background, interests.
+
+```typescript
+memory: {
+  storage,
+  userFacts: {
+    maxFacts: 100,    // max facts per user (default: 100)
+  },
+}
+```
+
+Example extracted facts:
+- "Prefers dark mode"
+- "Lives in Mumbai"
+- "Works on logistics software"
+
+## User Profile
+
+Structured user data — name, role, company, timezone, language, custom fields.
+
+```typescript
+memory: {
+  storage,
+  userProfile: {
+    customFields: ["department", "subscription_tier"],
+  },
+}
+```
+
+Injected as structured context:
+```
+About this user:
+- Name: Akash Sengar
+- Role: Product Manager
+- Company: Xhipment
+- Timezone: Asia/Kolkata
+```
+
+## Entity Memory
+
+Tracks companies, people, projects, and products mentioned in conversations.
+
+```typescript
+memory: {
+  storage,
+  entities: {
+    namespace: "global",  // "global" | "user" | custom string
+  },
+}
+```
+
+Provides tools: `search_entities`, `create_entity`.
+
+## Decision Log
+
+Audit trail of agent decisions — what was decided, why, and what happened.
+
+```typescript
+memory: {
+  storage,
+  decisions: {
+    maxContextDecisions: 5,  // recent decisions in context (default: 5)
+  },
+}
+```
+
+Provides tools: `log_decision`, `record_outcome`, `search_decisions`.
+
+## Learned Knowledge
+
+Vector-backed insights from conversations. Requires a `VectorStore`.
+
+```typescript
+import { QdrantVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+memory: {
+  storage,
+  learnings: {
+    vectorStore: new QdrantVectorStore({
+      url: "http://localhost:6333",
+      embedding: new OpenAIEmbedding(),
+    }),
+    collection: "radaros_learnings",  // default
+    topK: 3,                          // results injected into context
+  },
+}
+```
+
+Both auto-injects relevant learnings into context AND exposes `save_learning` / `search_learnings` tools.

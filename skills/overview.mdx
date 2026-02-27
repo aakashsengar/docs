@@ -1,0 +1,123 @@
+---
+title: Skills Overview
+description: Pre-packaged tool bundles and learned behaviors for agents.
+---
+
+# Skills
+
+Skills are pre-packaged bundles of tools and instructions that give agents domain expertise.
+
+## Quick Start
+
+```typescript
+import { Agent, loadSkill, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  skills: [
+    "./skills/shipping",           // local directory
+    "@radaros/skill-crm",         // npm package
+    "https://skills.example.com/analytics", // remote URL
+  ],
+});
+```
+
+## Skill Sources
+
+### Local Directory
+
+A directory with a `skill.json` manifest and tool modules:
+
+```
+skills/shipping/
+  skill.json
+  tools.ts
+  instructions.md
+```
+
+```json
+// skill.json
+{
+  "name": "shipping",
+  "description": "Shipping rate calculation and tracking",
+  "version": "1.0.0",
+  "main": "tools.ts",
+  "instructions": "instructions.md"
+}
+```
+
+```typescript
+// tools.ts
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+export function getTools() {
+  return [
+    defineTool({
+      name: "calculate_shipping_rate",
+      description: "Calculate shipping cost",
+      parameters: z.object({
+        weight: z.number(),
+        destination: z.string(),
+      }),
+      execute: async (args) => {
+        // calculation logic
+        return `$${(args.weight * 0.5).toFixed(2)}`;
+      },
+    }),
+  ];
+}
+```
+
+### npm Package
+
+Any npm package that exports tools:
+
+```typescript
+skills: ["@radaros/skill-crm"]
+```
+
+The package must export `getTools()`, `tools`, or a default export returning tool definitions.
+
+### Remote URL
+
+A hosted skill with a `skill.json` manifest:
+
+```typescript
+skills: ["https://skills.example.com/analytics"]
+```
+
+The remote server must serve `skill.json` and the main module at the specified paths.
+
+## Creating a Skill Object
+
+You can also pass pre-built `Skill` objects directly:
+
+```typescript
+import type { Skill } from "@radaros/core";
+
+const mySkill: Skill = {
+  name: "custom",
+  description: "Custom skill",
+  version: "1.0.0",
+  tools: [/* ToolDef[] */],
+  instructions: "Use these tools when...",
+};
+
+new Agent({ model, skills: [mySkill] });
+```
+
+## Lazy Loading
+
+Skills are loaded on the first `run()` or `connect()` call, not at construction time. This avoids blocking agent creation with slow I/O operations.
+
+## Skill Instructions
+
+If a skill has an `instructions` field, it's automatically injected into the system prompt:
+
+```
+[Skill: shipping]
+Use the calculate_shipping_rate tool when the user asks about shipping costs.
+Always ask for weight and destination before calculating.
+```

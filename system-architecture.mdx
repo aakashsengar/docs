@@ -32,7 +32,7 @@ RadarOS is built in layers. Higher layers depend on lower ones and infrastructur
 
 1. **SDK Layer** — Agent, Team, Workflow, VoiceAgent, BrowserAgent. The primary API surface for defining behavior, orchestrating agents, and running workflows.
 
-2. **Engine Layer** — LLM Loop, Tool Executor, Session Manager, User Memory, Memory (long-term summaries). Core execution logic with automatic retry on transient failures, tool caching, token-based history trimming, reasoning, and cross-session personalization.
+2. **Engine Layer** — LLM Loop, Tool Executor, MemoryManager (sessions, summaries, user facts, user profile, entities, decisions, learnings), SkillManager. Core execution logic with automatic retry, tool caching, token-based history trimming, reasoning, and cross-session personalization.
 
 3. **Safety Layer** — Sandbox (isolated subprocess execution with timeout and memory limits), Approval Manager (human-in-the-loop gating before tool execution), Guardrails (input/output validation).
 
@@ -57,7 +57,7 @@ User Input
     │
 Agent.run() / Agent.stream()
     │
-buildMessages (history + system instructions + user memory context)
+buildMessages (history + system instructions + MemoryManager.buildContext() + skill instructions)
     │
 LLM Loop (with retry)
     │
@@ -74,9 +74,10 @@ Tool Executor (if tool calls)
     │
 Loop until final response
     │
-SessionManager.save()
+MemoryManager.appendMessages() → auto-summarize overflow
     │
-UserMemory.extractAndStore() (async, non-blocking)
+MemoryManager.afterRun() → fire-and-forget extraction
+  (user facts, user profile, entities, learnings)
     │
 Output to caller
 ```
@@ -84,8 +85,8 @@ Output to caller
 ### Detailed Flow
 
 1. **User Input** — A string or multi-modal content (text, images, files).
-2. **Agent** — Receives input, loads session history from SessionManager, injects user memory context into the system prompt.
-3. **buildMessages** — Constructs the message array: system prompt (with user facts), session history (auto-trimmed if maxContextTokens is set), current user message.
+2. **Agent** — Receives input, loads session history from MemoryManager, injects memory context and skill instructions into the system prompt.
+3. **buildMessages** — Constructs the message array: system prompt (with summaries, user facts, user profile, entities, decisions, learnings, skill instructions), session history (auto-trimmed if maxTokens is set), current user message.
 4. **LLM Loop** — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors).
 5. **ModelProvider** — Translates to the provider API format.
 6. **Response** — Either text or tool calls.
@@ -93,8 +94,8 @@ Output to caller
    - Checks human approval if `requiresApproval` is set on the tool or agent.
    - Runs the tool in a sandboxed subprocess if `sandbox` is enabled.
    - Executes the tool, appends results, and loops back to the model.
-8. **SessionManager.save** — Persists the new turn to storage.
-9. **UserMemory.extractAndStore** — Asynchronously extracts facts from the conversation and stores them for future personalization.
+8. **MemoryManager.appendMessages** — Persists the new turn to session storage and auto-summarizes overflow.
+9. **MemoryManager.afterRun** — Asynchronously extracts user facts, user profile, entities, and learnings from the conversation for future personalization.
 10. **Output** — Returns or streams the final response to the caller.
 
 ---
@@ -112,17 +113,17 @@ Bidirectional audio stream
     │
 Tool calls (if any) → Tool Executor
     │
-Session persistence (MongoDB / InMemory)
+MemoryManager.appendMessages() (session persistence)
     │
-UserMemory extraction (async)
+MemoryManager.afterRun() (non-blocking extraction)
     │
 Audio Output → Client
 ```
 
 The VoiceAgent manages:
 - **VoiceSession** — wraps the realtime provider connection, routes tool calls, emits events.
-- **Session persistence** — conversation history saved to storage, restored on reconnect.
-- **User memory** — facts extracted from voice conversations, available across sessions.
+- **Session persistence** — conversation history saved via MemoryManager, restored on reconnect.
+- **Memory extraction** — user facts, profile, entities, and learnings extracted from voice transcripts (non-blocking).
 
 ---
 
@@ -176,20 +177,37 @@ All agents emit typed events via the `EventBus`. This enables logging, analytics
 | `voice.session.start`, `voice.session.end` | VoiceAgent |
 | `voice.tool.call`, `voice.tool.result` | VoiceSession |
 | `browser.step`, `browser.action`, `browser.done`, `browser.error` | BrowserAgent |
+| `memory.extract`, `memory.stored`, `memory.error` | MemoryManager |
+| `skill.loaded`, `skill.learned` | SkillManager |
 
 ---
 
 ## Memory Architecture
 
-RadarOS has three distinct memory layers:
+RadarOS provides a unified memory system through `MemoryManager`. A single `memory` config works identically across Agent, VoiceAgent, and BrowserAgent.
 
-| Layer | Scope | Purpose |
-|-------|-------|---------|
-| **Session** (SessionManager) | Per-session | Stores conversation history. Auto-trimmed by `maxMessages` or `maxContextTokens`. |
-| **Memory** (Long-term) | Per-session | LLM-generated summaries of overflow messages. Injected into context so the agent retains older knowledge. |
-| **User Memory** | Per-user, cross-session | Extracted facts about the user (preferences, location, interests). Persists across sessions via storage driver. |
+| Store | Scope | Default | Purpose |
+|-------|-------|---------|---------|
+| **Sessions** | Per-session | ON | Message history, auto-trimmed by `maxMessages` or `maxTokens`. |
+| **Summaries** | Per-session | ON | LLM-generated summaries of overflow messages for long-term context. |
+| **User Facts** | Per-user, cross-session | OFF | Extracted facts — "prefers dark mode", "lives in Mumbai". |
+| **User Profile** | Per-user, cross-session | OFF | Structured data — name, role, company, timezone. |
+| **Entity Memory** | Global / per-namespace | OFF | Companies, people, projects with facts, events, relationships. |
+| **Decision Log** | Per-agent | OFF | Audit trail of agent decisions — what, why, outcome. |
+| **Learned Knowledge** | Global (vector-backed) | OFF | Reusable insights discovered during conversations. |
 
-All three layers work with any `StorageDriver` (InMemory, SQLite, PostgreSQL, MongoDB).
+All stores share a single `StorageDriver` (InMemory, SQLite, PostgreSQL, MongoDB). All extraction is non-blocking (fire-and-forget).
+
+## Skills Architecture
+
+Skills are pre-packaged tool bundles loaded from local directories, npm packages, or remote URLs. The `SkillManager` orchestrates loading and provides lazy initialization (loaded on first run, not at construction).
+
+| Feature | Description |
+|---------|-------------|
+| **Pre-packaged Skills** | Local, npm, or remote tool bundles with manifests. |
+| **Learned Skills** | Agent-saved multi-step tool call patterns for replay. |
+| **Lazy Loading** | Skills loaded on first `run()`, not at construction. |
+| **Instruction Injection** | Skill instructions auto-injected into system prompt. |
 
 ---
 
@@ -200,8 +218,7 @@ All three layers work with any `StorageDriver` (InMemory, SQLite, PostgreSQL, Mo
 | **Tool schema caching** | Tool definitions are converted to JSON Schema once at construction, not on every LLM roundtrip. |
 | **Minimal schema serialization** | Uses compact JSON Schema 7 output, stripping metadata that inflate token counts. |
 | **Session read deduplication** | Session data is loaded once per run/stream call and reused for both context and history. |
-| **Non-blocking fact extraction** | UserMemory extraction runs in the background without blocking the response. |
-| **Smart context deduplication** | When userMemory.asTool() is registered, user facts skip system prompt injection. |
+| **Non-blocking memory extraction** | All memory extraction (facts, profile, entities, learnings) runs in background without blocking. |
 | **Token-based history trimming** | maxContextTokens auto-trims history (oldest first) to prevent context window overflow. |
 | **Automatic retry** | Transient LLM API failures (429, 5xx, network errors) are retried with exponential backoff. |
 | **Streaming usage tracking** | Token usage is accurately tracked in both run and stream modes. |

@@ -28,9 +28,6 @@
               "agents/overview",
               "agents/tools",
               "agents/tool-caching",
-              "agents/memory",
-              "agents/user-memory",
-              "agents/sessions",
               "agents/structured-output",
               "agents/multimodal",
               "agents/reasoning",
@@ -38,6 +35,21 @@
               "agents/sandbox",
               "agents/approval",
               "agents/logging"
+            ]
+          },
+          {
+            "group": "Memory",
+            "pages": [
+              "memory/overview",
+              "memory/stores",
+              "memory/curator"
+            ]
+          },
+          {
+            "group": "Skills",
+            "pages": [
+              "skills/overview",
+              "skills/learned-skills"
             ]
           },
           {

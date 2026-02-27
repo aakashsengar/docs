@@ -1,0 +1,58 @@
+---
+title: Memory Curator
+description: Maintenance operations for memory stores — prune, deduplicate, and clear.
+---
+
+# Memory Curator
+
+The Curator provides maintenance operations across all memory stores. Access it via `agent.memory.curator`.
+
+## Pruning Old Data
+
+Remove entries older than a specified number of days:
+
+```typescript
+const pruned = await agent.memory.curator.prune({
+  maxAgeDays: 90,
+  userId: "user-123",
+  agentName: "assistant",
+});
+
+console.log(`Pruned ${pruned} old entries`);
+```
+
+## Deduplication
+
+Remove duplicate user facts (case-insensitive):
+
+```typescript
+const removed = await agent.memory.curator.deduplicate({
+  userId: "user-123",
+});
+
+console.log(`Removed ${removed} duplicate facts`);
+```
+
+## Clear All Data
+
+Wipe all memory data for a user and/or agent:
+
+```typescript
+await agent.memory.curator.clearAll({
+  userId: "user-123",
+  agentName: "assistant",
+});
+```
+
+## Scheduling Maintenance
+
+For production use, run curator operations on a schedule:
+
+```typescript
+import { CronJob } from "cron";
+
+new CronJob("0 3 * * *", async () => {
+  await agent.memory.curator.prune({ maxAgeDays: 90, userId: "user-123" });
+  await agent.memory.curator.deduplicate({ userId: "user-123" });
+}).start();
+```
