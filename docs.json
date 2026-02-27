@@ -177,7 +177,8 @@
           {
             "group": "MCP (Model Context Protocol)",
             "pages": [
-              "mcp/overview"
+              "mcp/overview",
+              "mcp/admin"
             ]
           },
           {

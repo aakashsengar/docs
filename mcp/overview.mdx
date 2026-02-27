@@ -102,6 +102,32 @@ const tools = new MCPToolProvider({
   Custom HTTP headers (e.g. for authentication).
 </ParamField>
 
+### SSE (Server-Sent Events)
+
+For MCP servers that use separate `/sse` and `/messages` endpoints. The client opens a persistent SSE stream for receiving responses and sends JSON-RPC requests via POST. Use this when your server implements the async SSE pattern.
+
+```typescript
+const mcp = new MCPToolProvider({
+  name: "xhipment",
+  transport: "sse",
+  url: "http://localhost:3000/mcp/sse",
+  headers: {
+    "X-MCP-API-Key": "your-api-key",
+  },
+});
+
+await mcp.connect();
+const tools = await mcp.getTools();
+```
+
+<ParamField body="url" type="string" required>
+  The SSE endpoint URL. The client reads this stream and discovers the POST endpoint for messages automatically.
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Custom HTTP headers sent on both the SSE connection and POST requests.
+</ParamField>
+
 ---
 
 ## Mixing MCP and Local Tools
@@ -154,6 +180,84 @@ const agent = new Agent({
 
 ---
 
+## Dynamic Tools with `setTools()`
+
+When MCP servers are connected or disconnected at runtime, use `agent.setTools()` to hot-swap the tool set without recreating the agent:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [],
+});
+
+// Later, after MCP servers connect...
+const mcpTools = await mcp.getTools();
+agent.setTools(mcpTools);
+
+// Agent now uses the updated tools on the next run
+```
+
+---
+
+## MCPManager (Multi-Server Lifecycle)
+
+For managing multiple MCP servers at runtime — adding, connecting, disconnecting, and collecting tools — use `MCPManager` from `@radaros/transport`:
+
+```typescript
+import { MCPManager } from "@radaros/transport";
+
+const mcpManager = new MCPManager();
+
+// Add and connect a server
+mcpManager.add({
+  name: "xhipment",
+  transport: "sse",
+  url: "http://localhost:3000/mcp/sse",
+  headers: { "X-MCP-API-Key": "your-key" },
+});
+await mcpManager.connect("xhipment");
+
+// Add another server
+mcpManager.add({
+  name: "github",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-github"],
+});
+await mcpManager.connect("github");
+
+// Get all tools from all connected servers
+const allTools = await mcpManager.getAllTools();
+agent.setTools(allTools);
+
+// List server statuses
+const servers = mcpManager.list();
+// [{ id: "xhipment", status: "connected", toolCount: 54 }, ...]
+
+// Disconnect a specific server
+await mcpManager.disconnect("github");
+
+// Clean up all
+await mcpManager.closeAll();
+```
+
+| Method | Description |
+|---|---|
+| `add(config, id?)` | Register a server. Returns summary. |
+| `connect(id)` | Connect and discover tools. |
+| `disconnect(id)` | Disconnect a server. |
+| `remove(id)` | Remove a server entirely. |
+| `getAllTools()` | Merged `ToolDef[]` from all connected servers. |
+| `getTools(id)` | Tools from a single server. |
+| `list()` | All server summaries (id, status, toolCount). |
+| `has(id)` | Check if a server is registered. |
+| `closeAll()` | Disconnect all servers. |
+
+For managing MCP servers via REST API (from a UI), see [MCP Admin](/mcp/admin).
+
+---
+
 ## API Reference
 
 ### MCPToolProvider
@@ -162,7 +266,7 @@ const agent = new Agent({
   A unique name for this MCP server connection. Used to namespace tool names.
 </ParamField>
 
-<ParamField body="transport" type="'stdio' | 'http'" required>
+<ParamField body="transport" type="'stdio' | 'http' | 'sse'" required>
   The transport protocol to use.
 </ParamField>
 

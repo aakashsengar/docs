@@ -1,0 +1,299 @@
+---
+title: MCP Admin API
+description: Manage MCP server connections at runtime via REST endpoints — add, connect, disconnect, and remove MCP servers from a UI or API client.
+---
+
+# MCP Admin API
+
+The `@radaros/transport` package provides admin REST endpoints for managing MCP servers and the toolkit catalog at runtime. This enables UI-driven configuration — users can add MCP servers, connect them, and have their tools automatically available to agents.
+
+---
+
+## Setup
+
+### Option 1: Via `createAgentRouter`
+
+Enable admin routes with a single flag:
+
+```typescript
+import express from "express";
+import { createAgentRouter } from "@radaros/transport";
+
+const app = express();
+app.use(express.json());
+
+const router = createAgentRouter({
+  agents: { assistant },
+  admin: true,  // mounts /admin/* routes
+});
+
+app.use("/api", router);
+```
+
+### Option 2: Standalone admin router
+
+For more control, use `createAdminRouter` directly with a shared `MCPManager`:
+
+```typescript
+import express from "express";
+import { MCPManager, createAdminRouter } from "@radaros/transport";
+
+const mcpManager = new MCPManager();
+const { router: adminRouter } = createAdminRouter({ mcpManager });
+
+const app = express();
+app.use(express.json());
+app.use("/admin", adminRouter);
+```
+
+### Option 3: Shared MCPManager with agent
+
+Share the `MCPManager` between admin routes and your agent so tools stay in sync:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { MCPManager, createAdminRouter } from "@radaros/transport";
+
+const mcpManager = new MCPManager();
+const { router: adminRouter } = createAdminRouter({ mcpManager });
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [],
+});
+
+// Before each chat, inject latest tools
+app.post("/chat", async (req, res) => {
+  const tools = await mcpManager.getAllTools();
+  agent.setTools(tools);
+  // ... run or stream the agent
+});
+```
+
+---
+
+## MCP Server Endpoints
+
+### List servers
+
+```bash
+GET /admin/mcp
+```
+
+```json
+[
+  {
+    "id": "xhipment",
+    "name": "xhipment",
+    "transport": "sse",
+    "url": "http://localhost:3000/mcp/sse",
+    "status": "connected",
+    "toolCount": 54,
+    "connectedAt": "2026-02-26T10:30:00.000Z"
+  }
+]
+```
+
+### Add a server
+
+```bash
+POST /admin/mcp
+Content-Type: application/json
+
+{
+  "name": "xhipment",
+  "transport": "sse",
+  "url": "http://localhost:3000/mcp/sse",
+  "headers": { "X-MCP-API-Key": "your-key" },
+  "autoConnect": true
+}
+```
+
+<ParamField body="name" type="string" required>
+  Server name. Also used as the default `id`.
+</ParamField>
+
+<ParamField body="transport" type="'stdio' | 'http' | 'sse'" required>
+  Transport protocol.
+</ParamField>
+
+<ParamField body="url" type="string">
+  Server URL (required for `http` and `sse` transports).
+</ParamField>
+
+<ParamField body="command" type="string">
+  Command to spawn (required for `stdio` transport).
+</ParamField>
+
+<ParamField body="args" type="string[]">
+  Command arguments (`stdio` only).
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Custom HTTP headers for authentication.
+</ParamField>
+
+<ParamField body="id" type="string">
+  Custom server ID. Defaults to `name`.
+</ParamField>
+
+<ParamField body="autoConnect" type="boolean" default="true">
+  Automatically connect after adding. Set `false` to add without connecting.
+</ParamField>
+
+Returns the server summary with status and tool count.
+
+### Get server details
+
+```bash
+GET /admin/mcp/:id
+```
+
+### Connect a server
+
+```bash
+POST /admin/mcp/:id/connect
+```
+
+Connects to the MCP server and discovers its tools. Returns the updated summary.
+
+### Disconnect a server
+
+```bash
+POST /admin/mcp/:id/disconnect
+```
+
+Disconnects the server. Tools from this server are no longer available.
+
+### Remove a server
+
+```bash
+DELETE /admin/mcp/:id
+```
+
+Disconnects (if connected) and removes the server entirely.
+
+### Get tools from a server
+
+```bash
+GET /admin/mcp/:id/tools
+```
+
+```json
+[
+  {
+    "name": "xhipment__get_shipments",
+    "description": "[xhipment] Retrieve shipment records",
+    "parameters": ["status", "dateFrom", "dateTo"]
+  }
+]
+```
+
+### Get all tools (all connected servers)
+
+```bash
+GET /admin/mcp/tools
+```
+
+Returns a merged list of tools from every connected MCP server.
+
+---
+
+## Toolkit Catalog Endpoints
+
+The admin router also exposes the toolkit catalog, allowing UIs to list available toolkit types and instantiate them with configuration.
+
+### List toolkits
+
+```bash
+GET /admin/toolkits
+```
+
+```json
+[
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "GitHub API integration",
+    "category": "enterprise",
+    "requiresCredentials": true,
+    "configFields": [
+      {
+        "name": "token",
+        "label": "GitHub Token",
+        "type": "string",
+        "required": true,
+        "secret": true,
+        "envVar": "GITHUB_TOKEN"
+      }
+    ]
+  }
+]
+```
+
+### Get toolkit details
+
+```bash
+GET /admin/toolkits/:id
+```
+
+### Instantiate a toolkit
+
+```bash
+POST /admin/toolkits/:id
+Content-Type: application/json
+
+{
+  "token": "ghp_..."
+}
+```
+
+The body should match the `configFields` schema for the toolkit. Returns the instantiated toolkit's name and tools.
+
+---
+
+## Server Status Values
+
+| Status | Meaning |
+|---|---|
+| `disconnected` | Registered but not connected |
+| `connecting` | Connection in progress |
+| `connected` | Active connection, tools available |
+| `error` | Connection failed (see `error` field) |
+
+---
+
+## Full Example: Chat UI with MCP Management
+
+See `examples/toolkits/mcp-chat-ui.ts` for a complete working example that combines:
+
+- Dynamic MCP server management from the browser
+- Streaming chat with SSE
+- MongoDB-backed conversation memory
+- Per-session cost tracking
+
+```typescript
+import express from "express";
+import { Agent, openai, MongoDBStorage, CostTracker } from "@radaros/core";
+import { MCPManager, createAdminRouter } from "@radaros/transport";
+
+const mcpManager = new MCPManager();
+const { router: adminRouter } = createAdminRouter({ mcpManager });
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: { storage: new MongoDBStorage("mongodb://localhost:27017/radaros"), summaries: true, userFacts: true },
+  tools: [],
+});
+
+const app = express();
+app.use(express.json());
+app.use("/admin", adminRouter);
+
+app.post("/chat", async (req, res) => {
+  agent.setTools(await mcpManager.getAllTools());
+  // ... stream the response
+});
+```

@@ -98,6 +98,9 @@ This creates the following endpoints:
 | GET | `/api/registry` | List all registered names |
 | GET | `/api/tools` | List available tools (when toolkits/toolLibrary configured) |
 | GET | `/api/tools/:name` | Get single tool detail |
+| GET | `/api/admin/mcp` | List MCP servers (when `admin` enabled) |
+| POST | `/api/admin/mcp` | Add + connect an MCP server |
+| GET | `/api/admin/toolkits` | List toolkit catalog |
 
 ## RouterOptions
 
@@ -139,6 +142,11 @@ This creates the following endpoints:
 
 <ParamField body="toolLibrary" type="Record<string, ToolDef>">
   Named tools exposed via `GET /tools`. Merged with toolkit tools (explicit entries take precedence).
+</ParamField>
+
+<ParamField body="admin" type="boolean | { mcpManager?: MCPManager }">
+  Enable admin routes under `/admin` for managing MCP servers and the toolkit catalog at runtime.
+  Pass `true` to use defaults, or provide a shared `MCPManager` instance. See [MCP Admin](/mcp/admin).
 </ParamField>
 
 ## Request Format
