@@ -156,7 +156,8 @@
             "pages": [
               "api-reference/core",
               "api-reference/transport",
-              "api-reference/queue"
+              "api-reference/queue",
+              "api-reference/browser"
             ]
           }
         ]

@@ -11,7 +11,7 @@ This page describes the RadarOS architecture: how packages are organized, how la
 
 ## Monorepo Structure
 
-RadarOS is organized as a monorepo with three primary packages. Each package has a focused responsibility and can be used independently or together.
+RadarOS is organized as a monorepo with four primary packages. Each package has a focused responsibility and can be used independently or together.
 
 ---
 
@@ -19,9 +19,10 @@ RadarOS is organized as a monorepo with three primary packages. Each package has
 
 | Package | Purpose |
 |---------|---------|
-| **@radaros/core** | Agents, models, tools, memory, storage, vector stores, MCP client, A2A client |
-| **@radaros/transport** | Express REST API, Socket.IO WebSocket gateway, A2A server |
+| **@radaros/core** | Agents, models, tools, memory, storage, voice agents, vector stores, MCP client, A2A client |
+| **@radaros/transport** | Express REST API, Socket.IO gateway, Voice gateway, Browser gateway, A2A server |
 | **@radaros/queue** | BullMQ background job processing |
+| **@radaros/browser** | Vision-based autonomous browser automation with Playwright |
 
 ---
 
@@ -29,70 +30,170 @@ RadarOS is organized as a monorepo with three primary packages. Each package has
 
 RadarOS is built in layers. Higher layers depend on lower ones and infrastructure is pluggable.
 
-1. **SDK Layer** — Agent, Team, Workflow. The primary API surface for defining behavior, orchestrating agents, and running workflows.
+1. **SDK Layer** — Agent, Team, Workflow, VoiceAgent, BrowserAgent. The primary API surface for defining behavior, orchestrating agents, and running workflows.
 
-2. **Engine Layer** — LLM Loop, Tool Executor, Session Manager, User Memory. Core execution logic with automatic retry on transient failures, tool caching, token-based history trimming, reasoning, and cross-session personalization.
+2. **Engine Layer** — LLM Loop, Tool Executor, Session Manager, User Memory, Memory (long-term summaries). Core execution logic with automatic retry on transient failures, tool caching, token-based history trimming, reasoning, and cross-session personalization.
 
-3. **Model Abstraction** — ModelProvider interface and adapters. Abstracts over OpenAI, Anthropic, Google, Vertex AI, and Ollama via factory functions.
+3. **Safety Layer** — Sandbox (isolated subprocess execution with timeout and memory limits), Approval Manager (human-in-the-loop gating before tool execution), Guardrails (input/output validation).
 
-4. **Protocol Integration** — MCP Client for consuming external tools, A2A Client for calling remote agents.
+4. **Model Abstraction** — ModelProvider interface and adapters for text models. RealtimeProvider interface for voice/streaming models. Factory functions: `openai()`, `anthropic()`, `google()`, `ollama()`, `vertex()`, `openaiRealtime()`, `googleLive()`.
 
-5. **Infrastructure** — Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, and Embeddings. All pluggable.
+5. **Protocol Integration** — MCP Client for consuming external tools, A2A Client for calling remote agents.
 
-6. **Transport (Optional)** — Express, Socket.IO, and A2A Server. Expose agents via REST, WebSocket, or A2A protocol.
+6. **Infrastructure** — Storage (in-memory, SQLite, PostgreSQL, MongoDB), Vector Stores, and Embeddings. All pluggable.
 
-7. **Queue (Optional)** — BullMQ workers for background job processing.
+7. **Transport (Optional)** — Express REST, Socket.IO WebSocket, Voice Gateway (real-time audio streaming), Browser Gateway (live browser observation), and A2A Server.
+
+8. **Queue (Optional)** — BullMQ workers for background job processing.
 
 ---
 
-## Data Flow
+## Data Flow — Text Agent
 
-A typical request flows through the system as follows:
+A typical text agent request flows through the system as follows:
 
 ```text
 User Input
-    |
+    │
 Agent.run() / Agent.stream()
-    |
-buildMessages (history + system instructions)
-    |
+    │
+buildMessages (history + system instructions + user memory context)
+    │
 LLM Loop (with retry)
-    |
-ModelProvider (OpenAI / Anthropic / Google / Ollama)
-    |
+    │
+ModelProvider (OpenAI / Anthropic / Google / Ollama / Vertex)
+    │
 Response (text / tool calls)
-    |
+    │
 Tool Executor (if tool calls)
-  +-- Local tools (with optional caching)
-  +-- MCP tools (external servers)
-  +-- A2A tools (remote agents)
-    |
+  ├── Approval check (if requiresApproval is set)
+  ├── Sandbox execution (if sandbox is enabled)
+  ├── Local tools (with optional caching)
+  ├── MCP tools (external servers)
+  └── A2A tools (remote agents)
+    │
 Loop until final response
-    |
+    │
 SessionManager.save()
-    |
+    │
 UserMemory.extractAndStore() (async, non-blocking)
-    |
+    │
 Output to caller
 ```
 
 ### Detailed Flow
 
 1. **User Input** — A string or multi-modal content (text, images, files).
-2. **Agent** — Receives input, loads session history from SessionManager.
-3. **buildMessages** — Constructs the message array: system prompt, session history (auto-trimmed if maxContextTokens is set), current user message.
+2. **Agent** — Receives input, loads session history from SessionManager, injects user memory context into the system prompt.
+3. **buildMessages** — Constructs the message array: system prompt (with user facts), session history (auto-trimmed if maxContextTokens is set), current user message.
 4. **LLM Loop** — Sends messages to the model with automatic retry on transient failures (429, 5xx, network errors).
 5. **ModelProvider** — Translates to the provider API format.
 6. **Response** — Either text or tool calls.
-7. **Tool Executor** — If tool calls, executes tools, appends results, and loops back to the model.
+7. **Tool Executor** — If tool calls:
+   - Checks human approval if `requiresApproval` is set on the tool or agent.
+   - Runs the tool in a sandboxed subprocess if `sandbox` is enabled.
+   - Executes the tool, appends results, and loops back to the model.
 8. **SessionManager.save** — Persists the new turn to storage.
-9. **Output** — Returns or streams the final response to the caller.
+9. **UserMemory.extractAndStore** — Asynchronously extracts facts from the conversation and stores them for future personalization.
+10. **Output** — Returns or streams the final response to the caller.
+
+---
+
+## Data Flow — Voice Agent
+
+```text
+Audio Input (WebSocket / Socket.IO)
+    │
+VoiceAgent.connect()
+    │
+RealtimeProvider (OpenAI Realtime / Google Live)
+    │
+Bidirectional audio stream
+    │
+Tool calls (if any) → Tool Executor
+    │
+Session persistence (MongoDB / InMemory)
+    │
+UserMemory extraction (async)
+    │
+Audio Output → Client
+```
+
+The VoiceAgent manages:
+- **VoiceSession** — wraps the realtime provider connection, routes tool calls, emits events.
+- **Session persistence** — conversation history saved to storage, restored on reconnect.
+- **User memory** — facts extracted from voice conversations, available across sessions.
+
+---
+
+## Data Flow — Browser Agent
+
+```text
+Task (string)
+    │
+BrowserAgent.run()
+    │
+Launch Playwright (with stealth config + humanize settings)
+    │
+Screenshot → ModelProvider (vision)
+    │
+LLM decides action (click, type, scroll, navigate, done, fail)
+    │
+BrowserProvider executes action
+  ├── CredentialVault resolves {{placeholders}} for type actions
+  ├── DOM extraction (optional, for hybrid vision+DOM approach)
+  └── Loop detection (maxRepeats threshold)
+    │
+Screenshot → next iteration
+    │
+Loop until "done" or "fail" or maxSteps reached
+    │
+Close browser (with optional cookie/auth persistence)
+    │
+Output result + action history
+```
+
+The BrowserAgent supports:
+- **Stealth mode** — patches `navigator.webdriver`, WebGL, plugins to avoid bot detection.
+- **Humanize mode** — random delays, mouse movement curves, typing variation.
+- **Credential vault** — secrets never reach the LLM; only `{{placeholders}}` are used.
+- **Video recording** — Playwright-native recording of browser sessions.
+- **Parallel browsing** — multiple pages/tabs via BrowserProvider.
+- **Cookie persistence** — save and restore `storageState` across runs.
+
+---
+
+## Event System
+
+All agents emit typed events via the `EventBus`. This enables logging, analytics, transport integration, and custom middleware without coupling.
+
+| Event | Emitted by |
+|-------|-----------|
+| `run.start`, `run.complete`, `run.error` | Agent |
+| `run.stream.chunk` | Agent (streaming) |
+| `tool.call`, `tool.result`, `tool.error` | Tool Executor |
+| `tool.approval.request`, `tool.approval.response` | Approval Manager |
+| `voice.session.start`, `voice.session.end` | VoiceAgent |
+| `voice.tool.call`, `voice.tool.result` | VoiceSession |
+| `browser.step`, `browser.action`, `browser.done`, `browser.error` | BrowserAgent |
+
+---
+
+## Memory Architecture
+
+RadarOS has three distinct memory layers:
+
+| Layer | Scope | Purpose |
+|-------|-------|---------|
+| **Session** (SessionManager) | Per-session | Stores conversation history. Auto-trimmed by `maxMessages` or `maxContextTokens`. |
+| **Memory** (Long-term) | Per-session | LLM-generated summaries of overflow messages. Injected into context so the agent retains older knowledge. |
+| **User Memory** | Per-user, cross-session | Extracted facts about the user (preferences, location, interests). Persists across sessions via storage driver. |
+
+All three layers work with any `StorageDriver` (InMemory, SQLite, PostgreSQL, MongoDB).
 
 ---
 
 ## Performance Optimizations
-
-RadarOS is designed for minimal overhead. Key optimizations include:
 
 | Optimization | Impact |
 |-------------|--------|
@@ -104,6 +205,7 @@ RadarOS is designed for minimal overhead. Key optimizations include:
 | **Token-based history trimming** | maxContextTokens auto-trims history (oldest first) to prevent context window overflow. |
 | **Automatic retry** | Transient LLM API failures (429, 5xx, network errors) are retried with exponential backoff. |
 | **Streaming usage tracking** | Token usage is accurately tracked in both run and stream modes. |
+| **Sandbox subprocess pooling** | Sandboxed tools run in isolated child processes without affecting the main event loop. |
 
 ---
 
@@ -113,5 +215,6 @@ RadarOS is designed for minimal overhead. Key optimizations include:
 - **Optional Peer Dependencies** — Providers (openai, anthropic, etc.) are peer dependencies. Lazy-loaded so you only bundle what you use.
 - **Event-Driven** — EventBus emits lifecycle events. Subscribe for logging, analytics, or custom middleware.
 - **Pluggable Everything** — Storage, models, vector stores, and transport are all swappable. Configure once, change later without rewriting logic.
+- **Safety by Default** — Sandbox execution and human-in-the-loop approval are opt-in per tool or agent-wide. Guardrails validate input and output.
 - **Open Protocol Support** — MCP for tool integration and A2A for agent interoperability. Connect to the broader AI ecosystem without vendor lock-in.
 - **Production Resilient** — Automatic retry with exponential backoff, token-based context trimming, and non-blocking background operations ensure reliability at scale.
