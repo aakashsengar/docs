@@ -104,8 +104,16 @@ Configure an agent by passing an `AgentConfig` object to the `Agent` constructor
   Retry configuration for transient LLM API failures (429, 5xx, network errors). Default: 3 retries with exponential backoff.
 </ParamField>
 
+<ParamField path="maxTokens" type="number" required={false}>
+  Maximum output tokens per LLM call. Note: when `reasoning` is enabled, the Anthropic provider may override this to ensure enough room for both thinking and response tokens.
+</ParamField>
+
 <ParamField path="maxContextTokens" type="number" required={false}>
   Maximum context window tokens. When set, conversation history is automatically trimmed (oldest messages first) to fit within this limit.
+</ParamField>
+
+<ParamField path="toolResultLimit" type="ToolResultLimitConfig" required={false}>
+  Limit large tool results before they're sent back to the LLM. Prevents prompt token explosion when tools return massive payloads (e.g. MCP servers returning 200KB of data). See <a href="/agents/tools#tool-result-limits">Tool Result Limits</a>.
 </ParamField>
 
 ---

@@ -230,3 +230,131 @@ const riskyTool = defineTool({
   requiresApproval: true,
 });
 ```
+
+---
+
+## Tool Router (Automatic Tool Selection)
+
+When an agent has many tools (e.g., 50+ from an MCP server), sending all tool schemas in every prompt wastes tokens and can confuse the model. The **Tool Router** automatically selects only the relevant tools for each query using a cheap/fast model.
+
+### Basic usage
+
+Pass a `toolRouter` config to the agent. The router runs before every LLM call and filters the tool list:
+
+```typescript
+import { Agent, openai, anthropic } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: anthropic("claude-sonnet-4-6"),
+  tools: allMyTools, // 50+ tools
+  toolRouter: {
+    model: anthropic("claude-haiku-4-5-20251001"), // cheap model for selection
+    maxTools: 8,
+  },
+});
+```
+
+The main model only sees the 8 most relevant tools instead of all 50+.
+
+### Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `model` | `ModelProvider` | *required* | Cheap/fast model used to select relevant tools |
+| `maxTools` | `number` | `8` | Maximum number of tools to select per query |
+| `minTools` | `number` | `0` | Minimum tools to return; if selection returns fewer, all tools are sent as fallback |
+| `temperature` | `number` | `0` | Temperature for the selection model |
+
+### How it works
+
+1. Before each `run()` or `stream()` call, the router sends the user query and a compact tool index (name + description) to the selection model.
+2. The selection model returns a JSON array of tool names.
+3. The agent rebuilds its tool set with only the selected tools for that turn.
+4. If selection fails or returns too few tools, all tools are sent as a safe fallback.
+
+### When to use it
+
+- **Many tools** — MCP servers or large toolkit collections with 10+ tools
+- **Cost-sensitive** — Reducing prompt tokens directly lowers cost
+- **Mixed-domain agents** — Agent has tools across shipping, billing, CRM, etc. and most queries only need a few
+
+### Choosing a router model
+
+Use the cheapest model that can reliably read tool names and match them to a query. Good choices:
+
+- `anthropic("claude-haiku-4-5-20251001")`
+- `openai("gpt-4o-mini")`
+- `google("gemini-2.0-flash")`
+
+The router model does **not** need to be the same provider as the main model.
+
+<Note>
+  The `toolRouter` config is entirely optional. If omitted, the agent sends all tools on every call (the default behavior).
+</Note>
+
+---
+
+## Tool Result Limits
+
+When tools return large payloads (e.g. an MCP server returning 200KB of database records), the entire result is sent back to the LLM on the next roundtrip — causing massive prompt token usage and high costs.
+
+**`toolResultLimit`** intercepts oversized tool results and either smart-truncates them or summarizes them via a cheap model before they reach the main LLM.
+
+### Basic usage
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: anthropic("claude-sonnet-4-6"),
+  tools: allMyTools,
+  toolResultLimit: {
+    maxChars: 20000,        // Trigger at 20K chars (~5K tokens)
+    strategy: "truncate",   // Smart JSON truncation (default)
+  },
+});
+```
+
+### With summarization
+
+Use a cheap model to summarize large results instead of truncating. This preserves data fidelity while cutting tokens:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: anthropic("claude-sonnet-4-6"),
+  tools: allMyTools,
+  toolResultLimit: {
+    maxChars: 20000,
+    strategy: "summarize",
+    model: anthropic("claude-haiku-4-5-20251001"),
+  },
+});
+```
+
+### Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxChars` | `number` | `20000` | Character threshold before the strategy kicks in |
+| `strategy` | `"truncate" \| "summarize"` | `"truncate"` | How to handle oversized results |
+| `model` | `ModelProvider` | — | Model for summarization (required when strategy is `"summarize"`) |
+
+### Strategies
+
+**`"truncate"` (default)** — Smart JSON-aware truncation:
+- JSON arrays: keeps the first N items that fit, appends `"[Showing 15 of 892 items — 877 more omitted]"`
+- JSON objects with array values: truncates each array proportionally
+- Plain text: hard-cut with a note about remaining characters
+
+**`"summarize"`** — Sends the full result to a cheap/fast model with instructions to preserve all key data points, totals, IDs, and dates. The summary replaces the original result before the main model sees it. Falls back to truncation if summarization fails.
+
+### When to use it
+
+- **MCP tools returning bulk data** — API endpoints that return full record sets without pagination
+- **Cost-sensitive agents** — A 200KB tool result can cost $0.25+ in prompt tokens on a single roundtrip
+- **Any agent with `maxToolRoundtrips` > 0** — Tool results are sent back to the LLM on each roundtrip; large results compound quickly
+
+<Note>
+  `toolResultLimit` only affects text results sent back to the LLM. It does not modify the `ToolCallResult` stored in `RunOutput.toolCalls` — your application still has access to the original full result.
+</Note>

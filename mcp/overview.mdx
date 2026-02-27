@@ -180,6 +180,31 @@ const agent = new Agent({
 
 ---
 
+## Handling Large Tool Results
+
+MCP servers often return bulk data (e.g. all outstanding invoices, full record sets). A single tool result can be 200KB+, which translates to 50K+ prompt tokens on the next LLM roundtrip.
+
+Use `toolResultLimit` to automatically truncate or summarize oversized results before they reach the main model:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: anthropic("claude-sonnet-4-6"),
+  tools: [...await mcp.getTools()],
+  toolResultLimit: {
+    maxChars: 20000,
+    strategy: "summarize",
+    model: anthropic("claude-haiku-4-5-20251001"),
+  },
+});
+```
+
+This is especially important when combining `toolResultLimit` with `toolRouter` — the router selects which tools to call, and the result limit controls how much data comes back. Together they can reduce prompt tokens by 95%+.
+
+See [Tool Result Limits](/agents/tools#tool-result-limits) for full configuration details.
+
+---
+
 ## Dynamic Tools with `setTools()`
 
 When MCP servers are connected or disconnected at runtime, use `agent.setTools()` to hot-swap the tool set without recreating the agent:
