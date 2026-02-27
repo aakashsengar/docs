@@ -1,0 +1,164 @@
+---
+title: Observability
+description: Tracing, metrics, and structured logging for RadarOS agents
+---
+
+# Observability
+
+`@radaros/observability` is a **separate, opt-in package** that adds tracing, metrics, and structured logging to any RadarOS agent. It listens to the agent's `EventBus` from the outside — zero changes to core, zero overhead when not installed.
+
+```bash
+npm install @radaros/observability
+```
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { instrument } from "@radaros/observability";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+});
+
+// One-liner — just pass exporter names as strings
+const obs = instrument(agent, {
+  exporters: ["console"],
+});
+
+await agent.run("Hello!");
+
+// Access metrics
+const m = obs.metrics.getMetrics();
+console.log(`Runs: ${m.counters.runs_total}, Tokens: ${m.gauges.total_tokens}`);
+
+// Clean up when done
+await obs.tracer.flush();
+obs.detach();
+```
+
+## Exporter Shorthands
+
+Pass exporter names as strings — credentials are read from env vars automatically:
+
+```typescript
+// Langfuse — reads LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
+instrument(agent, { exporters: ["langfuse"] });
+
+// Multiple exporters
+instrument(agent, { exporters: ["langfuse", "console"] });
+
+// OpenTelemetry — reads OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS
+instrument(agent, { exporters: ["otel"] });
+
+// JSON file — writes to traces-<timestamp>.json
+instrument(agent, { exporters: ["json-file"] });
+```
+
+You can also mix shorthands with custom instances when you need to override defaults:
+
+```typescript
+import { instrument, LangfuseExporter } from "@radaros/observability";
+
+instrument(agent, {
+  exporters: [
+    new LangfuseExporter({ baseUrl: "https://self-hosted.example.com" }),
+    "console",
+  ],
+});
+```
+
+## How It Works
+
+The `instrument()` function attaches three listeners to the agent's `EventBus`:
+
+1. **Tracer** — builds a span tree from events (`run.start` → `tool.call` → `tool.result` → `run.complete`)
+2. **MetricsCollector** — counts runs, tool calls, errors, cache hits, and tracks latency histograms
+3. **StructuredLogger** — emits JSON log entries correlated with trace IDs
+
+Since core already emits rich events for every operation, observability works automatically with all features: handoffs, teams, cost tracking, caching, tools, etc.
+
+## Trace Tree
+
+Every `agent.run()` produces a trace like:
+
+```
+──────────────────────────────────────────
+  Trace abc123  duration=1240ms
+  agent=assistant
+──────────────────────────────────────────
+  ✓ agent.run        [0ms → +1240ms]  578 tok
+  ├─ ✓ tool.get_weather  [450ms → +35ms]
+  ├─ ✓ tool.search       [500ms → +120ms]
+──────────────────────────────────────────
+```
+
+## Exporters
+
+| Shorthand | Env Vars | Description |
+|-----------|----------|-------------|
+| `"console"` | — | Pretty-print trace tree to terminal |
+| `"langfuse"` | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Native Langfuse format with generations and spans |
+| `"otel"` | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP JSON to any OpenTelemetry collector |
+| `"json-file"` | — | Append traces to a JSON file |
+
+Plus `CallbackExporter` for custom integrations:
+
+```typescript
+import { instrument, CallbackExporter } from "@radaros/observability";
+
+instrument(agent, {
+  exporters: [new CallbackExporter((trace) => myCustomSink(trace))],
+});
+```
+
+## Metrics
+
+```typescript
+const snap = obs.metrics.getMetrics();
+
+snap.counters.runs_total;          // Total runs
+snap.counters.runs_success;        // Successful runs
+snap.counters.runs_error;          // Failed runs
+snap.counters.tool_calls_total;    // Total tool invocations
+snap.counters.handoffs_total;      // Agent handoffs
+snap.counters.cache_hits;          // Semantic cache hits
+snap.counters.cache_misses;        // Semantic cache misses
+snap.histograms.run_duration_ms;   // Array of run durations
+snap.histograms.tool_latency_ms;   // Array of tool latencies
+snap.gauges.total_tokens;          // Total tokens consumed
+snap.rates.cache_hit_ratio;        // Hits / (hits + misses)
+snap.rates.error_rate;             // Errors / total
+```
+
+## Structured Logging
+
+Three drain modes:
+
+```typescript
+// JSON to stdout (for log aggregators like Datadog, ELK)
+instrument(agent, { exporters: ["console"], structuredLogs: "json" });
+
+// Plain text to stdout
+instrument(agent, { exporters: ["console"], structuredLogs: "console" });
+
+// Custom function
+instrument(agent, {
+  exporters: ["console"],
+  structuredLogs: (entry) => myLogger.log(entry),
+});
+```
+
+Each entry includes `traceId` for correlation with traces.
+
+## Works With Teams & Workflows
+
+Use `instrumentBus()` to attach to any EventBus:
+
+```typescript
+import { instrumentBus } from "@radaros/observability";
+
+const team = new Team({ ... });
+const obs = instrumentBus(team.eventBus, { exporters: ["langfuse", "console"] });
+```

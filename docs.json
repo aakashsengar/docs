@@ -83,6 +83,12 @@
             ]
           },
           {
+            "group": "Observability",
+            "pages": [
+              "observability/overview"
+            ]
+          },
+          {
             "group": "Voice Agents",
             "pages": [
               "voice/overview"
@@ -200,7 +206,8 @@
               "api-reference/transport",
               "api-reference/queue",
               "api-reference/browser",
-              "api-reference/eval"
+              "api-reference/eval",
+              "api-reference/observability"
             ]
           }
         ]
