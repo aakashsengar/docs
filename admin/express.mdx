@@ -1,0 +1,181 @@
+---
+title: "Admin REST API"
+description: "CRUD endpoints for managing agents, teams, and workflows via Express."
+auth: "bearer"
+---
+
+# Admin REST API
+
+The `createAdminRouter()` function returns an Express router with full CRUD endpoints for agents, teams, and workflows.
+
+---
+
+## Endpoints
+
+### Agents
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agents` | Create agent from blueprint |
+| GET | `/agents` | List all persisted agent configs |
+| GET | `/agents/:name` | Get single agent config |
+| PUT | `/agents/:name` | Update agent (destroy + recreate) |
+| DELETE | `/agents/:name` | Remove from registry + storage |
+
+### Teams
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/teams` | Create team from agent names |
+| GET | `/teams` | List all persisted team configs |
+| GET | `/teams/:name` | Get single team config |
+| PUT | `/teams/:name` | Update team |
+| DELETE | `/teams/:name` | Remove from registry + storage |
+
+### Workflows
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/workflows` | Register workflow metadata |
+| GET | `/workflows` | List persisted workflow configs |
+| GET | `/workflows/:name` | Get single workflow config |
+| DELETE | `/workflows/:name` | Remove from registry + storage |
+
+---
+
+## Create Agent
+
+```bash
+curl -X POST http://localhost:3000/admin/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "researcher",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "instructions": "You research topics thoroughly.",
+    "tools": ["webSearch"]
+  }'
+```
+
+```json
+{
+  "name": "researcher",
+  "provider": "openai",
+  "model": "gpt-4o",
+  "instructions": "You research topics thoroughly.",
+  "tools": ["webSearch"],
+  "createdAt": "2026-02-27T10:00:00.000Z",
+  "updatedAt": "2026-02-27T10:00:00.000Z"
+}
+```
+
+The agent is immediately available via the transport layer:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/researcher/run \
+  -H "Content-Type: application/json" \
+  -d '{"input": "What is quantum computing?"}'
+```
+
+---
+
+## Agent Blueprint
+
+<ParamField body="name" type="string" required>
+  Unique agent name. Used as the identifier in registry and transport routes.
+</ParamField>
+
+<ParamField body="provider" type="string" required>
+  Model provider id: `"openai"`, `"anthropic"`, `"google"`, `"ollama"`, `"vertex"`.
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Model id: `"gpt-4o"`, `"gpt-4o-mini"`, `"claude-sonnet-4-20250514"`, etc.
+</ParamField>
+
+<ParamField body="instructions" type="string">
+  System prompt for the agent.
+</ParamField>
+
+<ParamField body="tools" type="string[]">
+  Tool names from the `toolLibrary`. e.g., `["webSearch", "calculator"]`.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Model temperature (0-2).
+</ParamField>
+
+<ParamField body="providerConfig" type="object">
+  Provider-specific config passed to `modelRegistry.resolve()` (e.g., `{ apiKey, baseURL }`).
+</ParamField>
+
+---
+
+## Update Agent
+
+```bash
+curl -X PUT http://localhost:3000/admin/agents/researcher \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "instructions": "Be concise."}'
+```
+
+The old agent is removed from the registry, a new one is created with the updated config, and the blueprint is persisted.
+
+---
+
+## Create Team
+
+```bash
+curl -X POST http://localhost:3000/admin/teams \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "content-team",
+    "mode": "coordinate",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "members": ["researcher", "writer"]
+  }'
+```
+
+All member agents must already exist in the registry.
+
+---
+
+## Team Blueprint
+
+<ParamField body="name" type="string" required>
+  Unique team name.
+</ParamField>
+
+<ParamField body="mode" type="string" required>
+  Team mode: `"coordinate"`, `"route"`, `"broadcast"`, `"collaborate"`, `"handoff"`.
+</ParamField>
+
+<ParamField body="provider" type="string" required>
+  Model provider for the team leader.
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Model id for the team leader.
+</ParamField>
+
+<ParamField body="members" type="string[]" required>
+  Agent names that must exist in the registry.
+</ParamField>
+
+<ParamField body="instructions" type="string">
+  System prompt for the team leader.
+</ParamField>
+
+---
+
+## Validation & Error Codes
+
+| Status | Meaning |
+|--------|---------|
+| `201` | Created successfully |
+| `400` | Missing required fields |
+| `404` | Entity not found |
+| `409` | Name already exists |
+| `422` | Validation error (unknown provider, missing tool, missing member agent) |
+| `500` | Internal error |

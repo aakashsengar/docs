@@ -99,6 +99,11 @@ createAgentGateway({ io, agents: { assistant: agent } });
 | Event | Direction | Description |
 |-------|-----------|-------------|
 | `agent.run` | Client → Server | Trigger agent run with `{ name, input, sessionId?, apiKey? }` |
+| `team.run` | Client → Server | Trigger team run |
+| `agents.list` | Client → Server | List agents with metadata (acknowledgement callback) |
+| `teams.list` | Client → Server | List teams (acknowledgement callback) |
+| `workflows.list` | Client → Server | List workflows (acknowledgement callback) |
+| `registry.list` | Client → Server | List all registered names (acknowledgement callback) |
 | `agent.chunk` | Server → Client | Streamed text chunk |
 | `agent.tool.call` | Server → Client | Tool call started |
 | `agent.tool.done` | Server → Client | Tool call finished |

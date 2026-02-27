@@ -125,6 +125,10 @@ createAgentGateway({
 |-------|---------|-------------|
 | `agent.run` | `{ name, input, sessionId?, apiKey? }` | Run agent and stream response |
 | `team.run` | `{ name, input, sessionId?, apiKey? }` | Run team (non-streaming) |
+| `agents.list` | `{}` | List registered agents with metadata (callback) |
+| `teams.list` | `{}` | List registered teams (callback) |
+| `workflows.list` | `{}` | List registered workflows (callback) |
+| `registry.list` | `{}` | List all registered entity names (callback) |
 
 ### Server → Client
 
@@ -135,6 +139,29 @@ createAgentGateway({
 | `agent.tool.done` | `{ toolCallId }` | Tool call finished |
 | `agent.done` | `{ output: { text } }` | Run complete |
 | `agent.error` | `{ error: string }` | Error occurred |
+
+---
+
+## Listing Agents & Teams
+
+Use acknowledgement callbacks to query registered entities:
+
+```javascript
+socket.emit("agents.list", {}, (agents) => {
+  console.log(agents);
+  // [{ name: "assistant", model: "gpt-4o", provider: "openai", tools: ["search"], hasStructuredOutput: false }]
+});
+
+socket.emit("teams.list", {}, (teams) => {
+  console.log(teams);
+  // [{ name: "research" }]
+});
+
+socket.emit("registry.list", {}, (data) => {
+  console.log(data);
+  // { agents: ["assistant"], teams: ["research"], workflows: [] }
+});
+```
 
 ---
 

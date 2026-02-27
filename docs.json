@@ -211,6 +211,20 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Admin (Pro)",
+        "groups": [
+          {
+            "group": "Admin API",
+            "pages": [
+              "admin/overview",
+              "admin/express",
+              "admin/socketio",
+              "admin/storage"
+            ]
+          }
+        ]
       }
     ],
     "global": {

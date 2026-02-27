@@ -1,0 +1,127 @@
+---
+title: "Admin Storage"
+description: "Configure persistence backends for admin-created agents, teams, and workflows."
+auth: "bearer"
+---
+
+# Admin Storage
+
+The admin package persists entity blueprints to a `StorageDriver`, ensuring they survive server restarts. Any storage backend supported by `@radaros/core` works.
+
+---
+
+## Storage Backends
+
+<Tabs>
+  <Tab title="In-Memory (Dev)">
+    ```typescript
+    import { InMemoryStorage } from "@radaros/core";
+    import { createAdminRouter } from "@radaros/admin";
+
+    const { router, hydrate } = createAdminRouter({
+      storage: new InMemoryStorage(),
+    });
+    ```
+    <Warning>Data is lost on server restart. Use for development only.</Warning>
+  </Tab>
+  <Tab title="SQLite">
+    ```bash
+    npm install better-sqlite3
+    ```
+    ```typescript
+    import { SqliteStorage } from "@radaros/core";
+    import { createAdminRouter } from "@radaros/admin";
+
+    const { router, hydrate } = createAdminRouter({
+      storage: new SqliteStorage("radaros.db"),
+    });
+
+    await hydrate();
+    ```
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```bash
+    npm install pg
+    ```
+    ```typescript
+    import { PostgresStorage } from "@radaros/core";
+    import { createAdminRouter } from "@radaros/admin";
+
+    const { router, hydrate } = createAdminRouter({
+      storage: new PostgresStorage("postgresql://localhost:5432/radaros"),
+    });
+
+    await hydrate();
+    ```
+  </Tab>
+  <Tab title="MongoDB">
+    ```bash
+    npm install mongodb
+    ```
+    ```typescript
+    import { MongoDBStorage } from "@radaros/core";
+    import { createAdminRouter } from "@radaros/admin";
+
+    const { router, hydrate } = createAdminRouter({
+      storage: new MongoDBStorage("mongodb://localhost:27017/radaros"),
+    });
+
+    await hydrate();
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## How It Works
+
+The `ConfigStore` uses three namespaces to organize data:
+
+| Namespace | Contents |
+|-----------|----------|
+| `radaros:admin:agents` | `AgentBlueprint` objects |
+| `radaros:admin:teams` | `TeamBlueprint` objects |
+| `radaros:admin:workflows` | `WorkflowBlueprint` objects |
+
+Each blueprint is stored as a plain JSON object keyed by the entity's `name`. No class instances or functions are persisted — only serializable configuration.
+
+---
+
+## Hydration Flow
+
+On server startup, call `hydrate()` to restore entities:
+
+```text
+Server starts
+    │
+hydrate()
+    │
+ConfigStore.listAgents()  →  EntityFactory.createAgent()  →  registry.add()
+ConfigStore.listTeams()   →  EntityFactory.createTeam()   →  registry.add()
+    │
+Transport layer discovers all entities via registry
+    │
+Ready to serve requests
+```
+
+Agents are hydrated first, then teams (since teams reference agents as members). Entities already in the registry (e.g., from code-defined agents) are skipped.
+
+---
+
+## Sharing Storage
+
+The admin storage can use the same `StorageDriver` instance as your agents' memory and sessions. Namespaces prevent collisions:
+
+```typescript
+const storage = new PostgresStorage("postgresql://localhost:5432/radaros");
+
+// Admin uses radaros:admin:* namespaces
+const { router, hydrate } = createAdminRouter({ storage });
+
+// Agents use radaros:sessions:*, radaros:memory:* namespaces
+const agent = new Agent({
+  name: "bot",
+  model: openai("gpt-4o"),
+  memory: { storage },
+});
+```

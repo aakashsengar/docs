@@ -1,0 +1,197 @@
+---
+title: "Admin Socket.IO"
+description: "Real-time CRUD events for managing agents, teams, and workflows via Socket.IO with live broadcasts."
+auth: "bearer"
+---
+
+# Admin Socket.IO Gateway
+
+The `createAdminGateway()` function attaches admin CRUD event handlers to a Socket.IO server. All operations use acknowledgement callbacks for request-response, and mutations are broadcast to all connected clients in real time.
+
+---
+
+## Setup
+
+```typescript
+import { Server } from "socket.io";
+import { SqliteStorage } from "@radaros/core";
+import { createAdminGateway } from "@radaros/admin";
+
+const io = new Server(httpServer);
+
+const { hydrate } = createAdminGateway({
+  io,
+  storage: new SqliteStorage("radaros.db"),
+  toolLibrary: { webSearch: webSearchTool, calculator: calcTool },
+  namespace: "/radaros-admin",
+  authMiddleware: (socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token || !validateToken(token)) return next(new Error("Unauthorized"));
+    next();
+  },
+});
+
+await hydrate();
+```
+
+---
+
+## AdminGatewayOptions
+
+<ParamField body="io" type="Server" required>
+  Socket.IO server instance.
+</ParamField>
+
+<ParamField body="storage" type="StorageDriver" required>
+  Storage backend for persisting blueprints.
+</ParamField>
+
+<ParamField body="toolLibrary" type="Record<string, ToolDef>">
+  Named tools available for agent creation.
+</ParamField>
+
+<ParamField body="namespace" type="string" default="/radaros-admin">
+  Socket.IO namespace for admin events.
+</ParamField>
+
+<ParamField body="authMiddleware" type="(socket, next) => void">
+  Socket.IO middleware for authentication.
+</ParamField>
+
+---
+
+## Events
+
+### Agent Events
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.agent.create` | `{ name, provider, model, instructions?, tools?, temperature? }` | `{ ok, data }` |
+| `admin.agent.list` | `{}` | `{ ok, data: AgentBlueprint[] }` |
+| `admin.agent.get` | `{ name }` | `{ ok, data }` |
+| `admin.agent.update` | `{ name, ...fields }` | `{ ok, data }` |
+| `admin.agent.delete` | `{ name }` | `{ ok, data: { deleted } }` |
+
+### Team Events
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.team.create` | `{ name, mode, provider, model, members, instructions? }` | `{ ok, data }` |
+| `admin.team.list` | `{}` | `{ ok, data: TeamBlueprint[] }` |
+| `admin.team.get` | `{ name }` | `{ ok, data }` |
+| `admin.team.update` | `{ name, ...fields }` | `{ ok, data }` |
+| `admin.team.delete` | `{ name }` | `{ ok, data: { deleted } }` |
+
+### Workflow Events
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.workflow.create` | `{ name, description? }` | `{ ok, data }` |
+| `admin.workflow.list` | `{}` | `{ ok, data: WorkflowBlueprint[] }` |
+| `admin.workflow.delete` | `{ name }` | `{ ok, data: { deleted } }` |
+
+### Registry
+
+| Event | Payload | Response |
+|-------|---------|----------|
+| `admin.registry.list` | `{}` | `{ ok, data: { agents, teams, workflows } }` |
+
+---
+
+## Broadcast Events
+
+When entities are created, updated, or deleted, the gateway broadcasts to **all connected clients** on the admin namespace:
+
+| Broadcast Event | Payload |
+|----------------|---------|
+| `admin.agent.created` | `AgentBlueprint` |
+| `admin.agent.updated` | `AgentBlueprint` |
+| `admin.agent.deleted` | `{ name }` |
+| `admin.team.created` | `TeamBlueprint` |
+| `admin.team.updated` | `TeamBlueprint` |
+| `admin.team.deleted` | `{ name }` |
+| `admin.workflow.created` | `WorkflowBlueprint` |
+| `admin.workflow.deleted` | `{ name }` |
+
+This enables real-time UI updates — when one user creates an agent, all other connected users see it appear immediately.
+
+---
+
+## Client Example
+
+```javascript
+const socket = io("http://localhost:3000/radaros-admin", {
+  auth: { token: "my-admin-token" },
+});
+
+// Create an agent
+socket.emit("admin.agent.create", {
+  name: "researcher",
+  provider: "openai",
+  model: "gpt-4o",
+  instructions: "You research topics thoroughly.",
+  tools: ["webSearch"],
+}, (res) => {
+  if (res.ok) {
+    console.log("Created:", res.data.name);
+  } else {
+    console.error("Error:", res.error);
+  }
+});
+
+// List all agents
+socket.emit("admin.agent.list", {}, (res) => {
+  console.log("Agents:", res.data);
+});
+
+// Listen for real-time updates from other users
+socket.on("admin.agent.created", (agent) => {
+  console.log("New agent:", agent.name);
+});
+
+socket.on("admin.team.created", (team) => {
+  console.log("New team:", team.name, "with members:", team.members);
+});
+```
+
+---
+
+## Full Flow: Create Agents, Build Team, Run
+
+```javascript
+const admin = io("http://localhost:3000/radaros-admin");
+const agent = io("http://localhost:3000/radaros");
+
+// Step 1: Create agents
+await new Promise((resolve) => {
+  admin.emit("admin.agent.create", {
+    name: "researcher", provider: "openai", model: "gpt-4o",
+    tools: ["webSearch"],
+  }, resolve);
+});
+
+await new Promise((resolve) => {
+  admin.emit("admin.agent.create", {
+    name: "writer", provider: "openai", model: "gpt-4o-mini",
+  }, resolve);
+});
+
+// Step 2: Build a team from those agents
+await new Promise((resolve) => {
+  admin.emit("admin.team.create", {
+    name: "content-team", mode: "coordinate",
+    provider: "openai", model: "gpt-4o",
+    members: ["researcher", "writer"],
+  }, resolve);
+});
+
+// Step 3: Run the team via the transport gateway
+agent.emit("team.run", {
+  name: "content-team",
+  input: "Write a blog post about AI agents",
+});
+
+agent.on("agent.done", ({ output }) => {
+  console.log("Result:", output.text);
+});
+```
