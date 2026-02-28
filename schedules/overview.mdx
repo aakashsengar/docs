@@ -1,0 +1,205 @@
+---
+title: Scheduled Agents
+description: Run agents and workflows on a cron schedule — daily reports, periodic syncs, health checks.
+---
+
+# Scheduled Agents
+
+Run agents and workflows on a recurring schedule using cron expressions. Built on BullMQ repeatable jobs with Redis — production-grade, timezone-aware, and zero custom infrastructure.
+
+<Info>
+  Requires the `@radaros/queue` package with `bullmq` and `ioredis` peer dependencies.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AgentQueue, AgentWorker } from "@radaros/queue";
+
+const reporter = new Agent({
+  name: "daily-reporter",
+  model: openai("gpt-4o"),
+  instructions: "Generate a daily summary report.",
+});
+
+const queue = new AgentQueue({ connection: "redis://localhost:6379" });
+
+// Schedule: run every day at 9am Eastern
+await queue.schedule({
+  id: "daily-report",
+  cron: "0 9 * * *",
+  timezone: "America/New_York",
+  agent: { name: "daily-reporter", input: "Generate today's summary." },
+});
+
+// Start a worker to process scheduled jobs
+const worker = new AgentWorker({
+  connection: "redis://localhost:6379",
+  agentRegistry: { "daily-reporter": reporter },
+});
+```
+
+---
+
+## `queue.schedule()`
+
+Create a recurring schedule for an agent or workflow.
+
+<ParamField body="id" type="string" required>
+  Unique schedule identifier (e.g. `"daily-report"`).
+</ParamField>
+
+<ParamField body="cron" type="string" required>
+  Cron expression (e.g. `"0 9 * * *"` for daily at 9am, `"*/5 * * * *"` for every 5 minutes).
+</ParamField>
+
+<ParamField body="timezone" type="string">
+  IANA timezone (e.g. `"America/New_York"`, `"UTC"`). Defaults to the server's local timezone.
+</ParamField>
+
+<ParamField body="agent" type="object">
+  Agent to run: `{ name, input, sessionId?, userId? }`.
+</ParamField>
+
+<ParamField body="workflow" type="object">
+  Workflow to run: `{ name, initialState? }`.
+</ParamField>
+
+Provide either `agent` or `workflow`, not both.
+
+---
+
+## `queue.unschedule(id)`
+
+Remove a recurring schedule.
+
+```typescript
+await queue.unschedule("daily-report");
+```
+
+---
+
+## `queue.listSchedules()`
+
+List all active schedules with their cron pattern, timezone, and next run time.
+
+```typescript
+const schedules = await queue.listSchedules();
+// [{ id: "daily-report", pattern: "0 9 * * *", timezone: "America/New_York", next: Date }]
+```
+
+---
+
+## Examples
+
+### Workflow Schedule
+
+```typescript
+await queue.schedule({
+  id: "weekly-etl",
+  cron: "0 2 * * 1",    // Every Monday at 2am
+  timezone: "UTC",
+  workflow: { name: "etl-pipeline", initialState: { source: "production" } },
+});
+```
+
+### Health Check Every 5 Minutes
+
+```typescript
+await queue.schedule({
+  id: "health-check",
+  cron: "*/5 * * * *",
+  agent: { name: "monitor", input: "Check system health and report issues." },
+});
+```
+
+### One-Off Delayed Job
+
+If you need a single delayed execution instead of a recurring schedule, use `enqueueAgentRun` directly:
+
+```typescript
+await queue.enqueueAgentRun({
+  agentName: "reminder-agent",
+  input: "Send the follow-up email.",
+  delay: 3600_000, // 1 hour from now
+});
+```
+
+---
+
+## REST API
+
+Enable schedule management endpoints by passing your `AgentQueue` as the `scheduler` option in `createAgentRouter`:
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+import { AgentQueue } from "@radaros/queue";
+
+const queue = new AgentQueue({ connection: "redis://localhost:6379" });
+
+const router = createAgentRouter({
+  scheduler: queue,
+});
+```
+
+This exposes:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/schedules` | List all active schedules |
+| `POST` | `/schedules` | Create a schedule (`{ id, cron, timezone?, agent?, workflow? }`) |
+| `DELETE` | `/schedules/:id` | Remove a schedule |
+
+### Example: Create via HTTP
+
+```bash
+curl -X POST http://localhost:3000/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "daily-report",
+    "cron": "0 9 * * *",
+    "timezone": "America/New_York",
+    "agent": { "name": "reporter", "input": "Generate daily summary." }
+  }'
+```
+
+### Example: List Schedules
+
+```bash
+curl http://localhost:3000/schedules
+# [{ "id": "daily-report", "pattern": "0 9 * * *", "timezone": "America/New_York", "next": "..." }]
+```
+
+---
+
+## Cron Expression Reference
+
+| Expression | Meaning |
+|------------|---------|
+| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour |
+| `0 9 * * *` | Daily at 9:00 AM |
+| `0 9 * * 1-5` | Weekdays at 9:00 AM |
+| `0 0 * * 0` | Weekly on Sunday at midnight |
+| `0 2 * * 1` | Every Monday at 2:00 AM |
+| `0 0 1 * *` | First day of every month at midnight |
+
+Format: `minute hour day-of-month month day-of-week`
+
+---
+
+## Unique Agent Names
+
+RadarOS enforces unique names across agents, teams, and workflows. Attempting to register two agents with the same name throws an error:
+
+```typescript
+new Agent({ name: "bot", model: openai("gpt-4o") });
+new Agent({ name: "bot", model: openai("gpt-4o") });
+// Error: Duplicate agent name: "bot". Each agent must have a unique name.
+```
+
+This ensures that scheduled jobs always resolve to the correct agent.

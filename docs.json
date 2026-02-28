@@ -246,6 +246,12 @@
               "queue/producer",
               "queue/worker"
             ]
+          },
+          {
+            "group": "Scheduling",
+            "pages": [
+              "schedules/overview"
+            ]
           }
         ]
       },
