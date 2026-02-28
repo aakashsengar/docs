@@ -1,0 +1,175 @@
+---
+title: DeepSeek
+description: Use DeepSeek reasoning and chat models with RadarOS agents.
+---
+
+# DeepSeek
+
+Use DeepSeek's powerful language models — including the `deepseek-reasoner` for complex multi-step reasoning and `deepseek-chat` for general conversations.
+
+DeepSeek exposes an **OpenAI-compatible API**, so RadarOS connects using the standard `openai` SDK pointed at `https://api.deepseek.com`.
+
+<Info>
+DeepSeek has no rate limits. During high-traffic periods, responses may be slower rather than rejected. See [DeepSeek docs](https://api-docs.deepseek.com/quick_start/rate_limit).
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [platform.deepseek.com](https://platform.deepseek.com/api_keys):
+
+```bash
+export DEEPSEEK_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { deepseek } from "@radaros/core";
+
+const model = deepseek("deepseek-chat");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"deepseek-chat"`, `"deepseek-reasoner"`).
+</ParamField>
+
+<ParamField path="config" type="DeepSeekConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `deepseek-chat` | General-purpose conversational model | Most tasks, fast responses |
+| `deepseek-reasoner` | Advanced reasoning with chain-of-thought | Complex math, logic, multi-step problems |
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, deepseek } from "@radaros/core";
+
+const agent = new Agent({
+  name: "deepseek-agent",
+  model: deepseek("deepseek-chat"),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Explain quantum entanglement in simple terms.");
+console.log(result.text);
+```
+
+---
+
+## Reasoning Model
+
+The `deepseek-reasoner` model returns chain-of-thought reasoning via `reasoning_content`:
+
+```typescript
+import { Agent, deepseek } from "@radaros/core";
+
+const agent = new Agent({
+  name: "math-solver",
+  model: deepseek("deepseek-reasoner"),
+  instructions: "Solve problems step by step.",
+});
+
+const result = await agent.run(
+  "A train leaves Station A at 60 mph. Another leaves Station B (300 miles away) at 80 mph toward A. When do they meet?"
+);
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+```typescript
+import { Agent, deepseek, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: deepseek("deepseek-chat"),
+  tools: [
+    defineTool({
+      name: "getWeather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 18°C, Clear skies`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the weather in Tokyo?");
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, deepseek, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "deepseek-chat": { promptPer1k: 0.00014, completionPer1k: 0.00028 },
+    "deepseek-reasoner": { promptPer1k: 0.00055, completionPer1k: 0.00219 },
+  },
+});
+
+const agent = new Agent({
+  name: "research-assistant",
+  model: deepseek("deepseek-chat"),
+  instructions: "You are a research assistant. Be thorough and cite sources.",
+  tools: [
+    defineTool({
+      name: "search",
+      description: "Search the web",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Results for "${query}": ...`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 5,
+});
+
+const result = await agent.run("What are the latest advances in fusion energy?");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(6)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
+
+---
+
+## Cross-References
+
+- [OpenAI](/models/openai) — Similar API format, different models
+- [Ollama](/models/ollama) — Run DeepSeek models locally via Ollama
+- [Reasoning](/agents/reasoning) — Reasoning configuration guide

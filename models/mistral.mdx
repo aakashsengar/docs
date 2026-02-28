@@ -1,0 +1,201 @@
+---
+title: Mistral
+description: Use Mistral AI models with RadarOS — code generation, reasoning, and vision.
+---
+
+# Mistral
+
+Use Mistral AI's models for code generation, reasoning, vision, and general tasks. Mistral provides `mistral-large-latest` for flagship capability, `codestral` for code, and `pixtral` for vision.
+
+<Info>
+RadarOS tries the native `@mistralai/mistralai` SDK first; if not installed, it falls back to the `openai` SDK via Mistral's OpenAI-compatible endpoint (`https://api.mistral.ai/v1`).
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install (Option A — Native)">
+```bash
+npm install @mistralai/mistralai
+```
+  </Tab>
+  <Tab title="Install (Option B — OpenAI compat)">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [console.mistral.ai](https://console.mistral.ai/api-keys/):
+
+```bash
+export MISTRAL_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { mistral } from "@radaros/core";
+
+const model = mistral("mistral-large-latest");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"mistral-large-latest"`, `"codestral-latest"`, `"pixtral-12b-2409"`).
+</ParamField>
+
+<ParamField path="config" type="MistralConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `mistral-large-latest` | Flagship model, strong reasoning | Complex tasks, tool calling |
+| `mistral-small-latest` | Fast, cost-effective | Simple tasks, high throughput |
+| `codestral-latest` | Code-optimized | Code generation, editing, review |
+| `open-mistral-nemo` | Free model, strong baseline | General tasks (free tier) |
+| `pixtral-12b-2409` | Vision-capable | OCR, document analysis, image comparison |
+| `pixtral-large-latest` | Large vision model | Complex visual reasoning |
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, mistral } from "@radaros/core";
+
+const agent = new Agent({
+  name: "mistral-agent",
+  model: mistral("mistral-large-latest"),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("What are the key differences between REST and GraphQL?");
+console.log(result.text);
+```
+
+---
+
+## Code Generation
+
+```typescript
+import { Agent, mistral } from "@radaros/core";
+
+const agent = new Agent({
+  name: "code-agent",
+  model: mistral("codestral-latest"),
+  instructions: "You are an expert programmer. Write clean, well-documented code.",
+});
+
+const result = await agent.run(
+  "Write a TypeScript function that implements binary search on a sorted array."
+);
+console.log(result.text);
+```
+
+---
+
+## Vision (Pixtral)
+
+```typescript
+import { Agent, mistral, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: mistral("pixtral-12b-2409"),
+  instructions: "Analyze images and documents with precision.",
+});
+
+const imageData = readFileSync("receipt.jpg").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Extract the total amount and date from this receipt." },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+```typescript
+import { Agent, mistral, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: mistral("mistral-large-latest"),
+  tools: [
+    defineTool({
+      name: "runSQL",
+      description: "Execute a SQL query",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Results for: ${query}\n| id | name |\n| 1 | Alice |`,
+    }),
+  ],
+});
+
+const result = await agent.run("How many users signed up this week?");
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, mistral, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "mistral-large-latest": { promptPer1k: 0.002, completionPer1k: 0.006 },
+    "codestral-latest": { promptPer1k: 0.0003, completionPer1k: 0.0009 },
+  },
+});
+
+const agent = new Agent({
+  name: "code-reviewer",
+  model: mistral("mistral-large-latest"),
+  instructions: "Review code for bugs, security issues, and best practices.",
+  tools: [
+    defineTool({
+      name: "readFile",
+      description: "Read a source file",
+      parameters: z.object({ path: z.string() }),
+      execute: async ({ path }) => `// Contents of ${path}\nfunction add(a, b) { return a + b; }`,
+    }),
+  ],
+  costTracker,
+});
+
+const result = await agent.run("Review the add function in utils.ts");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MISTRAL_API_KEY` | Mistral API key |
+
+---
+
+## Cross-References
+
+- [Azure AI Foundry](/models/azure-foundry) — Run Mistral models on Azure
+- [AWS Bedrock](/models/aws-bedrock) — Mistral models on AWS
+- [Ollama](/models/ollama) — Run Mistral locally

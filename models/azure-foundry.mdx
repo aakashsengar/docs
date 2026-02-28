@@ -1,0 +1,259 @@
+---
+title: Azure AI Foundry
+description: Use open-source models (Phi, Llama, Mistral, Cohere) hosted on Azure AI Foundry with RadarOS.
+---
+
+# Azure AI Foundry
+
+Use open-source and partner models hosted on **Azure AI Foundry** (formerly Azure AI Model Catalog) — access Phi, Llama, Mistral, Cohere, and more through Azure's infrastructure with enterprise compliance.
+
+Azure AI Foundry exposes an OpenAI-compatible API, so RadarOS connects to it using the standard `openai` SDK pointed at your Azure endpoint.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Uses the standard OpenAI SDK:
+
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your Azure AI Foundry credentials:
+
+```bash
+export AZURE_API_KEY="..."
+export AZURE_ENDPOINT="https://<your-host>.<region>.models.ai.azure.com"
+```
+
+Navigate to [Azure AI Foundry](https://ai.azure.com) on the Azure Portal to create a service and get your endpoint URL.
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { azureFoundry } from "@radaros/core";
+
+const model = azureFoundry("Phi-4");
+```
+
+<ParamField path="modelId" type="string" required>
+  The model name as deployed on Azure AI Foundry (e.g., `"Phi-4"`, `"Meta-Llama-3.1-70B-Instruct"`).
+</ParamField>
+
+<ParamField path="config" type="AzureFoundryConfig" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+### Microsoft Models
+
+| Model | Description |
+|-------|-------------|
+| `Phi-4` | Latest Phi model. Strong reasoning for its size. |
+| `Phi-3.5-mini-instruct` | Fast, compact, good for edge scenarios. |
+| `Phi-3.5-vision-instruct` | Vision-capable Phi model. |
+
+### Meta Models
+
+| Model | Description |
+|-------|-------------|
+| `Meta-Llama-3.1-405B-Instruct` | Largest open model. Exceptional capability. |
+| `Meta-Llama-3.1-70B-Instruct` | Strong balance of size and performance. |
+| `Meta-Llama-3.1-8B-Instruct` | Fast, efficient, good for most tasks. |
+
+### Mistral Models
+
+| Model | Description |
+|-------|-------------|
+| `Mistral-large` | High capability, strong reasoning. |
+| `Mistral-small` | Fast, cost-effective. |
+| `Mistral-Nemo` | Latest Nemo model. |
+
+### Cohere Models
+
+| Model | Description |
+|-------|-------------|
+| `Cohere-command-r-plus` | Strong RAG and tool use. |
+| `Cohere-command-r` | Fast, efficient. |
+
+<Accordion title="Discovering more models">
+  Browse the full model catalog at [Azure AI Foundry](https://ai.azure.com/explore/models). Available models depend on your Azure region and subscription.
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="apiKey" type="string" required={false}>
+  Azure API key. Falls back to `AZURE_API_KEY` env var.
+</ParamField>
+
+<ParamField path="endpoint" type="string" required>
+  Azure AI Foundry endpoint URL. Falls back to `AZURE_ENDPOINT` env var. Format: `https://<host>.<region>.models.ai.azure.com`
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required={false}>
+  API version. Falls back to `AZURE_API_VERSION` env var.
+</ParamField>
+
+---
+
+## Authentication
+
+### Environment Variables (Recommended)
+
+```bash
+export AZURE_API_KEY="..."
+export AZURE_ENDPOINT="https://my-host.eastus.models.ai.azure.com"
+```
+
+```typescript
+const model = azureFoundry("Phi-4");
+```
+
+### Explicit Config
+
+```typescript
+const model = azureFoundry("Phi-4", {
+  apiKey: "...",
+  endpoint: "https://my-host.eastus.models.ai.azure.com",
+});
+```
+
+---
+
+## Tool Calling
+
+Tool calling is supported by models that implement function calling (Mistral Large, Llama 3.1, Cohere Command R/R+):
+
+```typescript
+import { Agent, azureFoundry, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "foundry-assistant",
+  model: azureFoundry("Mistral-large"),
+  instructions: "You are a helpful assistant with tool access.",
+  tools: [
+    defineTool({
+      name: "getStockPrice",
+      description: "Get current stock price",
+      parameters: z.object({ symbol: z.string() }),
+      execute: async ({ symbol }) => `${symbol}: $185.42 (+2.3%)`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the current price of AAPL?");
+console.log(result.text);
+```
+
+<Warning>
+Not all Azure AI Foundry models support tool calling. Phi models and some smaller models may not support function calling. Test with your specific model.
+</Warning>
+
+---
+
+## Vision Models
+
+Some Azure AI Foundry models support image input (e.g., `Phi-3.5-vision-instruct`):
+
+```typescript
+import { Agent, azureFoundry, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: azureFoundry("Phi-3.5-vision-instruct"),
+  instructions: "Describe images in detail.",
+});
+
+const imageData = readFileSync("photo.jpg").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What's in this image?" },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, azureFoundry, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "Meta-Llama-3.1-70B-Instruct": { promptPer1k: 0.00268, completionPer1k: 0.00354 },
+    "Mistral-large": { promptPer1k: 0.004, completionPer1k: 0.012 },
+  },
+});
+
+const agent = new Agent({
+  name: "research-agent",
+  model: azureFoundry("Meta-Llama-3.1-70B-Instruct", {
+    endpoint: "https://my-host.eastus.models.ai.azure.com",
+  }),
+  instructions: "You are a research assistant. Use tools to find information.",
+  tools: [
+    defineTool({
+      name: "search",
+      description: "Search for information",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Results for "${query}": ...`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Research the latest trends in AI agent frameworks");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Azure AI Foundry vs Other Providers
+
+| Feature | `openai()` | `azureFoundry()` | `ollama()` |
+|---------|-----------|-------------------|-----------|
+| Models | OpenAI only | Phi, Llama, Mistral, Cohere | Any local model |
+| Auth | API key | Azure API key | None |
+| Hosting | OpenAI cloud | Azure cloud | Local machine |
+| Cost | Per-token | Per-token (Azure pricing) | Free (your hardware) |
+| Privacy | OpenAI terms | Azure data residency | Fully local |
+| Compliance | SOC2 | SOC2, HIPAA, GDPR | N/A |
+| GPU required | No | No | Yes (recommended) |
+
+Use `azureFoundry()` when you want open-source model quality with Azure enterprise compliance — without managing GPU infrastructure.
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_API_KEY` | Azure AI Foundry API key |
+| `AZURE_ENDPOINT` | Azure AI Foundry endpoint URL |
+| `AZURE_API_VERSION` | API version (optional) |
+
+---
+
+## Cross-References
+
+- [Azure OpenAI](/models/azure-openai) — OpenAI GPT/o-series models on Azure
+- [Ollama](/models/ollama) — Run the same open-source models locally
+- [AWS Bedrock](/models/aws-bedrock) — Similar model catalog on AWS
+- [Custom Provider](/models/custom-provider) — Build your own provider

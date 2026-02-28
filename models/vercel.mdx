@@ -1,0 +1,155 @@
+---
+title: Vercel v0
+description: Use Vercel v0 models with RadarOS — optimized for web development and code generation.
+---
+
+# Vercel v0
+
+Use Vercel's **v0** models, specifically designed for **frontend and full-stack web development**. These models excel at generating React components, Next.js pages, Tailwind CSS styling, and modern web applications.
+
+The v0 API is **OpenAI-compatible**.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Create an API key at [v0.dev/chat/settings/keys](https://v0.dev/chat/settings/keys):
+
+```bash
+export V0_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { vercel } from "@radaros/core";
+
+const model = vercel("v0-1.0-md");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"v0-1.0-md"`).
+</ParamField>
+
+<ParamField path="config" type="VercelConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `v0-1.0-md` | Main v0 model | Web development, React/Next.js code generation |
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, vercel } from "@radaros/core";
+
+const agent = new Agent({
+  name: "web-dev",
+  model: vercel("v0-1.0-md"),
+  instructions:
+    "You are a frontend developer. Generate clean, modern React components " +
+    "using TypeScript, Tailwind CSS, and shadcn/ui.",
+});
+
+const result = await agent.run(
+  "Create a responsive pricing card component with three tiers: Basic, Pro, and Enterprise."
+);
+console.log(result.text);
+```
+
+---
+
+## Full-Stack Code Generation
+
+```typescript
+import { Agent, vercel, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "fullstack-dev",
+  model: vercel("v0-1.0-md"),
+  instructions:
+    "You are a full-stack web developer. Generate complete, production-ready code " +
+    "using Next.js App Router, TypeScript, Tailwind CSS, and shadcn/ui components.",
+  tools: [
+    defineTool({
+      name: "saveFile",
+      description: "Save generated code to a file",
+      parameters: z.object({
+        path: z.string().describe("File path relative to project root"),
+        content: z.string().describe("File contents"),
+      }),
+      execute: async ({ path, content }) => `Saved ${path} (${content.length} chars)`,
+    }),
+  ],
+});
+
+const result = await agent.run(
+  "Create a weather dashboard page that shows current weather, 5-day forecast, " +
+  "and humidity/wind cards. Use shadcn components and Tailwind."
+);
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, vercel, CostTracker } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "v0-1.0-md": { promptPer1k: 0.001, completionPer1k: 0.002 },
+  },
+});
+
+const agent = new Agent({
+  name: "ui-generator",
+  model: vercel("v0-1.0-md"),
+  instructions:
+    "Generate beautiful, accessible, responsive UI components. " +
+    "Use semantic HTML, ARIA attributes, and modern CSS.",
+  costTracker,
+});
+
+const result = await agent.run(
+  "Create a dark mode toggle component with smooth animation and system preference detection."
+);
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `V0_API_KEY` | Vercel v0 API key |
+
+---
+
+## Cross-References
+
+- [OpenAI](/models/openai) — General-purpose model with code capabilities
+- [Mistral](/models/mistral) — Codestral for code generation
+- [Tools](/agents/tools) — Extend with file-writing tools

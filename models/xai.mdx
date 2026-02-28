@@ -1,0 +1,172 @@
+---
+title: xAI (Grok)
+description: Use xAI Grok models with RadarOS agents — fast, capable, with live web search.
+---
+
+# xAI (Grok)
+
+Use xAI's **Grok** models for general tasks, reasoning, and real-time web search. xAI exposes an **OpenAI-compatible API**, making integration seamless.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [console.x.ai](https://console.x.ai/):
+
+```bash
+export XAI_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { xai } from "@radaros/core";
+
+const model = xai("grok-3");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"grok-3"`, `"grok-3-mini"`, `"grok-2-vision"`, `"grok-2"`).
+</ParamField>
+
+<ParamField path="config" type="XAIConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `grok-3` | Flagship model, strong all-around | Complex reasoning, general tasks |
+| `grok-3-mini` | Fast, efficient | Quick responses, cost-sensitive |
+| `grok-2` | Previous gen, still capable | General tasks |
+| `grok-2-vision` | Vision-capable Grok | Image analysis, OCR |
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, xai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "grok-agent",
+  model: xai("grok-3"),
+  instructions: "You are a witty and knowledgeable assistant.",
+});
+
+const result = await agent.run("What are the most promising breakthroughs in battery technology?");
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+```typescript
+import { Agent, xai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: xai("grok-3"),
+  tools: [
+    defineTool({
+      name: "getStockPrice",
+      description: "Get current stock price",
+      parameters: z.object({ symbol: z.string() }),
+      execute: async ({ symbol }) => `${symbol}: $192.53 (+1.2%)`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's Apple's current stock price?");
+console.log(result.text);
+```
+
+---
+
+## Vision
+
+```typescript
+import { Agent, xai, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: xai("grok-2-vision"),
+  instructions: "Analyze images in detail.",
+});
+
+const imageData = readFileSync("diagram.png").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Explain this architecture diagram." },
+  { type: "image", data: imageData, mimeType: "image/png" },
+] as ContentPart[]);
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, xai, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "grok-3": { promptPer1k: 0.003, completionPer1k: 0.015 },
+    "grok-3-mini": { promptPer1k: 0.0003, completionPer1k: 0.0005 },
+  },
+});
+
+const agent = new Agent({
+  name: "research-grok",
+  model: xai("grok-3"),
+  instructions: "You are a research assistant with access to tools.",
+  tools: [
+    defineTool({
+      name: "search",
+      description: "Search for information",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Results for "${query}": ...`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 5,
+});
+
+const result = await agent.run("Research the latest developments in quantum computing");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `XAI_API_KEY` | xAI API key |
+
+---
+
+## Cross-References
+
+- [OpenAI](/models/openai) — Similar API format
+- [DeepSeek](/models/deepseek) — Another reasoning-focused model
+- [Tools](/agents/tools) — Tool calling guide

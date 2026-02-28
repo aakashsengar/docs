@@ -1,0 +1,357 @@
+---
+title: OpenAI-Compatible
+description: Connect to any OpenAI-compatible API endpoint — Together, Groq, Fireworks, OpenRouter, NVIDIA, LM Studio, and more.
+---
+
+# OpenAI-Compatible Models
+
+Many LLM providers expose an **OpenAI-compatible** Chat Completions API. RadarOS lets you connect to any of them by simply providing a `baseURL` and `apiKey` — no custom provider code required.
+
+This works for providers like **Together AI**, **Groq**, **Fireworks**, **OpenRouter**, **NVIDIA**, **DeepInfra**, **Cerebras**, **SambaNova**, **LM Studio**, **vLLM**, and any other service that implements the OpenAI format.
+
+---
+
+## Two Ways to Connect
+
+### Option 1: `openai()` Factory with Custom `baseURL`
+
+The simplest approach — use the existing `openai()` factory:
+
+```typescript
+import { openai } from "@radaros/core";
+
+const model = openai("mistralai/Mixtral-8x7B-Instruct-v0.1", {
+  apiKey: process.env.TOGETHER_API_KEY,
+  baseURL: "https://api.together.xyz/v1",
+});
+```
+
+This works because these providers use the same API format as OpenAI.
+
+### Option 2: `OpenAICompatibleProvider` Class
+
+For more control or when building reusable providers, use the class directly:
+
+```typescript
+import { OpenAICompatibleProvider } from "@radaros/core";
+
+const model = new OpenAICompatibleProvider(
+  "together",                                    // providerId
+  "mistralai/Mixtral-8x7B-Instruct-v0.1",       // modelId
+  { baseURL: "https://api.together.xyz/v1", apiKeyEnvVar: "TOGETHER_API_KEY" },
+);
+```
+
+---
+
+## Provider Examples
+
+### Together AI
+
+Access 100+ open-source models including Llama, Mistral, Qwen, and more.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "together-agent",
+  model: openai("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", {
+    apiKey: process.env.TOGETHER_API_KEY,
+    baseURL: "https://api.together.xyz/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Explain how transformers work in 3 sentences.");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export TOGETHER_API_KEY="..."
+```
+
+### Groq
+
+Ultra-fast inference for open models.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "groq-agent",
+  model: openai("llama-3.3-70b-versatile", {
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1",
+  }),
+  instructions: "You are a fast, helpful assistant.",
+});
+
+const result = await agent.run("What is the capital of France?");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export GROQ_API_KEY="..."
+```
+
+### Fireworks AI
+
+Optimized inference for open-source models.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "fireworks-agent",
+  model: openai("accounts/fireworks/models/llama-v3p1-70b-instruct", {
+    apiKey: process.env.FIREWORKS_API_KEY,
+    baseURL: "https://api.fireworks.ai/inference/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Write a haiku about programming.");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export FIREWORKS_API_KEY="..."
+```
+
+### OpenRouter
+
+Access models from multiple providers through a single API.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "openrouter-agent",
+  model: openai("anthropic/claude-sonnet-4-20250514", {
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: "https://openrouter.ai/api/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("What are the pros and cons of microservices?");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export OPENROUTER_API_KEY="..."
+```
+
+### NVIDIA NIM
+
+NVIDIA-hosted inference for optimized models.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "nvidia-agent",
+  model: openai("meta/llama-3.1-70b-instruct", {
+    apiKey: process.env.NVIDIA_API_KEY,
+    baseURL: "https://integrate.api.nvidia.com/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Explain GPU parallelism.");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export NVIDIA_API_KEY="..."
+```
+
+### DeepInfra
+
+Serverless inference at low cost.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "deepinfra-agent",
+  model: openai("meta-llama/Meta-Llama-3.1-70B-Instruct", {
+    apiKey: process.env.DEEPINFRA_API_KEY,
+    baseURL: "https://api.deepinfra.com/v1/openai",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("What is retrieval-augmented generation?");
+console.log(result.text);
+```
+
+**Environment:**
+```bash
+export DEEPINFRA_API_KEY="..."
+```
+
+### LM Studio (Local)
+
+Connect to a locally-running LM Studio server.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "local-agent",
+  model: openai("local-model", {
+    apiKey: "lm-studio",  // LM Studio doesn't validate keys
+    baseURL: "http://localhost:1234/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Hello! How are you?");
+console.log(result.text);
+```
+
+### vLLM (Self-Hosted)
+
+Connect to a self-hosted vLLM server.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "vllm-agent",
+  model: openai("meta-llama/Meta-Llama-3.1-8B-Instruct", {
+    apiKey: "token-abc123",  // your vLLM auth token
+    baseURL: "http://localhost:8000/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("What is vLLM?");
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+Tool calling works with any OpenAI-compatible provider that supports function calling:
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: openai("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", {
+    apiKey: process.env.TOGETHER_API_KEY,
+    baseURL: "https://api.together.xyz/v1",
+  }),
+  tools: [
+    defineTool({
+      name: "getWeather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 22°C, Sunny`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the weather in Paris?");
+console.log(result.text);
+```
+
+<Warning>
+Not all models or providers support tool calling. Check your provider's documentation for function calling support. Larger models (70B+) generally have better tool calling reliability.
+</Warning>
+
+---
+
+## Registering a Custom Provider
+
+If you use a specific endpoint frequently, register it as a named provider:
+
+```typescript
+import { modelRegistry, OpenAICompatibleProvider } from "@radaros/core";
+
+modelRegistry.register(
+  "together",
+  (modelId) =>
+    new OpenAICompatibleProvider("together", modelId, {
+      baseURL: "https://api.together.xyz/v1",
+      apiKeyEnvVar: "TOGETHER_API_KEY",
+    }),
+);
+
+// Now use it like a built-in provider
+const model = modelRegistry.resolve("together", "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo");
+```
+
+---
+
+## Supported Provider Endpoints
+
+| Provider | Base URL | Env Var | Tool Calling |
+|----------|----------|---------|-------------|
+| [Together AI](https://together.ai) | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | Yes (most models) |
+| [Groq](https://groq.com) | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | Yes |
+| [Fireworks](https://fireworks.ai) | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` | Yes |
+| [OpenRouter](https://openrouter.ai) | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | Model-dependent |
+| [NVIDIA NIM](https://build.nvidia.com) | `https://integrate.api.nvidia.com/v1` | `NVIDIA_API_KEY` | Yes |
+| [DeepInfra](https://deepinfra.com) | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_API_KEY` | Yes |
+| [Cerebras](https://cerebras.ai) | `https://api.cerebras.ai/v1` | `CEREBRAS_API_KEY` | Yes |
+| [SambaNova](https://sambanova.ai) | `https://api.sambanova.ai/v1` | `SAMBANOVA_API_KEY` | Model-dependent |
+| [LM Studio](https://lmstudio.ai) | `http://localhost:1234/v1` | N/A | Model-dependent |
+| [vLLM](https://docs.vllm.ai) | `http://localhost:8000/v1` | Custom | Model-dependent |
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, openai, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo": { promptPer1k: 0.00088, completionPer1k: 0.00088 },
+  },
+});
+
+const agent = new Agent({
+  name: "together-assistant",
+  model: openai("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", {
+    apiKey: process.env.TOGETHER_API_KEY,
+    baseURL: "https://api.together.xyz/v1",
+  }),
+  instructions: "You are a helpful coding assistant.",
+  tools: [
+    defineTool({
+      name: "searchDocs",
+      description: "Search documentation",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Results for "${query}": ...`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("How do I set up a Next.js project with TypeScript?");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Cross-References
+
+- [OpenAI](/models/openai) — Direct OpenAI API
+- [Ollama](/models/ollama) — Local models with a different interface
+- [Custom Provider](/models/custom-provider) — Build a provider from scratch
+- [Models Overview](/models/overview) — All built-in providers

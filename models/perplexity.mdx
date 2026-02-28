@@ -1,0 +1,172 @@
+---
+title: Perplexity
+description: Use Perplexity models with built-in web search in RadarOS agents.
+---
+
+# Perplexity
+
+Use Perplexity's models for **research and Q&A with built-in web search**. Perplexity models (Sonar) automatically search the web and provide grounded, cited answers — no separate search tool needed.
+
+Perplexity exposes an **OpenAI-compatible API**.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api):
+
+```bash
+export PERPLEXITY_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { perplexity } from "@radaros/core";
+
+const model = perplexity("sonar-pro");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"sonar"`, `"sonar-pro"`, `"sonar-reasoning"`).
+</ParamField>
+
+<ParamField path="config" type="PerplexityConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `sonar` | Fast search-grounded model | Quick research queries |
+| `sonar-pro` | Enhanced search with more sources | Deep research, comprehensive answers |
+| `sonar-reasoning` | Reasoning + search | Complex research requiring analysis |
+
+---
+
+## Basic Example
+
+Perplexity shines for research — answers are automatically web-grounded:
+
+```typescript
+import { Agent, perplexity } from "@radaros/core";
+
+const agent = new Agent({
+  name: "researcher",
+  model: perplexity("sonar-pro"),
+  instructions: "You are a research assistant. Provide thorough, well-sourced answers.",
+});
+
+const result = await agent.run("What are the latest FDA-approved treatments for Alzheimer's disease?");
+console.log(result.text);
+```
+
+---
+
+## Research Agent
+
+Combine Perplexity's search with tools for a powerful research workflow:
+
+```typescript
+import { Agent, perplexity, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "deep-researcher",
+  model: perplexity("sonar-pro"),
+  instructions: "You are a thorough researcher. Save important findings.",
+  tools: [
+    defineTool({
+      name: "saveNote",
+      description: "Save a research note",
+      parameters: z.object({ title: z.string(), content: z.string() }),
+      execute: async ({ title, content }) => `Saved: "${title}" (${content.length} chars)`,
+    }),
+  ],
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run(
+  "Research the current state of nuclear fusion energy. Save the key findings."
+);
+console.log(result.text);
+```
+
+---
+
+## Reasoning + Search
+
+The `sonar-reasoning` model combines chain-of-thought reasoning with web search:
+
+```typescript
+import { Agent, perplexity } from "@radaros/core";
+
+const agent = new Agent({
+  name: "analyst",
+  model: perplexity("sonar-reasoning"),
+  instructions: "Analyze questions thoroughly with reasoning and evidence.",
+});
+
+const result = await agent.run(
+  "Compare the economic policies of the EU and US regarding AI regulation. Which approach is more likely to foster innovation?"
+);
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, perplexity, CostTracker } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "sonar": { promptPer1k: 0.001, completionPer1k: 0.001 },
+    "sonar-pro": { promptPer1k: 0.003, completionPer1k: 0.015 },
+  },
+});
+
+const agent = new Agent({
+  name: "fact-checker",
+  model: perplexity("sonar-pro"),
+  instructions: "Fact-check claims by searching the web. Provide sources for your findings.",
+  costTracker,
+});
+
+const result = await agent.run(
+  "Fact-check: 'The Great Wall of China is visible from space with the naked eye.'"
+);
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PERPLEXITY_API_KEY` | Perplexity API key |
+
+---
+
+## Cross-References
+
+- [DeepSeek](/models/deepseek) — Reasoning models without web search
+- [xAI](/models/xai) — Grok with optional live search
+- [Tools](/agents/tools) — Extend Perplexity with custom tools

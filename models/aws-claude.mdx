@@ -1,0 +1,341 @@
+---
+title: AWS Claude
+description: Use Claude models through AWS Bedrock with RadarOS. Native Anthropic SDK integration with AWS authentication.
+---
+
+# AWS Claude
+
+Use Anthropic's Claude models through **AWS Bedrock** — same powerful Claude capabilities (extended thinking, document analysis, tool calling) but authenticated with AWS credentials and billed through your AWS account.
+
+<Info>
+`awsClaude()` uses the `@anthropic-ai/bedrock-sdk` package, which provides the same Anthropic Messages API routed through AWS Bedrock. All Claude features (thinking, multi-modal, tool calling) work identically to the direct [`anthropic()`](/models/anthropic) provider.
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Install the Anthropic Bedrock SDK:
+
+```bash
+npm install @anthropic-ai/bedrock-sdk
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your AWS credentials via environment variables:
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_REGION="us-east-1"
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { awsClaude } from "@radaros/core";
+
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0");
+```
+
+<ParamField path="modelId" type="string" required>
+  The AWS Bedrock Claude model identifier. Use the `us.` or `eu.` prefix for cross-region inference.
+</ParamField>
+
+<ParamField path="config" type="AwsClaudeConfig" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Description |
+|----------|-------------|
+| `us.anthropic.claude-sonnet-4-20250514-v1:0` | Claude Sonnet 4. Most capable. |
+| `anthropic.claude-sonnet-4-20250514-v1:0` | Claude Sonnet 4 (region-local). |
+| `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | Claude 3.5 Sonnet. Strong all-around, vision support. |
+| `us.anthropic.claude-3-5-haiku-20241022-v2:0` | Claude 3.5 Haiku. Fastest Claude model. |
+| `anthropic.claude-3-haiku-20240307-v1:0` | Claude 3 Haiku. Cost-effective. |
+
+<Accordion title="Cross-region inference">
+  Prefix the model ID with `us.` or `eu.` to use cross-region inference profiles. This routes requests to the nearest available region for lower latency:
+
+```typescript
+// Cross-region (recommended)
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0");
+
+// Region-local
+const model = awsClaude("anthropic.claude-sonnet-4-20250514-v1:0");
+```
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="awsAccessKey" type="string" required={false}>
+  AWS access key ID. Falls back to `AWS_ACCESS_KEY_ID` env var.
+</ParamField>
+
+<ParamField path="awsSecretKey" type="string" required={false}>
+  AWS secret access key. Falls back to `AWS_SECRET_ACCESS_KEY` env var.
+</ParamField>
+
+<ParamField path="awsRegion" type="string" required={false} default="us-east-1">
+  AWS region. Falls back to `AWS_REGION` env var.
+</ParamField>
+
+<ParamField path="awsSessionToken" type="string" required={false}>
+  AWS session token for temporary credentials. Falls back to `AWS_SESSION_TOKEN` env var.
+</ParamField>
+
+---
+
+## Authentication Methods
+
+### Method 1: Environment Variables (Recommended)
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_REGION="us-east-1"
+```
+
+```typescript
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0");
+// Credentials picked up from env automatically
+```
+
+### Method 2: Explicit Credentials
+
+```typescript
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0", {
+  awsAccessKey: "AKIA...",
+  awsSecretKey: "...",
+  awsRegion: "us-east-1",
+});
+```
+
+### Method 3: Temporary Credentials (STS / SSO)
+
+```typescript
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0", {
+  awsAccessKey: "ASIA...",
+  awsSecretKey: "...",
+  awsSessionToken: "FwoGZX...",
+  awsRegion: "us-east-1",
+});
+```
+
+---
+
+## Reasoning / Extended Thinking
+
+Claude's extended thinking works on Bedrock just like the direct API:
+
+```typescript
+import { Agent, awsClaude } from "@radaros/core";
+
+const agent = new Agent({
+  name: "deep-thinker",
+  model: awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0"),
+  instructions: "Think step by step before answering.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 4000,
+  },
+});
+
+const result = await agent.run(
+  "A bat and a ball cost $1.10 in total. The bat costs $1 more than the ball. How much does the ball cost?"
+);
+
+console.log(result.thinking);
+// "Let me set up equations... Let ball = x, bat = x + 1.00..."
+console.log(result.text);
+// "The ball costs $0.05."
+```
+
+<Warning>
+When `reasoning` is enabled, `maxTokens` is automatically adjusted to accommodate both thinking and response tokens. See [Reasoning](/agents/reasoning) for details.
+</Warning>
+
+---
+
+## Tool Calling
+
+Tool calling works identically to the direct Anthropic provider:
+
+```typescript
+import { Agent, awsClaude, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "aws-assistant",
+  model: awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0"),
+  instructions: "Help users with their orders.",
+  tools: [
+    defineTool({
+      name: "getOrderStatus",
+      description: "Get the status of an order by ID",
+      parameters: z.object({
+        orderId: z.string().describe("Order ID (e.g., ORD-12345)"),
+      }),
+      execute: async ({ orderId }) => {
+        return JSON.stringify({
+          id: orderId,
+          status: "shipped",
+          carrier: "FedEx",
+          tracking: "7891234567",
+          eta: "2026-03-01",
+        });
+      },
+    }),
+  ],
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Where is order ORD-12345?");
+console.log(result.text);
+// "Your order ORD-12345 has been shipped via FedEx (tracking: 7891234567).
+//  Estimated delivery: March 1, 2026."
+```
+
+---
+
+## Multi-Modal Support
+
+AWS Claude supports **images** and **files/documents** — same as the direct Anthropic provider.
+
+### Images
+
+```typescript
+import { Agent, awsClaude, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0"),
+  instructions: "Analyze images thoroughly.",
+});
+
+const imageData = readFileSync("dashboard.png").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What metrics are shown in this dashboard?" },
+  { type: "image", data: imageData, mimeType: "image/png" },
+] as ContentPart[]);
+```
+
+### PDF Documents
+
+```typescript
+const pdfData = readFileSync("contract.pdf").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What are the payment terms?" },
+  { type: "file", data: pdfData, mimeType: "application/pdf", filename: "contract.pdf" },
+] as ContentPart[]);
+```
+
+### CSV Data
+
+```typescript
+const csvData = readFileSync("sales.csv").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Analyze this sales data. What are the trends?" },
+  { type: "file", data: csvData, mimeType: "text/csv", filename: "sales.csv" },
+] as ContentPart[]);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, awsClaude, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "us.anthropic.claude-sonnet-4-20250514-v1:0": { promptPer1k: 0.003, completionPer1k: 0.015 },
+    "us.anthropic.claude-3-5-haiku-20241022-v2:0": { promptPer1k: 0.0008, completionPer1k: 0.004 },
+  },
+});
+
+const agent = new Agent({
+  name: "enterprise-assistant",
+  model: awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0", {
+    awsRegion: "us-east-1",
+  }),
+  instructions: "You are an enterprise assistant. Be thorough and professional.",
+  tools: [
+    defineTool({
+      name: "searchKnowledgeBase",
+      description: "Search the company knowledge base",
+      parameters: z.object({
+        query: z.string().describe("Search query"),
+      }),
+      execute: async ({ query }) => {
+        return JSON.stringify([
+          { title: "PTO Policy", snippet: "Employees receive 20 days PTO annually..." },
+          { title: "Remote Work", snippet: "Hybrid model: 3 days office, 2 days remote..." },
+        ]);
+      },
+    }),
+  ],
+  reasoning: { enabled: true, budgetTokens: 2000 },
+  toolRouter: {
+    model: awsClaude("us.anthropic.claude-3-5-haiku-20241022-v2:0"),
+    maxTools: 5,
+  },
+  costTracker,
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("What is our PTO policy?");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## AWS Claude vs Direct Anthropic
+
+| Feature | `anthropic()` (Direct) | `awsClaude()` (Bedrock) |
+|---------|----------------------|------------------------|
+| Auth | Anthropic API key | AWS IAM credentials |
+| Billing | Anthropic billing | AWS billing (consolidated) |
+| Extended Thinking | Yes | Yes |
+| Tool Calling | Yes | Yes |
+| Multi-Modal | Yes | Yes |
+| VPC / PrivateLink | No | Yes |
+| Compliance | SOC2 | SOC2, HIPAA, FedRAMP |
+| Prompt Caching | Yes (automatic) | Yes (via Bedrock) |
+
+Use `awsClaude()` when you need AWS billing, VPC isolation, or compliance certifications. Use `anthropic()` when you want the simplest setup with an API key.
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AWS_ACCESS_KEY_ID` | AWS access key ID |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret access key |
+| `AWS_REGION` | AWS region (default: `us-east-1`) |
+| `AWS_SESSION_TOKEN` | Temporary session token (STS/SSO) |
+
+---
+
+## Cross-References
+
+- [Anthropic (Direct)](/models/anthropic) — Direct Anthropic API with API key auth
+- [AWS Bedrock](/models/aws-bedrock) — Generic Bedrock provider for non-Claude models
+- [Reasoning](/agents/reasoning) — Extended thinking configuration
+- [Multi-Modal](/agents/multimodal) — Provider support matrix

@@ -201,16 +201,20 @@ console.log(result.structured);
 
 Not all providers support all content types. When an unsupported type is passed, the provider logs a warning and either skips the content or substitutes a placeholder.
 
-| Content Type | OpenAI | Anthropic | Google/Vertex | Ollama |
-|-------------|--------|-----------|---------------|--------|
-| **Image** (URL) | Yes | Yes | Yes | No |
-| **Image** (base64) | Yes | Yes | Yes | Yes |
-| **Audio** (base64) | Yes | No | Yes | No |
-| **File** (URL) | Yes | Yes | Yes | No |
-| **File** (base64) | Yes | Yes | Yes | No |
+| Content Type | OpenAI | Anthropic | Google/Vertex | AWS Claude | AWS Bedrock | Azure OpenAI | Azure Foundry | Ollama |
+|-------------|--------|-----------|---------------|------------|-------------|-------------|---------------|--------|
+| **Image** (URL) | Yes | Yes | Yes | Yes | No | Yes | Model-dependent | No |
+| **Image** (base64) | Yes | Yes | Yes | Yes | Yes* | Yes | Model-dependent | Yes |
+| **Audio** (base64) | Yes | No | Yes | No | No | Yes | No | No |
+| **File** (URL) | Yes | Yes | Yes | Yes | No | Yes | No | No |
+| **File** (base64) | Yes | Yes | Yes | Yes | Yes* | Yes | No | No |
 
 <Note>
-  Ollama image support requires a vision-capable model (e.g., `llava`, `bakllava`, `llama3.2-vision`).
+  - Ollama image support requires a vision-capable model (e.g., `llava`, `bakllava`, `llama3.2-vision`).
+  - AWS Bedrock multi-modal support (*) depends on the specific model. Amazon Nova supports images; document support varies by model.
+  - AWS Claude supports the same multi-modal features as the direct Anthropic provider.
+  - Azure OpenAI supports the same multi-modal features as the direct OpenAI provider.
+  - Azure AI Foundry vision support depends on the model (e.g., `Phi-3.5-vision-instruct` supports images).
 </Note>
 
 ---

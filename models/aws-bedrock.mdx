@@ -1,0 +1,280 @@
+---
+title: AWS Bedrock
+description: Use AWS Bedrock foundation models (Mistral, Amazon Nova, Llama, Cohere) with RadarOS. Setup, factory, config, and multi-model support.
+---
+
+# AWS Bedrock
+
+Use AWS Bedrock to access a broad catalog of foundation models — Mistral, Amazon Nova, Meta Llama, Cohere, AI21, and more — through RadarOS's unified `ModelProvider` interface. All models are accessed via the Bedrock Converse API.
+
+<Info>
+For **Claude models on Bedrock**, use the dedicated [`awsClaude()`](/models/aws-claude) provider instead. It uses the native Anthropic SDK for full Claude feature support (extended thinking, document input, etc.).
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    Install the AWS Bedrock Runtime SDK:
+
+```bash
+npm install @aws-sdk/client-bedrock-runtime
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your AWS credentials via environment variables:
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_REGION="us-east-1"
+```
+
+Or use AWS default credential chain (SSO, IAM roles, EC2 instance profiles).
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { awsBedrock } from "@radaros/core";
+
+const model = awsBedrock("mistral.mistral-large-2402-v1:0");
+```
+
+<ParamField path="modelId" type="string" required>
+  The Bedrock model identifier. Find model IDs in the [AWS Bedrock model catalog](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
+</ParamField>
+
+<ParamField path="config" type="AwsBedrockConfig" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model ID | Provider | Description |
+|----------|----------|-------------|
+| `mistral.mistral-large-2402-v1:0` | Mistral | Strong general-purpose performance |
+| `mistral.mistral-small-2402-v1:0` | Mistral | Fast, cost-effective |
+| `amazon.nova-pro-v1:0` | Amazon | General-purpose Nova model |
+| `amazon.nova-lite-v1:0` | Amazon | Lightweight, low-latency |
+| `amazon.nova-micro-v1:0` | Amazon | Ultra-fast, cost-optimized |
+| `meta.llama3-1-70b-instruct-v1:0` | Meta | Llama 3.1 70B Instruct |
+| `meta.llama3-1-8b-instruct-v1:0` | Meta | Llama 3.1 8B Instruct |
+| `cohere.command-r-plus-v1:0` | Cohere | Strong RAG and tool use |
+| `cohere.command-r-v1:0` | Cohere | Fast, efficient |
+
+<Accordion title="Using other Bedrock models">
+  Pass any valid Bedrock model ID to the factory. Manage model access in the [AWS Bedrock console](https://us-east-1.console.aws.amazon.com/bedrock/home#/model-catalog). Not all models support all features — check [supported features per model](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html).
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="accessKeyId" type="string" required={false}>
+  AWS access key ID. Falls back to `AWS_ACCESS_KEY_ID` env var, then default credential chain.
+</ParamField>
+
+<ParamField path="secretAccessKey" type="string" required={false}>
+  AWS secret access key. Falls back to `AWS_SECRET_ACCESS_KEY` env var.
+</ParamField>
+
+<ParamField path="region" type="string" required={false} default="us-east-1">
+  AWS region. Falls back to `AWS_REGION` env var.
+</ParamField>
+
+<ParamField path="sessionToken" type="string" required={false}>
+  AWS session token for temporary credentials (STS, SSO). Falls back to `AWS_SESSION_TOKEN` env var.
+</ParamField>
+
+---
+
+## Authentication Methods
+
+### Method 1: Access Key + Secret (Explicit)
+
+```typescript
+const model = awsBedrock("mistral.mistral-large-2402-v1:0", {
+  accessKeyId: "AKIA...",
+  secretAccessKey: "...",
+  region: "us-east-1",
+});
+```
+
+### Method 2: Environment Variables (Recommended)
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_REGION="us-east-1"
+```
+
+```typescript
+const model = awsBedrock("mistral.mistral-large-2402-v1:0");
+// Credentials picked up from env automatically
+```
+
+### Method 3: Default Credential Chain (SSO, IAM Roles)
+
+If running on EC2, ECS, Lambda, or using `aws sso login`, credentials are resolved automatically via the AWS SDK's default credential provider chain:
+
+```typescript
+const model = awsBedrock("amazon.nova-pro-v1:0", {
+  region: "us-east-1",
+});
+// Uses IAM role, SSO session, or ~/.aws/credentials
+```
+
+### Method 4: Temporary Credentials (STS)
+
+```typescript
+const model = awsBedrock("mistral.mistral-large-2402-v1:0", {
+  accessKeyId: "ASIA...",
+  secretAccessKey: "...",
+  sessionToken: "FwoGZX...",
+  region: "us-east-1",
+});
+```
+
+---
+
+## Tool Calling
+
+Tool calling is supported via the Bedrock Converse API. Define tools with `defineTool` and they work automatically:
+
+```typescript
+import { Agent, awsBedrock, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "bedrock-assistant",
+  model: awsBedrock("mistral.mistral-large-2402-v1:0"),
+  instructions: "You are a helpful assistant with tool access.",
+  tools: [
+    defineTool({
+      name: "getWeather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 24°C, Sunny`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the weather in Mumbai?");
+console.log(result.text);
+```
+
+<Warning>
+Not all Bedrock models support tool calling. Mistral Large, Amazon Nova, Cohere Command R/R+, and Meta Llama 3.1+ support function calling. Check the [Bedrock docs](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html) for your model.
+</Warning>
+
+---
+
+## Multi-Modal Support
+
+The Bedrock Converse API supports **images** and **documents** for models that have vision capabilities (e.g., Amazon Nova).
+
+### Images
+
+```typescript
+import { Agent, awsBedrock, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: awsBedrock("amazon.nova-pro-v1:0"),
+  instructions: "Describe images in detail.",
+});
+
+const imageData = readFileSync("photo.jpg").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What's in this image?" },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+```
+
+### Documents
+
+```typescript
+const pdfData = readFileSync("report.pdf").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Summarize the key points." },
+  { type: "file", data: pdfData, mimeType: "application/pdf", filename: "report.pdf" },
+] as ContentPart[]);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, awsBedrock, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "mistral.mistral-large-2402-v1:0": { promptPer1k: 0.004, completionPer1k: 0.012 },
+  },
+});
+
+const agent = new Agent({
+  name: "bedrock-agent",
+  model: awsBedrock("mistral.mistral-large-2402-v1:0", {
+    region: "us-east-1",
+  }),
+  instructions: "You are a helpful assistant running on AWS Bedrock.",
+  tools: [
+    defineTool({
+      name: "lookup_order",
+      description: "Look up an order by ID",
+      parameters: z.object({ orderId: z.string() }),
+      execute: async ({ orderId }) => JSON.stringify({ id: orderId, status: "shipped", eta: "2026-03-01" }),
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Where is my order ORD-12345?");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## AWS Bedrock vs Direct API
+
+| Feature | Direct API (`openai()`, `anthropic()`) | `awsBedrock()` |
+|---------|---------------------------------------|----------------|
+| Auth | Provider API key | AWS IAM / credentials |
+| Billing | Provider billing | AWS billing (consolidated) |
+| VPC / Private | No | Yes (PrivateLink) |
+| Model variety | Single provider | Multi-provider catalog |
+| Claude support | Full (thinking, docs) | Use `awsClaude()` instead |
+| Compliance | Provider-dependent | SOC2, HIPAA, FedRAMP |
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AWS_ACCESS_KEY_ID` | AWS access key ID |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret access key |
+| `AWS_REGION` | AWS region (default: `us-east-1`) |
+| `AWS_SESSION_TOKEN` | Temporary session token (STS/SSO) |
+
+---
+
+## Cross-References
+
+- [AWS Claude](/models/aws-claude) — Claude models on Bedrock with full Anthropic feature support
+- [Custom Provider](/models/custom-provider) — Build your own provider for any LLM
+- [Cost Tracking](/cost/overview) — Add custom pricing for Bedrock models

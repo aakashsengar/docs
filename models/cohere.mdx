@@ -1,0 +1,200 @@
+---
+title: Cohere
+description: Use Cohere Command models with RadarOS — RAG-optimized, tool calling, and fine-tuning support.
+---
+
+# Cohere
+
+Use Cohere's **Command** models for RAG, tool calling, and enterprise workloads. Cohere excels at retrieval-augmented generation and offers fine-tuning support.
+
+<Info>
+RadarOS tries the native `cohere-ai` SDK first; if not installed, it falls back to the `openai` SDK via Cohere's [OpenAI-compatible endpoint](https://docs.cohere.com/docs/openai-compatibility).
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install (Option A — Native)">
+```bash
+npm install cohere-ai
+```
+  </Tab>
+  <Tab title="Install (Option B — OpenAI compat)">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [dashboard.cohere.com](https://dashboard.cohere.com/api-keys):
+
+```bash
+export CO_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { cohere } from "@radaros/core";
+
+const model = cohere("command-r-plus");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"command-r-plus"`, `"command-r"`, `"command-r7b-12-2024"`, `"command-light"`).
+</ParamField>
+
+<ParamField path="config" type="CohereConfig" required={false}>
+  Optional `{ apiKey? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `command-r-plus` | Flagship model, strong reasoning | RAG, complex tasks, tool calling |
+| `command-r` | Fast and capable | General tasks, moderate complexity |
+| `command-r7b-12-2024` | Small but strong | RAG, reasoning on a budget |
+| `command` | General purpose | Basic tasks |
+| `command-light` | Fastest, smallest | Simple tasks, high throughput |
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, cohere } from "@radaros/core";
+
+const agent = new Agent({
+  name: "cohere-agent",
+  model: cohere("command-r-plus"),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Summarize the key benefits of microservices architecture.");
+console.log(result.text);
+```
+
+---
+
+## RAG-Optimized Usage
+
+Cohere's Command R models are specifically designed for retrieval-augmented generation:
+
+```typescript
+import { Agent, cohere, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "rag-agent",
+  model: cohere("command-r-plus"),
+  instructions:
+    "You are a knowledge-grounded assistant. Always use the search tool to find " +
+    "relevant information before answering. Cite your sources.",
+  tools: [
+    defineTool({
+      name: "searchDocs",
+      description: "Search internal documentation",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) =>
+        JSON.stringify([
+          { title: "Deployment Guide", content: `Guide for: ${query}...`, source: "docs/deploy.md" },
+          { title: "API Reference", content: `API info for: ${query}...`, source: "docs/api.md" },
+        ]),
+    }),
+  ],
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("How do I deploy our service to production?");
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+```typescript
+import { Agent, cohere, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: cohere("command-r-plus"),
+  tools: [
+    defineTool({
+      name: "createTicket",
+      description: "Create a support ticket",
+      parameters: z.object({
+        title: z.string(),
+        priority: z.enum(["low", "medium", "high"]),
+        description: z.string(),
+      }),
+      execute: async ({ title, priority }) => `Ticket created: "${title}" [${priority}] — ID: TK-1234`,
+    }),
+  ],
+});
+
+const result = await agent.run("Create a high-priority ticket: 'API returning 500 errors on /users endpoint'");
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, cohere, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "command-r-plus": { promptPer1k: 0.0025, completionPer1k: 0.01 },
+    "command-r": { promptPer1k: 0.00015, completionPer1k: 0.0006 },
+  },
+});
+
+const agent = new Agent({
+  name: "enterprise-agent",
+  model: cohere("command-r-plus"),
+  instructions: "You are an enterprise assistant with document search capabilities.",
+  tools: [
+    defineTool({
+      name: "search",
+      description: "Search knowledge base",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Found 5 results for "${query}"`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 5,
+});
+
+const result = await agent.run("What is our company's vacation policy?");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CO_API_KEY` | Cohere API key |
+
+---
+
+## Cross-References
+
+- [Azure AI Foundry](/models/azure-foundry) — Cohere models on Azure
+- [AWS Bedrock](/models/aws-bedrock) — Cohere models on AWS
+- [Tools](/agents/tools) — Tool calling guide
+- [Knowledge Base](/knowledge/overview) — RAG with vector search

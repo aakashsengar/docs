@@ -7,7 +7,7 @@ description: Model-agnostic design, ModelProvider interface, factory functions, 
 
 ## Model Agnosticism
 
-RadarOS is **model-agnostic**. You can use OpenAI, Anthropic, Google Gemini, Vertex AI, Ollama, or any custom provider through a unified `ModelProvider` interface. Switch models with a single line change—no refactoring required.
+RadarOS is **model-agnostic**. You can use OpenAI, Anthropic, Google Gemini, Vertex AI, AWS Bedrock, Azure OpenAI, Azure AI Foundry, DeepSeek, Mistral, xAI (Grok), Perplexity, Cohere, Meta (Llama), Vercel v0, Ollama, or any custom provider through a unified `ModelProvider` interface. Switch models with a single line change—no refactoring required.
 
 <CardGroup cols={2}>
   <Card title="Unified Interface" icon="layer-group">
@@ -62,13 +62,28 @@ Use factory functions to create model instances. Each returns a `ModelProvider` 
 | `google(modelId, config?)` | Google Gemini | `ModelProvider` | `{ apiKey? }` |
 | `vertex(modelId, config?)` | Google Vertex AI | `ModelProvider` | `{ project?, location?, credentials? }` |
 | `ollama(modelId, config?)` | Ollama (local) | `ModelProvider` | `{ host? }` (default: `http://localhost:11434`) |
+| `awsBedrock(modelId, config?)` | AWS Bedrock | `ModelProvider` | `{ accessKeyId?, secretAccessKey?, region? }` |
+| `awsClaude(modelId, config?)` | AWS Claude (Bedrock) | `ModelProvider` | `{ awsAccessKey?, awsSecretKey?, awsRegion? }` |
+| `azureOpenai(modelId, config?)` | Azure OpenAI | `ModelProvider` | `{ apiKey?, endpoint?, deployment?, apiVersion? }` |
+| `azureFoundry(modelId, config?)` | Azure AI Foundry | `ModelProvider` | `{ apiKey?, endpoint? }` |
+| `deepseek(modelId, config?)` | DeepSeek | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `mistral(modelId, config?)` | Mistral | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `xai(modelId, config?)` | xAI (Grok) | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `perplexity(modelId, config?)` | Perplexity | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `cohere(modelId, config?)` | Cohere | `ModelProvider` | `{ apiKey? }` |
+| `meta(modelId, config?)` | Meta (Llama) | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `vercel(modelId, config?)` | Vercel v0 | `ModelProvider` | `{ apiKey?, baseURL? }` |
 | `openaiRealtime(modelId?, config?)` | OpenAI Realtime | `RealtimeProvider` | `{ apiKey?, baseURL? }` |
 | `googleLive(modelId?, config?)` | Gemini Live | `RealtimeProvider` | `{ apiKey? }` |
 
 ### Switching Models in One Line
 
 ```typescript
-import { Agent, openai, anthropic, google, vertex, ollama } from "@radaros/core";
+import {
+  Agent, openai, anthropic, google, vertex, ollama,
+  awsBedrock, awsClaude, azureOpenai, azureFoundry,
+  deepseek, mistral, xai, perplexity, cohere, meta, vercel,
+} from "@radaros/core";
 
 // OpenAI
 const model = openai("gpt-4o");
@@ -84,6 +99,39 @@ const model = vertex("gemini-2.5-flash", { project: "my-project" });
 
 // Local Ollama (no API key)
 const model = ollama("llama3.1");
+
+// AWS Bedrock (Mistral, Nova, Llama, etc.)
+const model = awsBedrock("mistral.mistral-large-2402-v1:0");
+
+// AWS Claude (Claude via Bedrock)
+const model = awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0");
+
+// Azure OpenAI (GPT on Azure)
+const model = azureOpenai("gpt-4o");
+
+// Azure AI Foundry (Phi, Llama, Mistral on Azure)
+const model = azureFoundry("Phi-4");
+
+// DeepSeek (reasoning + chat)
+const model = deepseek("deepseek-chat");
+
+// Mistral (code, vision, reasoning)
+const model = mistral("mistral-large-latest");
+
+// xAI Grok
+const model = xai("grok-3");
+
+// Perplexity (built-in web search)
+const model = perplexity("sonar-pro");
+
+// Cohere (RAG-optimized)
+const model = cohere("command-r-plus");
+
+// Meta Llama (via Llama API)
+const model = meta("Llama-4-Scout-17B-16E-Instruct");
+
+// Vercel v0 (web dev code gen)
+const model = vercel("v0-1.0-md");
 
 const agent = new Agent({
   name: "Assistant",
@@ -172,7 +220,43 @@ const response = await model.generate(messages, {
   <Card title="Ollama" icon="server" href="/models/ollama">
     Local models: Llama, CodeLlama, Mistral.
   </Card>
+  <Card title="AWS Bedrock" icon="aws" href="/models/aws-bedrock">
+    Mistral, Nova, Llama, Cohere via AWS.
+  </Card>
+  <Card title="AWS Claude" icon="aws" href="/models/aws-claude">
+    Claude on Bedrock with AWS auth.
+  </Card>
+  <Card title="Azure OpenAI" icon="microsoft" href="/models/azure-openai">
+    GPT-4o, o-series on Azure with enterprise compliance.
+  </Card>
+  <Card title="Azure AI Foundry" icon="microsoft" href="/models/azure-foundry">
+    Phi, Llama, Mistral, Cohere on Azure.
+  </Card>
+  <Card title="DeepSeek" icon="brain" href="/models/deepseek">
+    Reasoning and chat models with chain-of-thought.
+  </Card>
+  <Card title="Mistral" icon="wind" href="/models/mistral">
+    Code generation, vision (Pixtral), reasoning.
+  </Card>
+  <Card title="xAI (Grok)" icon="bolt" href="/models/xai">
+    Grok models with live web search.
+  </Card>
+  <Card title="Perplexity" icon="magnifying-glass" href="/models/perplexity">
+    Search-grounded answers with citations.
+  </Card>
+  <Card title="Cohere" icon="database" href="/models/cohere">
+    RAG-optimized Command models, fine-tuning.
+  </Card>
+  <Card title="Meta (Llama)" icon="meta" href="/models/meta">
+    Llama 3.3, Llama 4 via the Llama API.
+  </Card>
+  <Card title="Vercel v0" icon="code" href="/models/vercel">
+    Web development code generation.
+  </Card>
+  <Card title="OpenAI-Compatible" icon="plug" href="/models/openai-like">
+    Together, Groq, Fireworks, OpenRouter, NVIDIA, and more.
+  </Card>
   <Card title="Custom Provider" icon="puzzle-piece" href="/models/custom-provider">
-    Implement your own ModelProvider.
+    Implement your own ModelProvider from scratch.
   </Card>
 </CardGroup>

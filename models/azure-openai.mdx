@@ -1,0 +1,258 @@
+---
+title: Azure OpenAI
+description: Use OpenAI models (GPT-4o, o-series) through Azure with RadarOS. Enterprise-grade with Azure AD authentication.
+---
+
+# Azure OpenAI
+
+Use OpenAI's GPT-4o, GPT-4o-mini, o-series, and other models through **Azure OpenAI Service**. Same OpenAI capabilities, but authenticated with Azure credentials, billed through Azure, and deployed in your own Azure subscription with enterprise compliance.
+
+<Info>
+`azureOpenai()` uses the `openai` SDK's built-in `AzureOpenAI` class. All OpenAI features — tool calling, streaming, JSON mode, vision, reasoning — work identically to the direct [`openai()`](/models/openai) provider.
+</Info>
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+    The Azure OpenAI provider uses the same OpenAI SDK:
+
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Set your Azure OpenAI credentials:
+
+```bash
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com"
+export AZURE_OPENAI_DEPLOYMENT="gpt-4o"  # optional, can use modelId instead
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { azureOpenai } from "@radaros/core";
+
+const model = azureOpenai("gpt-4o");
+```
+
+<ParamField path="modelId" type="string" required>
+  The model or deployment name. This is passed as the `model` parameter to the API.
+</ParamField>
+
+<ParamField path="config" type="AzureOpenAIConfig" required={false}>
+  Optional configuration. See Config below.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description |
+|-------|-------------|
+| `gpt-4o` | Latest flagship model. Vision, audio, tool calling. |
+| `gpt-4o-mini` | Smaller, faster, cost-effective. |
+| `gpt-4-turbo` | High capability, larger context. |
+| `o1-preview` | Reasoning-optimized model. |
+| `o3-mini` | Fast reasoning model. |
+
+<Accordion title="Deploying models on Azure">
+  You must create a deployment for each model in the [Azure AI Studio portal](https://oai.azure.com). The deployment name becomes the `modelId` (or you can use `config.deployment`). See [Azure OpenAI docs](https://learn.microsoft.com/azure/ai-services/openai/overview) for setup instructions.
+</Accordion>
+
+---
+
+## Config
+
+<ParamField path="apiKey" type="string" required={false}>
+  Azure OpenAI API key. Falls back to `AZURE_OPENAI_API_KEY` env var.
+</ParamField>
+
+<ParamField path="endpoint" type="string" required={false}>
+  Azure OpenAI endpoint URL. Falls back to `AZURE_OPENAI_ENDPOINT` env var. Format: `https://<resource-name>.openai.azure.com`
+</ParamField>
+
+<ParamField path="deployment" type="string" required={false}>
+  Deployment name. Falls back to `AZURE_OPENAI_DEPLOYMENT` env var. If not set, `modelId` is used.
+</ParamField>
+
+<ParamField path="apiVersion" type="string" required={false} default="2024-10-21">
+  Azure API version. Falls back to `AZURE_OPENAI_API_VERSION` env var.
+</ParamField>
+
+---
+
+## Authentication Methods
+
+### Method 1: API Key (Recommended)
+
+```bash
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_ENDPOINT="https://my-resource.openai.azure.com"
+```
+
+```typescript
+const model = azureOpenai("gpt-4o");
+```
+
+### Method 2: Explicit Config
+
+```typescript
+const model = azureOpenai("gpt-4o", {
+  apiKey: "...",
+  endpoint: "https://my-resource.openai.azure.com",
+  deployment: "my-gpt4o-deployment",
+  apiVersion: "2024-10-21",
+});
+```
+
+---
+
+## Tool Calling
+
+Tool calling works identically to the direct OpenAI provider:
+
+```typescript
+import { Agent, azureOpenai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "azure-assistant",
+  model: azureOpenai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  tools: [
+    defineTool({
+      name: "getWeather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 22°C, Partly Cloudy`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the weather in London?");
+console.log(result.text);
+```
+
+---
+
+## Reasoning Models (o-series)
+
+Azure OpenAI supports the o-series reasoning models with the same `reasoning` config:
+
+```typescript
+const agent = new Agent({
+  name: "analyst",
+  model: azureOpenai("o3-mini"),
+  instructions: "Solve problems step by step.",
+  reasoning: {
+    effort: "high",
+  },
+});
+
+const result = await agent.run("Calculate the compound interest on $10,000 at 5% for 10 years, compounded monthly.");
+console.log(result.text);
+```
+
+---
+
+## Multi-Modal Support
+
+Azure OpenAI GPT-4o supports images, audio, and files — same as the direct OpenAI provider:
+
+```typescript
+import { Agent, azureOpenai, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: azureOpenai("gpt-4o"),
+  instructions: "Analyze images and documents.",
+});
+
+const imageData = readFileSync("chart.png").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What trends does this chart show?" },
+  { type: "image", data: imageData, mimeType: "image/png" },
+] as ContentPart[]);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, azureOpenai, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "gpt-4o": { promptPer1k: 0.0025, completionPer1k: 0.01 },
+  },
+});
+
+const agent = new Agent({
+  name: "enterprise-assistant",
+  model: azureOpenai("gpt-4o", {
+    endpoint: "https://my-company.openai.azure.com",
+    apiVersion: "2024-10-21",
+  }),
+  instructions: "You are an enterprise assistant for internal use.",
+  tools: [
+    defineTool({
+      name: "searchDocs",
+      description: "Search internal documentation",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Found 3 results for "${query}"...`,
+    }),
+  ],
+  costTracker,
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Find the onboarding docs for new engineers");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+## Azure OpenAI vs Direct OpenAI
+
+| Feature | `openai()` (Direct) | `azureOpenai()` (Azure) |
+|---------|---------------------|------------------------|
+| Auth | OpenAI API key | Azure API key / Azure AD |
+| Billing | OpenAI billing | Azure billing (consolidated) |
+| Data residency | OpenAI servers | Your Azure region |
+| VPC / Private | No | Yes (Private Endpoints) |
+| Compliance | SOC2 | SOC2, HIPAA, FedRAMP, GDPR |
+| Prompt Caching | Yes | Yes |
+| Models | All OpenAI models | Models you deploy |
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
+| `AZURE_OPENAI_DEPLOYMENT` | Default deployment name |
+| `AZURE_OPENAI_API_VERSION` | API version (default: `2024-10-21`) |
+
+---
+
+## Cross-References
+
+- [OpenAI (Direct)](/models/openai) — Direct OpenAI API with API key auth
+- [Azure AI Foundry](/models/azure-foundry) — Open-source models (Phi, Llama, Mistral) on Azure
+- [Reasoning](/agents/reasoning) — O-series reasoning configuration
+- [Multi-Modal](/agents/multimodal) — Provider support matrix

@@ -1,0 +1,197 @@
+---
+title: Meta (Llama)
+description: Use Meta Llama models with RadarOS — powerful open models via the Llama API.
+---
+
+# Meta (Llama)
+
+Use Meta's **Llama** models via the official [Llama API](https://llama.developer.meta.com). Access Llama 3.3, Llama 4 Scout, Llama 4 Maverick, and more through Meta's hosted inference endpoint.
+
+The Llama API exposes an **OpenAI-compatible** interface.
+
+---
+
+## Setup
+
+<Tabs>
+  <Tab title="Install">
+```bash
+npm install openai
+```
+  </Tab>
+  <Tab title="Environment">
+    Get your API key from [llama.developer.meta.com](https://llama.developer.meta.com):
+
+```bash
+export LLAMA_API_KEY="..."
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Factory
+
+```typescript
+import { meta } from "@radaros/core";
+
+const model = meta("Llama-4-Scout-17B-16E-Instruct");
+```
+
+<ParamField path="modelId" type="string" required>
+  Model ID (e.g., `"Llama-3.3-70B-Instruct"`, `"Llama-4-Scout-17B-16E-Instruct"`, `"Llama-4-Maverick-17B-128E-Instruct-FP8"`).
+</ParamField>
+
+<ParamField path="config" type="MetaLlamaConfig" required={false}>
+  Optional `{ apiKey?, baseURL? }`.
+</ParamField>
+
+---
+
+## Supported Models
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `Llama-4-Maverick-17B-128E-Instruct-FP8` | Latest flagship, 128 experts MoE | Maximum capability |
+| `Llama-4-Scout-17B-16E-Instruct` | Latest scout model, 16 experts | Great balance of speed and quality |
+| `Llama-3.3-70B-Instruct` | Proven large model | Complex reasoning, tool calling |
+| `Llama-3.1-8B-Instruct` | Fast, efficient | Simple tasks, high throughput |
+
+See the full list at [llama.developer.meta.com/docs/models](https://llama.developer.meta.com/docs/models).
+
+---
+
+## Basic Example
+
+```typescript
+import { Agent, meta } from "@radaros/core";
+
+const agent = new Agent({
+  name: "llama-agent",
+  model: meta("Llama-4-Scout-17B-16E-Instruct"),
+  instructions: "You are a helpful, harmless, and honest assistant.",
+});
+
+const result = await agent.run("Explain the difference between TCP and UDP.");
+console.log(result.text);
+```
+
+---
+
+## Tool Calling
+
+Llama 3.1+ and Llama 4 models support function calling:
+
+```typescript
+import { Agent, meta, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: meta("Llama-3.3-70B-Instruct"),
+  tools: [
+    defineTool({
+      name: "calculate",
+      description: "Evaluate a math expression",
+      parameters: z.object({ expression: z.string() }),
+      execute: async ({ expression }) => {
+        try { return String(Function(`return ${expression}`)()); }
+        catch { return "Error evaluating expression"; }
+      },
+    }),
+  ],
+});
+
+const result = await agent.run("What is 2^16 + 3^10?");
+console.log(result.text);
+```
+
+---
+
+## Multi-Modal (Llama 4)
+
+Llama 4 models support image input:
+
+```typescript
+import { Agent, meta, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: meta("Llama-4-Scout-17B-16E-Instruct"),
+  instructions: "Analyze images carefully.",
+});
+
+const imageData = readFileSync("photo.jpg").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Describe this image in detail." },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+console.log(result.text);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, meta, CostTracker, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "Llama-3.3-70B-Instruct": { promptPer1k: 0.00099, completionPer1k: 0.00099 },
+    "Llama-4-Scout-17B-16E-Instruct": { promptPer1k: 0.00015, completionPer1k: 0.0006 },
+  },
+});
+
+const agent = new Agent({
+  name: "coding-assistant",
+  model: meta("Llama-3.3-70B-Instruct"),
+  instructions: "You are a senior software engineer. Help with code reviews and architecture.",
+  tools: [
+    defineTool({
+      name: "readFile",
+      description: "Read a file's contents",
+      parameters: z.object({ path: z.string() }),
+      execute: async ({ path }) => `// ${path}\nexport function main() { console.log("hello"); }`,
+    }),
+  ],
+  costTracker,
+});
+
+const result = await agent.run("Review the main function in index.ts");
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(6)}`);
+```
+
+---
+
+## Running Llama Locally
+
+You can also run Llama models locally via Ollama:
+
+```typescript
+import { ollama } from "@radaros/core";
+
+const model = ollama("llama3.1:70b");
+```
+
+See [Ollama](/models/ollama) for local setup instructions.
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `LLAMA_API_KEY` | Llama API key |
+
+---
+
+## Cross-References
+
+- [Ollama](/models/ollama) — Run Llama models locally
+- [AWS Bedrock](/models/aws-bedrock) — Llama models on AWS
+- [Azure AI Foundry](/models/azure-foundry) — Llama models on Azure
+- [Tools](/agents/tools) — Tool calling guide
