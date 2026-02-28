@@ -34,7 +34,10 @@
               "agents/hooks-and-guardrails",
               "agents/sandbox",
               "agents/approval",
-              "agents/logging"
+              "agents/logging",
+              "agents/memory",
+              "agents/sessions",
+              "agents/user-memory"
             ]
           },
           {
