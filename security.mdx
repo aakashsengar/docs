@@ -1,0 +1,211 @@
+---
+title: Security
+description: Security hardening, best practices, and built-in protections across RadarOS.
+---
+
+# Security
+
+RadarOS includes built-in protections against common security threats when building AI agent systems. This page covers the security measures in place and best practices for deploying agents safely.
+
+---
+
+## Overview
+
+AI agent frameworks face unique security challenges: agents execute tools, run shell commands, query databases, navigate browsers, and process untrusted input from users and LLMs. RadarOS hardens each of these surfaces.
+
+| Category | Protection | Package |
+|----------|-----------|---------|
+| Command Injection | Shell metacharacter rejection, `execFileSync` | `@radaros/core`, `@radaros/edge` |
+| SQL Injection | Parameterized queries for schema introspection | `@radaros/core` |
+| XSS | HTML sanitization with DOMPurify | Examples |
+| Path Traversal | Filename sanitization on file uploads | `@radaros/transport` |
+| SSRF / URL Injection | URL scheme validation (http/https only) | `@radaros/browser` |
+| DoS | Rate limiting, JSON body size limits, memory cleanup | `@radaros/transport` |
+| Info Leakage | Generic error messages in production | `@radaros/transport` |
+| Auth Bypass | Admin route auth enforcement in production | `@radaros/transport` |
+| Prototype Pollution | Filtered `Object.assign` in workflows | `@radaros/core` |
+| TLS | HTTPS errors not silently ignored by default | `@radaros/browser` |
+| Unhandled Errors | Default error handlers on EventEmitters | `@radaros/core` |
+
+---
+
+## Command Injection Prevention
+
+### Shell Toolkit
+
+The `ShellToolkit` validates all commands before execution. In addition to the optional `allowedCommands` allowlist, the toolkit **rejects shell metacharacters** that could be used for injection:
+
+```
+; | & $ ( ) { } \ < > ` (backtick) newlines
+```
+
+If a command contains any of these characters, it is rejected before execution — even if it appears in the allowlist.
+
+```typescript
+import { ShellToolkit } from "@radaros/core";
+
+const shell = new ShellToolkit({
+  allowedCommands: ["ls", "cat", "grep"],
+  timeout: 10_000,
+});
+```
+
+<Warning>
+Always set `allowedCommands` in production. Without it, an agent can run any command (subject to metacharacter validation).
+</Warning>
+
+### Edge Camera & Ollama
+
+The `@radaros/edge` package uses `execFileSync` instead of `execSync` for all system commands (`libcamera-still`, `libcamera-vid`, `ollama pull`). This prevents shell interpretation of arguments — model names and file paths are passed as array arguments, not interpolated into shell strings.
+
+---
+
+## SQL Injection Prevention
+
+The `SqlToolkit` uses **parameterized queries** for PostgreSQL schema introspection. Table names are passed as bind parameters (`$1`) rather than string interpolation:
+
+```sql
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = $1 AND table_schema = 'public'
+```
+
+Table name validation also rejects names that don't match `^[a-zA-Z_]\w*$`.
+
+<Info>
+Read-only mode is enabled by default. Only SELECT, SHOW, DESCRIBE, EXPLAIN, PRAGMA, and WITH queries are allowed.
+</Info>
+
+---
+
+## Path Traversal Protection
+
+File uploads via `@radaros/transport` sanitize filenames by stripping path components and special characters. This prevents attackers from using names like `../../etc/passwd` or `..%2F..%2Fetc%2Fpasswd` to write files outside the intended directory.
+
+---
+
+## URL Validation
+
+The `BrowserProvider` in `@radaros/browser` validates URLs before navigation. Only `http://` and `https://` schemes are allowed — `file://`, `javascript:`, and `data:` URLs are rejected. This prevents local file access and code injection through the browser.
+
+```typescript
+// Allowed
+await browser.navigate("https://example.com");
+
+// Rejected — throws error
+await browser.navigate("file:///etc/passwd");
+await browser.navigate("javascript:alert(1)");
+```
+
+---
+
+## TLS / HTTPS
+
+The `@radaros/browser` stealth configuration defaults `ignoreHTTPSErrors` to `false`. This means TLS certificate errors are not silently bypassed — the browser will reject connections to sites with invalid certificates unless explicitly configured otherwise.
+
+---
+
+## Transport Security
+
+### Rate Limiting
+
+`createAgentRouter()` includes a built-in IP-based rate limiter with periodic cleanup to prevent unbounded memory growth. The rate limiter's internal `Map` is pruned every 60 seconds to remove stale entries.
+
+### Error Handling
+
+The `errorHandler` middleware behaves differently in production vs. development:
+
+- **Production** (`NODE_ENV=production`): 5xx errors return a generic `"Internal server error"` message. Stack traces and internal details are never exposed.
+- **Development**: Full error messages are returned for debugging.
+
+### JSON Body Limits
+
+The A2A (Agent-to-Agent) server applies a `1MB` JSON body size limit via `express.json({ limit: "1mb" })` to prevent large-payload DoS attacks.
+
+### Admin Route Auth
+
+In production, mounting admin routes (`/admin/*`) without authentication middleware throws an error at startup — not just a warning. This prevents accidentally exposing admin APIs without auth.
+
+```typescript
+const router = createAgentRouter({
+  admin: {
+    middleware: [authMiddleware],
+  },
+  middleware: [authMiddleware],
+});
+```
+
+### Request Logging
+
+The `requestLogger` middleware sanitizes `req.path` to prevent log injection attacks. Control characters and newlines in URL paths are stripped before logging.
+
+---
+
+## Voice Gateway Validation
+
+The Socket.IO voice gateway validates all incoming data:
+
+- **Audio data**: Must be a string, with a maximum size limit, and is wrapped in `try/catch` during `Buffer.from()` decoding.
+- **Text data**: Must be a string with a maximum length limit.
+- **Session cleanup**: `session.close()` errors are caught and logged instead of crashing the server.
+
+---
+
+## Prototype Pollution Protection
+
+The workflow `StepRunner` filters dangerous keys when merging step results into shared state. The keys `__proto__`, `constructor`, and `prototype` are excluded from `Object.assign` operations to prevent prototype pollution attacks via crafted workflow step outputs.
+
+---
+
+## Unhandled Error Safety
+
+### EventBus
+
+The core `EventBus` registers a default `'error'` handler on its underlying `EventEmitter`. Without this, a single unhandled `'error'` event would crash the Node.js process.
+
+### VoiceAgent
+
+`VoiceSessionImpl` (which extends `EventEmitter`) also registers a default `'error'` handler to prevent process crashes during voice sessions.
+
+### Browser Agent
+
+The `BrowserAgent` attaches `.catch()` handlers to background memory operations (`memoryManager.afterRun`) to prevent unhandled promise rejections.
+
+### Queue Workers
+
+The `AgentWorker.stop()` method logs errors during shutdown instead of silently swallowing them, and `JobProducer.close()` uses `Promise.allSettled` to ensure all cleanup completes even if individual operations fail.
+
+### Webhook Manager
+
+The `WebhookManager`'s batch flush timer wraps the flush call in `try/catch` to prevent timer chain breakage from unhandled exceptions.
+
+---
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use allowedCommands" icon="terminal">
+    Always restrict shell commands in production with an explicit allowlist.
+  </Card>
+  <Card title="Enable auth middleware" icon="lock">
+    Pass authentication middleware to both `createAgentRouter()` and admin routes.
+  </Card>
+  <Card title="Set NODE_ENV" icon="gear">
+    Set `NODE_ENV=production` in production to enable error sanitization and admin auth enforcement.
+  </Card>
+  <Card title="Limit file uploads" icon="upload">
+    Use `allowedMimeTypes` and `maxFileSize` to restrict what files agents can receive.
+  </Card>
+  <Card title="Use read-only SQL" icon="database">
+    Keep `readOnly: true` (the default) on `SqlToolkit` unless write access is specifically needed.
+  </Card>
+  <Card title="Validate URLs" icon="globe">
+    When building custom browser tools, validate URL schemes before navigation.
+  </Card>
+  <Card title="Sanitize HTML" icon="shield">
+    Use DOMPurify or equivalent when rendering LLM output as HTML in browser UIs.
+  </Card>
+  <Card title="Rotate API keys" icon="key">
+    Use per-request API key overrides for multi-tenant apps instead of sharing a single key.
+  </Card>
+</CardGroup>

@@ -61,6 +61,19 @@ const result = await agent.run("How many TypeScript files are in the src directo
 |------|-------------|
 | `shell_exec` | Execute a shell command. Returns stdout, stderr, and exit code. |
 
+---
+
+## Security
+
+The Shell toolkit includes built-in protections against command injection:
+
+- **Metacharacter rejection**: Commands containing shell metacharacters (`;`, `|`, `&`, `` ` ``, `$`, `(`, `)`, `{`, `}`, `\`, `<`, `>`, newlines) are automatically rejected before execution — even if they pass the allowlist check.
+- **Allowlist enforcement**: When `allowedCommands` is set, only commands starting with an allowed prefix are permitted.
+
+These protections prevent an LLM from chaining commands, piping to other processes, or using shell expansion in arguments.
+
 <Warning>
-  Use `allowedCommands` in production to restrict which commands agents can run.
+  Always set `allowedCommands` in production to restrict which commands agents can run. Without it, the agent can execute any single command (subject to metacharacter validation).
 </Warning>
+
+See the [Security](/security) page for a full overview of security hardening across RadarOS.

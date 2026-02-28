@@ -80,6 +80,18 @@ npm install pg
 npm install mysql2
 ```
 
+---
+
+## Security
+
+The SQL toolkit includes built-in protections:
+
+- **Read-only mode** (default): Only `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `PRAGMA`, and `WITH` queries are permitted.
+- **Parameterized queries**: Schema introspection (`sql_describe`) uses parameterized queries (`$1` bind parameters) for PostgreSQL to prevent SQL injection.
+- **Table name validation**: Table names are validated against `^[a-zA-Z_]\w*$` to reject injection attempts.
+
 <Warning>
   Read-only mode is enabled by default. Set `readOnly: false` only if your agent needs to write data.
 </Warning>
+
+See the [Security](/security) page for a full overview of security hardening across RadarOS.

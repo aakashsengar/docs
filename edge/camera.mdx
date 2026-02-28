@@ -68,6 +68,12 @@ const agent = new Agent({
 
 ---
 
+## Security
+
+All camera commands use `execFileSync` instead of `execSync`. Arguments (resolution, output path, duration) are passed as array parameters — never interpolated into shell strings. This prevents command injection through crafted filenames or parameters.
+
+---
+
 ## Prerequisites
 
 Make sure `libcamera-apps` is installed on your Pi:

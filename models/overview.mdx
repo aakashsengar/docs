@@ -69,7 +69,7 @@ Use factory functions to create model instances. Each returns a `ModelProvider` 
 | `deepseek(modelId, config?)` | DeepSeek | `ModelProvider` | `{ apiKey?, baseURL? }` |
 | `mistral(modelId, config?)` | Mistral | `ModelProvider` | `{ apiKey?, baseURL? }` |
 | `xai(modelId, config?)` | xAI (Grok) | `ModelProvider` | `{ apiKey?, baseURL? }` |
-| `perplexity(modelId, config?)` | Perplexity | `ModelProvider` | `{ apiKey?, baseURL? }` |
+| `perplexity(modelId, config?)` | Perplexity | `ModelProvider` | `{ apiKey?, baseURL?, search? }` |
 | `cohere(modelId, config?)` | Cohere | `ModelProvider` | `{ apiKey? }` |
 | `meta(modelId, config?)` | Meta (Llama) | `ModelProvider` | `{ apiKey?, baseURL? }` |
 | `vercel(modelId, config?)` | Vercel v0 | `ModelProvider` | `{ apiKey?, baseURL? }` |
@@ -199,6 +199,30 @@ const response = await model.generate(messages, {
   responseFormat: "json",
 });
 ```
+
+---
+
+## SDK Implementation
+
+Each provider uses the best available SDK for its API. Some providers support a **dual-mode** pattern: they try to load the native SDK first for full feature access, and fall back to the `openai` SDK (via the provider's OpenAI-compatible endpoint) if the native SDK is not installed.
+
+| Provider | Native SDK | Fallback | Notes |
+|----------|-----------|----------|-------|
+| OpenAI | `openai` | — | Direct |
+| Anthropic | `@anthropic-ai/sdk` | — | Direct |
+| Google / Vertex | `@google/genai` | — | Direct |
+| Ollama | `ollama` | — | Direct |
+| AWS Bedrock | `@aws-sdk/client-bedrock-runtime` | — | Converse API |
+| AWS Claude | `@anthropic-ai/bedrock-sdk` | — | Anthropic SDK + AWS auth |
+| Mistral | `@mistralai/mistralai` | `openai` | Dual-mode |
+| Cohere | `cohere-ai` | `openai` | Dual-mode |
+| Perplexity | `@perplexity-ai/perplexity_ai` | `openai` | Dual-mode; native unlocks search options & citations |
+| xAI, DeepSeek, Meta, Vercel | `openai` | — | OpenAI-compatible APIs |
+| Azure OpenAI, Azure Foundry | `openai` | — | OpenAI-compatible with Azure auth |
+
+<Info>
+For dual-mode providers, install the native SDK to access provider-specific features (e.g., Perplexity search filtering, Cohere RAG connectors). If you only need basic chat completions, the `openai` fallback works fine.
+</Info>
 
 ---
 

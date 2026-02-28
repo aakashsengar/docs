@@ -519,6 +519,22 @@ socket.emit("browser.stop");
 
 ---
 
+## Security
+
+### URL Validation
+
+The `BrowserProvider` validates URLs before navigation. Only `http://` and `https://` schemes are allowed — `file://`, `javascript:`, and `data:` URLs are rejected to prevent local file access and code injection.
+
+### TLS Defaults
+
+Stealth mode defaults `ignoreHTTPSErrors` to `false`. This means TLS certificate errors are not silently bypassed unless you explicitly configure `ignoreHTTPSErrors: true` in the `StealthConfig`. This prevents man-in-the-middle attacks on production deployments.
+
+### Memory Safety
+
+Background memory operations (`memoryManager.afterRun`) include `.catch()` handlers to prevent unhandled promise rejections from crashing the process.
+
+---
+
 ## Loop Detection
 
 The agent detects when it's stuck repeating the same action:

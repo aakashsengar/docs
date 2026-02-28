@@ -144,9 +144,11 @@ This creates the following endpoints:
   Named tools exposed via `GET /tools`. Merged with toolkit tools (explicit entries take precedence).
 </ParamField>
 
-<ParamField body="admin" type="boolean | { mcpManager?: MCPManager }">
+<ParamField body="admin" type="boolean | { mcpManager?: MCPManager; middleware?: any[] }">
   Enable admin routes under `/admin` for managing MCP servers and the toolkit catalog at runtime.
-  Pass `true` to use defaults, or provide a shared `MCPManager` instance. See [MCP Admin](/mcp/admin).
+  Pass `true` to use defaults, or provide a shared `MCPManager` instance and authentication middleware. See [MCP Admin](/mcp/admin).
+
+  In production, admin routes **require** authentication middleware — the server will throw an error at startup if none is provided.
 </ParamField>
 
 ## Request Format
@@ -363,3 +365,40 @@ The `errorHandler` middleware catches errors and returns structured JSON respons
   "error": "Agent \"unknown\" not found"
 }
 ```
+
+<Info>
+In production (`NODE_ENV=production`), 5xx errors return a generic `"Internal server error"` message. Stack traces and internal details are never exposed to clients.
+</Info>
+
+---
+
+## Security
+
+RadarOS includes several built-in security measures for the Express transport layer:
+
+### Rate Limiting
+
+`createAgentRouter()` includes a built-in IP-based rate limiter. The rate limiter's internal state is periodically cleaned (every 60 seconds) to prevent unbounded memory growth from large numbers of unique IPs.
+
+### Admin Route Authentication
+
+In production (`NODE_ENV=production`), mounting admin routes without authentication middleware will throw an error at startup — not just a warning. Always pass auth middleware when enabling admin routes:
+
+```typescript
+const router = createAgentRouter({
+  admin: {
+    middleware: [authMiddleware],
+  },
+  middleware: [authMiddleware],
+});
+```
+
+### Request Logging
+
+The `requestLogger` middleware sanitizes URL paths to prevent log injection. Control characters and newlines are stripped before logging.
+
+### JSON Body Limits
+
+The A2A server applies a 1MB JSON body size limit to prevent large-payload DoS attacks.
+
+See the [Security](/security) page for a full overview of all security protections.

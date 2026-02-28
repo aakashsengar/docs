@@ -312,6 +312,16 @@ createVoiceGateway({
 });
 ```
 
+## Voice Gateway Security
+
+The voice gateway validates all incoming data to prevent abuse:
+
+- **Audio data** (`voice.audio`): Must be a string with a maximum size limit. `Buffer.from()` decoding is wrapped in `try/catch` to handle malformed base64 data.
+- **Text data** (`voice.text`): Must be a string with a maximum length limit.
+- **Session cleanup**: `session.close()` errors in `voice.stop` are caught and logged instead of crashing the server.
+
+---
+
 ## Browser Gateway
 
 For **live browser agent observation** over Socket.IO, see the [Browser Agents](/browser/overview) docs. The `createBrowserGateway()` function streams screenshots, actions, and step events from `BrowserAgent` runs to connected clients.

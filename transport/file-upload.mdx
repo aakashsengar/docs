@@ -143,6 +143,16 @@ pnpm add multer
 
 ---
 
+## Security
+
+Uploaded filenames are automatically sanitized to prevent **path traversal attacks**. Path components (`/`, `\`, `..`) and special characters are stripped from `file.originalname` before processing. This prevents attackers from using filenames like `../../etc/passwd` to write files outside the intended upload directory.
+
+<Info>
+Use `allowedMimeTypes` to restrict which file types agents can receive. This is especially important for public-facing APIs.
+</Info>
+
+---
+
 ## Full Example
 
 ```typescript

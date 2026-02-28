@@ -1,23 +1,39 @@
 ---
 title: Perplexity
-description: Use Perplexity models with built-in web search in RadarOS agents.
+description: Use Perplexity models with built-in web search, citations, and domain filtering in RadarOS agents.
 ---
 
 # Perplexity
 
 Use Perplexity's models for **research and Q&A with built-in web search**. Perplexity models (Sonar) automatically search the web and provide grounded, cited answers — no separate search tool needed.
 
-Perplexity exposes an **OpenAI-compatible API**.
+RadarOS supports **two modes** for the Perplexity provider:
+
+| Mode | SDK | Search Options | Citations |
+|------|-----|---------------|-----------|
+| **Native** (recommended) | `@perplexity-ai/perplexity_ai` | Full control (domain filter, recency, academic mode) | Typed in `raw` response |
+| **OpenAI-compat** (fallback) | `openai` | Basic only | Not available |
+
+The provider automatically selects native mode when the Perplexity SDK is installed, falling back to the OpenAI SDK otherwise.
 
 ---
 
 ## Setup
 
 <Tabs>
-  <Tab title="Install">
+  <Tab title="Native SDK (recommended)">
+```bash
+npm install @perplexity-ai/perplexity_ai
+```
+
+The native SDK unlocks search-specific parameters and typed citation responses.
+  </Tab>
+  <Tab title="OpenAI-compat (fallback)">
 ```bash
 npm install openai
 ```
+
+Uses the OpenAI SDK pointed at Perplexity's OpenAI-compatible endpoint. Basic chat works, but search options and citations are not available.
   </Tab>
   <Tab title="Environment">
     Get your API key from [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api):
@@ -39,12 +55,20 @@ const model = perplexity("sonar-pro");
 ```
 
 <ParamField path="modelId" type="string" required>
-  Model ID (e.g., `"sonar"`, `"sonar-pro"`, `"sonar-reasoning"`).
+  Model ID (e.g., `"sonar"`, `"sonar-pro"`, `"sonar-deep-research"`, `"sonar-reasoning-pro"`).
 </ParamField>
 
 <ParamField path="config" type="PerplexityConfig" required={false}>
-  Optional `{ apiKey?, baseURL? }`.
+  Optional configuration object.
 </ParamField>
+
+### PerplexityConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `string` | API key override (default: `PERPLEXITY_API_KEY` env var) |
+| `baseURL` | `string` | Custom base URL (default: `https://api.perplexity.ai`) |
+| `search` | `PerplexitySearchOptions` | Search-specific options (native SDK only) |
 
 ---
 
@@ -54,7 +78,8 @@ const model = perplexity("sonar-pro");
 |-------|-------------|----------|
 | `sonar` | Fast search-grounded model | Quick research queries |
 | `sonar-pro` | Enhanced search with more sources | Deep research, comprehensive answers |
-| `sonar-reasoning` | Reasoning + search | Complex research requiring analysis |
+| `sonar-deep-research` | Multi-step deep research | Complex multi-source investigation |
+| `sonar-reasoning-pro` | Reasoning + search | Complex research requiring analysis |
 
 ---
 
@@ -77,18 +102,99 @@ console.log(result.text);
 
 ---
 
-## Research Agent
+## Search Options (Native SDK)
 
-Combine Perplexity's search with tools for a powerful research workflow:
+<Note>
+Search options require the `@perplexity-ai/perplexity_ai` package. They are silently ignored in OpenAI-compat fallback mode.
+</Note>
+
+Configure search behavior via the `search` field in `PerplexityConfig`:
+
+```typescript
+import { perplexity } from "@radaros/core";
+
+const model = perplexity("sonar-pro", {
+  search: {
+    searchMode: "academic",
+    searchRecencyFilter: "month",
+    searchDomainFilter: ["nature.com", "sciencedirect.com", "arxiv.org"],
+    returnImages: false,
+    returnRelatedQuestions: true,
+    searchContextSize: "high",
+  },
+});
+```
+
+### PerplexitySearchOptions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `searchMode` | `"web" \| "academic" \| "sec"` | Search mode (default: web). `academic` searches scholarly sources, `sec` searches SEC filings. |
+| `searchDomainFilter` | `string[]` | Restrict search to specific domains |
+| `searchRecencyFilter` | `"hour" \| "day" \| "week" \| "month" \| "year"` | Only return results from the specified time window |
+| `searchAfterDate` | `string` | Only return results after this date (YYYY-MM-DD) |
+| `searchBeforeDate` | `string` | Only return results before this date (YYYY-MM-DD) |
+| `returnImages` | `boolean` | Include images in the response |
+| `returnRelatedQuestions` | `boolean` | Include related follow-up questions |
+| `disableSearch` | `boolean` | Disable search entirely (use as a pure LLM) |
+| `searchContextSize` | `"low" \| "medium" \| "high"` | Amount of search context to include (default: low) |
+
+---
+
+## Citations & Search Results
+
+When using the native SDK, the raw API response includes **citations**, **search results**, **images**, and **related questions**. Access them via `result.raw`:
+
+```typescript
+import { Agent, perplexity } from "@radaros/core";
+
+const agent = new Agent({
+  name: "cited-researcher",
+  model: perplexity("sonar-pro", {
+    search: { returnRelatedQuestions: true },
+  }),
+  instructions: "Provide well-sourced answers with citations.",
+});
+
+const result = await agent.run("What is the current population of Tokyo?");
+console.log(result.text);
+
+// Access citations from the raw response
+const raw = result.raw as any;
+if (raw?.citations) {
+  console.log("Sources:", raw.citations);
+  // ["https://worldpopulationreview.com/...", "https://en.wikipedia.org/..."]
+}
+if (raw?.search_results) {
+  for (const sr of raw.search_results) {
+    console.log(`- ${sr.title}: ${sr.url}`);
+  }
+}
+if (raw?.related_questions) {
+  console.log("Related:", raw.related_questions);
+}
+```
+
+---
+
+## Academic Research Agent
+
+Use `searchMode: "academic"` to search scholarly sources:
 
 ```typescript
 import { Agent, perplexity, defineTool } from "@radaros/core";
 import { z } from "zod";
 
 const agent = new Agent({
-  name: "deep-researcher",
-  model: perplexity("sonar-pro"),
-  instructions: "You are a thorough researcher. Save important findings.",
+  name: "academic-researcher",
+  model: perplexity("sonar-pro", {
+    search: {
+      searchMode: "academic",
+      searchRecencyFilter: "year",
+      searchContextSize: "high",
+    },
+  }),
+  instructions: "You are an academic research assistant. Cite your sources.",
   tools: [
     defineTool({
       name: "saveNote",
@@ -101,7 +207,7 @@ const agent = new Agent({
 });
 
 const result = await agent.run(
-  "Research the current state of nuclear fusion energy. Save the key findings."
+  "Find recent papers on CRISPR gene editing for sickle cell disease. Save key findings."
 );
 console.log(result.text);
 ```
@@ -110,14 +216,14 @@ console.log(result.text);
 
 ## Reasoning + Search
 
-The `sonar-reasoning` model combines chain-of-thought reasoning with web search:
+The `sonar-reasoning-pro` model combines chain-of-thought reasoning with web search:
 
 ```typescript
 import { Agent, perplexity } from "@radaros/core";
 
 const agent = new Agent({
   name: "analyst",
-  model: perplexity("sonar-reasoning"),
+  model: perplexity("sonar-reasoning-pro"),
   instructions: "Analyze questions thoroughly with reasoning and evidence.",
 });
 
@@ -143,7 +249,12 @@ const costTracker = new CostTracker({
 
 const agent = new Agent({
   name: "fact-checker",
-  model: perplexity("sonar-pro"),
+  model: perplexity("sonar-pro", {
+    search: {
+      searchDomainFilter: ["reuters.com", "apnews.com", "bbc.com"],
+      searchRecencyFilter: "month",
+    },
+  }),
   instructions: "Fact-check claims by searching the web. Provide sources for your findings.",
   costTracker,
 });
@@ -170,3 +281,4 @@ console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
 - [DeepSeek](/models/deepseek) — Reasoning models without web search
 - [xAI](/models/xai) — Grok with optional live search
 - [Tools](/agents/tools) — Extend Perplexity with custom tools
+- [OpenAI-Compatible](/models/openai-like) — How the fallback mode works
