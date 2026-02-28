@@ -109,6 +109,18 @@
               "models/google",
               "models/vertex",
               "models/ollama",
+              "models/deepseek",
+              "models/mistral",
+              "models/xai",
+              "models/perplexity",
+              "models/cohere",
+              "models/meta",
+              "models/vercel",
+              "models/aws-bedrock",
+              "models/aws-claude",
+              "models/azure-openai",
+              "models/azure-foundry",
+              "models/openai-like",
               "models/custom-provider"
             ]
           },
