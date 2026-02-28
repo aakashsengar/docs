@@ -1,0 +1,78 @@
+---
+title: Redis
+description: Get, set, delete, list, and increment keys in Redis.
+---
+
+# Redis
+
+Key-value storage, caching, and counters via Redis. Natural pairing with the `@radaros/queue` package (BullMQ/Redis).
+
+<Info>
+  Requires the `ioredis` peer dependency.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, RedisToolkit } from "@radaros/core";
+
+const redis = new RedisToolkit({
+  url: "redis://localhost:6379",
+  keyPrefix: "myapp:",
+});
+
+const agent = new Agent({
+  name: "cache-agent",
+  model: openai("gpt-4o"),
+  instructions: "Manage application cache and counters in Redis.",
+  tools: [...redis.getTools()],
+});
+
+const result = await agent.run("Set key 'user:123:name' to 'Alice' with a 1 hour TTL.");
+```
+
+---
+
+## Config
+
+<ParamField body="url" type="string" default="redis://localhost:6379">
+  Redis connection URL. Falls back to `REDIS_URL` env var.
+</ParamField>
+
+<ParamField body="keyPrefix" type="string">
+  Namespace prefix prepended to all keys (e.g. `myapp:` makes key `foo` into `myapp:foo`).
+</ParamField>
+
+<ParamField body="maxKeys" type="number" default="100">
+  Max keys to return in list operations.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `redis_get` | Get the value of a key. |
+| `redis_set` | Set a key-value pair with optional TTL (seconds). |
+| `redis_delete` | Delete one or more keys. |
+| `redis_list_keys` | List keys matching a glob pattern (uses `SCAN`). |
+| `redis_increment` | Increment a numeric key by a given amount. |
+
+---
+
+## Peer Dependency
+
+```bash
+npm install ioredis
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `REDIS_URL` | Redis connection URL (e.g. `redis://localhost:6379`) |

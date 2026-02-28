@@ -1,0 +1,77 @@
+---
+title: Stripe
+description: List charges, get customers, create refunds, list subscriptions, and get invoices.
+---
+
+# Stripe
+
+E-commerce and payment operations for customer service agents — look up charges, retrieve customer details, process refunds, check subscriptions, and view invoices.
+
+<Info>
+  Requires the `stripe` peer dependency.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, StripeToolkit } from "@radaros/core";
+
+const stripe = new StripeToolkit({
+  secretKey: process.env.STRIPE_SECRET_KEY,
+});
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  instructions: "Help customers with billing inquiries. Look up charges and process refunds when needed.",
+  tools: [...stripe.getTools()],
+});
+
+const result = await agent.run("Look up customer cus_ABC123 and show their recent charges.");
+```
+
+---
+
+## Config
+
+<ParamField body="secretKey" type="string" required>
+  Stripe secret API key. Falls back to `STRIPE_SECRET_KEY` env var.
+</ParamField>
+
+<ParamField body="maxItems" type="number" default="25">
+  Max items per list operation.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `stripe_list_charges` | List recent charges, optionally filtered by customer. |
+| `stripe_get_customer` | Get customer details — email, name, balance, metadata. |
+| `stripe_create_refund` | Create a full or partial refund for a charge. |
+| `stripe_list_subscriptions` | List subscriptions filtered by customer or status. |
+| `stripe_get_invoice` | Get invoice details including amounts, status, and PDF link. |
+
+---
+
+## Peer Dependency
+
+```bash
+npm install stripe
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `STRIPE_SECRET_KEY` | Stripe secret API key (`sk_live_...` or `sk_test_...`) |
+
+<Warning>
+  Use a **test mode** key (`sk_test_...`) during development. Never expose live keys in agent interactions.
+</Warning>

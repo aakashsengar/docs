@@ -1,0 +1,69 @@
+---
+title: Telegram
+description: Send messages, photos, and read updates via the Telegram Bot API.
+---
+
+# Telegram
+
+Send messages, photos, and read bot updates via the Telegram Bot API. No external SDK required — uses pure HTTP via `fetch`.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, TelegramToolkit } from "@radaros/core";
+
+const telegram = new TelegramToolkit({
+  botToken: process.env.TELEGRAM_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "telegram-bot",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Telegram messages.",
+  tools: [...telegram.getTools()],
+});
+
+const result = await agent.run("Send 'Hello from RadarOS!' to chat 123456789.");
+```
+
+---
+
+## Config
+
+<ParamField body="botToken" type="string" required>
+  Telegram Bot token from [@BotFather](https://t.me/BotFather). Falls back to `TELEGRAM_BOT_TOKEN` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `telegram_send_message` | Send a text message to a chat (supports Markdown/HTML). |
+| `telegram_send_photo` | Send a photo (by URL or file_id) to a chat. |
+| `telegram_get_updates` | Get recent messages/updates received by the bot. |
+
+---
+
+## No External Dependencies
+
+This toolkit uses the [Telegram Bot API](https://core.telegram.org/bots/api) directly via `fetch` — no SDK needed.
+
+---
+
+## Getting a Bot Token
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts
+3. Copy the token and set it as `TELEGRAM_BOT_TOKEN`
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |

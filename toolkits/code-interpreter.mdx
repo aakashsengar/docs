@@ -1,0 +1,84 @@
+---
+title: Code Interpreter
+description: Execute JavaScript, Python, or TypeScript code in a sandboxed subprocess.
+---
+
+# Code Interpreter
+
+Let agents write and execute code (JavaScript, Python, TypeScript) in a subprocess. Essential for data analysis, math, and automation agents.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, CodeInterpreterToolkit } from "@radaros/core";
+
+const code = new CodeInterpreterToolkit({
+  languages: ["javascript", "python"],
+  timeout: 30_000,
+});
+
+const agent = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o"),
+  instructions: "Write and execute code to solve problems. Use Python for data analysis and JavaScript for general tasks.",
+  tools: [...code.getTools()],
+});
+
+const result = await agent.run("Calculate the first 20 Fibonacci numbers and return them as a list.");
+```
+
+---
+
+## Config
+
+<ParamField body="languages" type="('javascript' | 'python' | 'typescript')[]" default="['javascript', 'python']">
+  Allowed languages for code execution.
+</ParamField>
+
+<ParamField body="timeout" type="number" default="30000">
+  Execution timeout in milliseconds.
+</ParamField>
+
+<ParamField body="maxOutput" type="number" default="10000">
+  Max output characters to return. Long output is truncated.
+</ParamField>
+
+<ParamField body="cwd" type="string">
+  Working directory for script execution. Defaults to `os.tmpdir()`.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `code_run` | Execute code in a subprocess. Returns stdout, stderr, and exit code. |
+
+---
+
+## Language Runtimes
+
+| Language | Runtime | Requirement |
+|----------|---------|-------------|
+| JavaScript | `node` | Always available |
+| Python | `python3` | Must be in PATH |
+| TypeScript | `npx tsx` | Requires `tsx` installed |
+
+<Warning>
+  Code is executed in a subprocess with no sandboxing beyond the OS-level process boundary. Always set `timeout` and `maxOutput` to prevent runaway execution.
+</Warning>
+
+---
+
+## Example: Data Analysis
+
+```typescript
+const result = await agent.run(`
+  Read the CSV file at /tmp/sales.csv, calculate the total revenue
+  per region, and output a summary table.
+`);
+// Agent writes Python code using pandas, executes it, returns results
+```

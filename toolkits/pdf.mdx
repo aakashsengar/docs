@@ -1,0 +1,75 @@
+---
+title: PDF
+description: Extract text, metadata, and page content from PDF files.
+---
+
+# PDF
+
+Extract text, metadata, and page content from PDF files. Accepts file paths, URLs, and base64-encoded data.
+
+<Info>
+  Requires the `pdf-parse` peer dependency.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, PdfToolkit } from "@radaros/core";
+
+const pdf = new PdfToolkit();
+
+const agent = new Agent({
+  name: "document-analyst",
+  model: openai("gpt-4o"),
+  instructions: "Extract and summarize content from PDF documents.",
+  tools: [...pdf.getTools()],
+});
+
+const result = await agent.run("Extract the text from ./report.pdf and summarize the key findings.");
+```
+
+---
+
+## Config
+
+<ParamField body="maxLength" type="number" default="50000">
+  Maximum characters to return per extraction. Longer text is truncated.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `pdf_extract_text` | Extract all text from a PDF. Accepts a file path, URL, or base64 data. |
+| `pdf_get_metadata` | Get PDF metadata — title, author, page count, creation date. |
+| `pdf_extract_pages` | Extract text from specific pages (1-indexed). |
+
+---
+
+## Peer Dependency
+
+```bash
+npm install pdf-parse
+```
+
+---
+
+## Input Sources
+
+The `source` parameter accepts three formats:
+
+- **File path**: `/path/to/document.pdf`
+- **URL**: `https://example.com/report.pdf`
+- **Base64**: Raw base64-encoded PDF data
+
+```typescript
+// From file
+await agent.run("Extract text from /tmp/invoice.pdf");
+
+// From URL
+await agent.run("Extract text from https://example.com/whitepaper.pdf");
+```

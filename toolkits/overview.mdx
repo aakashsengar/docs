@@ -5,7 +5,7 @@ description: Pre-built tool collections for common integrations — web search, 
 
 # Toolkits
 
-A **Toolkit** is a collection of related tools that share configuration and can be added to any Agent. RadarOS ships with 18 pre-built toolkits for common integrations so you don't have to write boilerplate.
+A **Toolkit** is a collection of related tools that share configuration and can be added to any Agent. RadarOS ships with 28 pre-built toolkits for common integrations so you don't have to write boilerplate.
 
 ```typescript
 import { Agent, openai, DuckDuckGoToolkit } from "@radaros/core";
@@ -38,6 +38,15 @@ const agent = new Agent({
   <Card title="Wikipedia" icon="book" href="/toolkits/wikipedia">
     Search and read Wikipedia articles — no API key required.
   </Card>
+  <Card title="PDF" icon="file-pdf" href="/toolkits/pdf">
+    Extract text, metadata, and page content from PDF files.
+  </Card>
+  <Card title="Git" icon="code-branch" href="/toolkits/git">
+    Local git operations — status, diff, log, commit, branch.
+  </Card>
+  <Card title="Code Interpreter" icon="code" href="/toolkits/code-interpreter">
+    Execute JavaScript, Python, or TypeScript in a subprocess.
+  </Card>
 </CardGroup>
 
 ### Web & Search
@@ -63,11 +72,20 @@ const agent = new Agent({
   </Card>
 </CardGroup>
 
-### Data
+### Data & Storage
 
 <CardGroup cols={2}>
   <Card title="SQL Database" icon="database" href="/toolkits/sql">
     Query SQLite, PostgreSQL, or MySQL databases.
+  </Card>
+  <Card title="Redis" icon="server" href="/toolkits/redis">
+    Get, set, delete, list, and increment keys in Redis.
+  </Card>
+  <Card title="S3 Cloud Storage" icon="cloud-arrow-up" href="/toolkits/s3">
+    Upload, download, list, and presign URLs for S3-compatible storage.
+  </Card>
+  <Card title="Google Sheets" icon="table" href="/toolkits/google-sheets">
+    Read, write, and append data in Google Sheets.
   </Card>
 </CardGroup>
 
@@ -81,6 +99,12 @@ const agent = new Agent({
     Send messages via Meta's WhatsApp Business Cloud API.
   </Card>
   <Card title="Slack" icon="slack" href="/toolkits/slack">
+    Send/read messages, list channels, and reply in threads.
+  </Card>
+  <Card title="Telegram" icon="paper-plane" href="/toolkits/telegram">
+    Send messages, photos, and read updates via Telegram Bot API.
+  </Card>
+  <Card title="Discord" icon="discord" href="/toolkits/discord">
     Send/read messages, list channels, and reply in threads.
   </Card>
 </CardGroup>
@@ -99,6 +123,17 @@ const agent = new Agent({
   </Card>
   <Card title="Google Calendar" icon="calendar" href="/toolkits/calendar">
     List, create, get, and delete calendar events.
+  </Card>
+  <Card title="Stripe" icon="credit-card" href="/toolkits/stripe">
+    Charges, customers, refunds, subscriptions, and invoices.
+  </Card>
+</CardGroup>
+
+### AI & Creative
+
+<CardGroup cols={2}>
+  <Card title="Image Generation" icon="image" href="/toolkits/image-generation">
+    Generate and edit images via OpenAI DALL-E API.
   </Card>
 </CardGroup>
 
@@ -126,6 +161,16 @@ const agent = new Agent({
 | Jira | `jira_search_issues`, `jira_get_issue`, `jira_create_issue`, `jira_update_issue`, `jira_add_comment` | Jira API token |
 | Notion | `notion_search`, `notion_get_page`, `notion_create_page`, `notion_query_database` | Notion token |
 | Google Calendar | `calendar_list_events`, `calendar_create_event`, `calendar_get_event`, `calendar_delete_event` | Google OAuth2 |
+| PDF | `pdf_extract_text`, `pdf_get_metadata`, `pdf_extract_pages` | None |
+| Git | `git_status`, `git_diff`, `git_log`, `git_commit`, `git_branch` | None |
+| Code Interpreter | `code_run` | None |
+| Google Sheets | `sheets_read_range`, `sheets_write_range`, `sheets_append_row`, `sheets_list_sheets` | Google OAuth2 |
+| Redis | `redis_get`, `redis_set`, `redis_delete`, `redis_list_keys`, `redis_increment` | Redis URL |
+| S3 Cloud Storage | `s3_upload`, `s3_download`, `s3_list`, `s3_delete`, `s3_presign_url` | AWS credentials |
+| Telegram | `telegram_send_message`, `telegram_send_photo`, `telegram_get_updates` | Bot token |
+| Discord | `discord_send_message`, `discord_read_messages`, `discord_list_channels`, `discord_reply_thread` | Bot token |
+| Stripe | `stripe_list_charges`, `stripe_get_customer`, `stripe_create_refund`, `stripe_list_subscriptions`, `stripe_get_invoice` | Stripe secret key |
+| Image Generation | `image_generate`, `image_edit` | OpenAI API key |
 
 ---
 
@@ -181,7 +226,7 @@ const descriptions = describeToolLibrary(toolLibrary);
 
 ## Toolkit Catalog
 
-RadarOS includes a built-in `toolkitCatalog` that knows about all 18 toolkit types and their configuration requirements. This powers the Admin UI's toolkit browser.
+RadarOS includes a built-in `toolkitCatalog` that knows about all 28 toolkit types and their configuration requirements. This powers the Admin UI's toolkit browser.
 
 ```typescript
 import { toolkitCatalog } from "@radaros/core";

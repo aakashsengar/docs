@@ -1,0 +1,78 @@
+---
+title: Discord
+description: Send messages, read messages, and list channels in Discord servers.
+---
+
+# Discord
+
+Build AI agent bots for Discord — send messages, read channels, list servers, and reply in threads.
+
+<Info>
+  Requires the `discord.js` peer dependency.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, DiscordToolkit } from "@radaros/core";
+
+const discord = new DiscordToolkit({
+  botToken: process.env.DISCORD_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "discord-bot",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Discord server communications.",
+  tools: [...discord.getTools()],
+});
+
+const result = await agent.run("Read the last 5 messages from channel 1234567890.");
+```
+
+---
+
+## Config
+
+<ParamField body="botToken" type="string" required>
+  Discord bot token. Falls back to `DISCORD_BOT_TOKEN` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `discord_send_message` | Send a message to a channel. |
+| `discord_read_messages` | Read recent messages from a channel (up to 100). |
+| `discord_list_channels` | List text channels in a server (guild). |
+| `discord_reply_thread` | Reply to a specific message in a channel or thread. |
+
+---
+
+## Peer Dependency
+
+```bash
+npm install discord.js
+```
+
+---
+
+## Bot Setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application and add a bot
+3. Enable **Message Content Intent** under Privileged Gateway Intents
+4. Copy the bot token and set it as `DISCORD_BOT_TOKEN`
+5. Invite the bot to your server with the `bot` scope and `Send Messages`, `Read Message History` permissions
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DISCORD_BOT_TOKEN` | Discord bot token |

@@ -181,13 +181,23 @@
               "toolkits/scraper",
               "toolkits/youtube",
               "toolkits/sql",
+              "toolkits/pdf",
+              "toolkits/git",
+              "toolkits/code-interpreter",
+              "toolkits/google-sheets",
+              "toolkits/redis",
+              "toolkits/s3",
               "toolkits/gmail",
               "toolkits/whatsapp",
               "toolkits/slack",
+              "toolkits/telegram",
+              "toolkits/discord",
               "toolkits/github",
               "toolkits/jira",
               "toolkits/notion",
-              "toolkits/calendar"
+              "toolkits/calendar",
+              "toolkits/stripe",
+              "toolkits/image-generation"
             ]
           },
           {

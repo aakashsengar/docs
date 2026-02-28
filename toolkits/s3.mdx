@@ -1,0 +1,129 @@
+---
+title: S3 Cloud Storage
+description: Upload, download, list, delete, and presign URLs for S3-compatible storage.
+---
+
+# S3 Cloud Storage
+
+Store and retrieve files from S3-compatible storage. Works with AWS S3, MinIO, Cloudflare R2, and Google Cloud Storage (S3-compatible mode).
+
+<Info>
+  Requires the `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` peer dependencies.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, S3Toolkit } from "@radaros/core";
+
+const s3 = new S3Toolkit({
+  bucket: "my-agent-artifacts",
+  region: "us-east-1",
+});
+
+const agent = new Agent({
+  name: "file-agent",
+  model: openai("gpt-4o"),
+  instructions: "Store and retrieve files from cloud storage.",
+  tools: [...s3.getTools()],
+});
+
+const result = await agent.run("Upload this report to reports/2025/q4-summary.txt");
+```
+
+---
+
+## Config
+
+<ParamField body="bucket" type="string">
+  S3 bucket name. Falls back to `S3_BUCKET` env var.
+</ParamField>
+
+<ParamField body="region" type="string" default="us-east-1">
+  AWS region. Falls back to `AWS_REGION` env var.
+</ParamField>
+
+<ParamField body="endpoint" type="string">
+  Custom endpoint URL for S3-compatible services (MinIO, R2, GCS).
+</ParamField>
+
+<ParamField body="forcePathStyle" type="boolean" default="false">
+  Force path-style addressing. Enable for MinIO.
+</ParamField>
+
+<ParamField body="accessKeyId" type="string">
+  AWS Access Key ID. Falls back to `AWS_ACCESS_KEY_ID` env var.
+</ParamField>
+
+<ParamField body="secretAccessKey" type="string">
+  AWS Secret Access Key. Falls back to `AWS_SECRET_ACCESS_KEY` env var.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `s3_upload` | Upload content to a bucket. |
+| `s3_download` | Download an object and return its text content. |
+| `s3_list` | List objects with optional prefix filter. |
+| `s3_delete` | Delete an object. |
+| `s3_presign_url` | Generate a pre-signed URL for temporary access (default 1 hour). |
+
+---
+
+## Peer Dependencies
+
+```bash
+npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
+```
+
+---
+
+## S3-Compatible Services
+
+<Tabs>
+  <Tab title="AWS S3">
+```typescript
+const s3 = new S3Toolkit({
+  bucket: "my-bucket",
+  region: "us-east-1",
+});
+```
+  </Tab>
+  <Tab title="MinIO">
+```typescript
+const s3 = new S3Toolkit({
+  bucket: "my-bucket",
+  endpoint: "http://localhost:9000",
+  forcePathStyle: true,
+  accessKeyId: "minioadmin",
+  secretAccessKey: "minioadmin",
+});
+```
+  </Tab>
+  <Tab title="Cloudflare R2">
+```typescript
+const s3 = new S3Toolkit({
+  bucket: "my-bucket",
+  endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+});
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `S3_BUCKET` | Default bucket name |
+| `AWS_REGION` | AWS region |
+| `AWS_ACCESS_KEY_ID` | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key |

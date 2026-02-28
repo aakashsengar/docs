@@ -1,0 +1,80 @@
+---
+title: Google Sheets
+description: Read, write, and append data in Google Sheets.
+---
+
+# Google Sheets
+
+Read, write, and append data in Google Sheets via the Google Sheets API. Ideal for data analyst agents, reporting, and lightweight database use cases.
+
+<Info>
+  Requires the `googleapis` peer dependency and Google OAuth2 credentials.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GoogleSheetsToolkit } from "@radaros/core";
+
+const sheets = new GoogleSheetsToolkit({
+  credentialsPath: "./credentials.json",
+  tokenPath: "./token.json",
+  spreadsheetId: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+});
+
+const agent = new Agent({
+  name: "data-agent",
+  model: openai("gpt-4o"),
+  instructions: "Read and update data in Google Sheets.",
+  tools: [...sheets.getTools()],
+});
+
+const result = await agent.run("Read the data in Sheet1 from A1 to D10.");
+```
+
+---
+
+## Config
+
+<ParamField body="credentialsPath" type="string">
+  Path to Google OAuth2 credentials JSON file. Falls back to `GOOGLE_SHEETS_CREDENTIALS_PATH` env var.
+</ParamField>
+
+<ParamField body="tokenPath" type="string">
+  Path to stored OAuth2 token. Falls back to `GOOGLE_SHEETS_TOKEN_PATH` env var.
+</ParamField>
+
+<ParamField body="spreadsheetId" type="string">
+  Default spreadsheet ID (from the URL). Falls back to `GOOGLE_SHEETS_SPREADSHEET_ID` env var. Can be overridden per-call.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `sheets_read_range` | Read data from a range in A1 notation (e.g. `Sheet1!A1:D10`). |
+| `sheets_write_range` | Write a 2D array of values to a range (overwrites existing data). |
+| `sheets_append_row` | Append a single row to the end of a sheet. |
+| `sheets_list_sheets` | List all sheets (tabs) in a spreadsheet with row/column counts. |
+
+---
+
+## Peer Dependency
+
+```bash
+npm install googleapis
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_SHEETS_CREDENTIALS_PATH` | Path to OAuth2 credentials JSON |
+| `GOOGLE_SHEETS_TOKEN_PATH` | Path to stored OAuth2 token |
+| `GOOGLE_SHEETS_SPREADSHEET_ID` | Default spreadsheet ID |

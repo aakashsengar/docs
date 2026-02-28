@@ -1,0 +1,63 @@
+---
+title: Git
+description: Local git operations — status, diff, log, commit, branch.
+---
+
+# Git
+
+Local git operations for code agents. Check status, view diffs, browse history, create commits, and manage branches. Pairs with the GitHub toolkit for remote + local workflows.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GitToolkit } from "@radaros/core";
+
+const git = new GitToolkit({ cwd: "/path/to/repo" });
+
+const agent = new Agent({
+  name: "code-agent",
+  model: openai("gpt-4o"),
+  instructions: "Help users manage their git repository.",
+  tools: [...git.getTools()],
+});
+
+const result = await agent.run("Show me what files have changed and create a commit with a good message.");
+```
+
+---
+
+## Config
+
+<ParamField body="cwd" type="string">
+  Working directory for git commands. Defaults to `process.cwd()`.
+</ParamField>
+
+<ParamField body="maxOutput" type="number" default="10000">
+  Max output characters. Long output is truncated.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `git_status` | Show working tree status (modified, staged, untracked files). |
+| `git_diff` | Show changes — unstaged by default, or `--staged`. Optionally filter by file. |
+| `git_log` | Show commit log history (default 10 commits, one-line format). |
+| `git_commit` | Stage files and create a commit. Stages all modified files by default. |
+| `git_branch` | List, create, or switch branches. |
+
+---
+
+## Security
+
+All commands use `execFileSync` (not shell execution) to prevent command injection. Arguments are passed as arrays directly to the `git` binary.
+
+---
+
+## No Dependencies
+
+This toolkit requires no additional packages — it uses the system `git` binary that is already available on virtually all development machines.
