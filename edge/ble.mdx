@@ -60,6 +60,51 @@ const result = await agent.run("Scan for nearby Bluetooth devices");
 
 ## Workflow
 
-1. **Scan** for devices with `ble_scan`
-2. **Connect** to a device using its ID from the scan results
-3. **Read/Write** characteristics or **subscribe** to notifications
+A typical BLE interaction follows this pattern:
+
+```
+1. Scan → 2. Connect → 3. Read/Write/Subscribe
+```
+
+### Example: Reading a Temperature Sensor
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { BleToolkit } from "@radaros/edge";
+
+const ble = new BleToolkit({
+  scanTimeout: 5000,
+  serviceUuidFilter: ["1809"], // Health Thermometer Service
+});
+
+const agent = new Agent({
+  name: "sensor-reader",
+  model: ollama("llama3.1"),
+  instructions: `You control BLE devices. Follow this workflow:
+1. Scan for nearby devices
+2. Connect to the temperature sensor
+3. Read the temperature characteristic (UUID: 2a1c)
+Report the temperature in both Celsius and Fahrenheit.`,
+  tools: [...ble.getTools()],
+});
+
+const result = await agent.run("What's the current temperature from the sensor?");
+
+// The agent will:
+// 1. Call ble_scan → finds "TempSensor-01" (id: "aa:bb:cc:dd:ee:ff")
+// 2. Call ble_connect → { deviceId: "aa:bb:cc:dd:ee:ff" }
+// 3. Call ble_read → { deviceId: "...", serviceUuid: "1809", characteristicUuid: "2a1c" }
+// 4. Interpret the raw bytes and respond: "The sensor reads 23.5°C (74.3°F)"
+```
+
+### Subscribing to Notifications
+
+For real-time data (e.g., heart rate monitor), use `ble_notify`:
+
+```typescript
+const result = await agent.run("Monitor the heart rate sensor for 10 seconds");
+
+// The agent calls ble_notify with:
+// { deviceId: "...", serviceUuid: "180d", characteristicUuid: "2a37" }
+// Returns notification data as it arrives
+```

@@ -69,3 +69,134 @@ interface SemanticCacheConfig {
 ## Supported Backends
 
 Any `VectorStore` implementation works: `InMemoryVectorStore`, `QdrantVectorStore`, `MongoDBVectorStore`, `PgVectorStore`.
+
+---
+
+## Backend Examples
+
+### InMemory (Development)
+
+```typescript
+import { Agent, openai, InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedding = new OpenAIEmbedding();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  semanticCache: {
+    vectorStore: new InMemoryVectorStore(embedding),
+    embedding,
+    similarityThreshold: 0.92,
+  },
+});
+```
+
+Fast, zero-config. Cache is lost when the process restarts — ideal for development and testing.
+
+### Qdrant (Production)
+
+```typescript
+import { Agent, openai, QdrantVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedding = new OpenAIEmbedding();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  semanticCache: {
+    vectorStore: new QdrantVectorStore({
+      url: "http://localhost:6333",
+      collection: "semantic_cache",
+      embedding,
+    }),
+    embedding,
+    similarityThreshold: 0.90,
+    ttl: 3600_000, // 1 hour
+  },
+});
+```
+
+### PgVector (PostgreSQL)
+
+```typescript
+import { Agent, openai, PgVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedding = new OpenAIEmbedding();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  semanticCache: {
+    vectorStore: new PgVectorStore({
+      connectionString: "postgresql://localhost:5432/myapp",
+      table: "semantic_cache",
+      embedding,
+    }),
+    embedding,
+    similarityThreshold: 0.92,
+  },
+});
+```
+
+---
+
+## Cache Hit vs Miss Behavior
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  semanticCache: {
+    vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+    embedding: new OpenAIEmbedding(),
+    similarityThreshold: 0.92,
+    ttl: 60_000, // 1 minute
+  },
+});
+
+// Listen to cache events
+agent.on("cache.hit", ({ input, cachedId }) => {
+  console.log(`Cache HIT for: "${input}" (id: ${cachedId})`);
+});
+agent.on("cache.miss", ({ input }) => {
+  console.log(`Cache MISS for: "${input}"`);
+});
+
+// First call: MISS — calls LLM, stores result
+await agent.run("What is the capital of France?");
+// → Cache MISS for: "What is the capital of France?"
+
+// Semantically similar: HIT — returns cached result (no LLM call)
+await agent.run("What's France's capital city?");
+// → Cache HIT for: "What's France's capital city?"
+
+// Different enough: MISS
+await agent.run("What is the population of France?");
+// → Cache MISS for: "What is the population of France?"
+
+// After TTL expires: MISS again
+// (wait 60 seconds...)
+await agent.run("What is the capital of France?");
+// → Cache MISS for: "What is the capital of France?"
+```
+
+---
+
+## Tuning `similarityThreshold`
+
+| Threshold | Behavior |
+|-----------|----------|
+| `0.98+` | Nearly exact matches only |
+| `0.92-0.95` | Good default — catches rephrasings |
+| `0.85-0.90` | Aggressive caching — may return irrelevant results |
+| `< 0.85` | Not recommended — too many false matches |
+
+Start with `0.92` and adjust based on your cache hit rate and quality.
+
+---
+
+## Cross-References
+
+- [Tool Caching](/agents/tool-caching) — Cache individual tool results (different from semantic cache)
+- [Cost Tracking](/cost/overview) — Semantic cache reduces LLM costs; track savings with CostTracker

@@ -66,12 +66,55 @@ llmJudge({
 });
 ```
 
+Each criterion is scored 0-1. The overall score is the average. Customize the judge prompt for domain-specific evaluation:
+
+```typescript
+llmJudge({
+  model: openai("gpt-4o"),
+  criteria: ["faithfulness", "relevance", "helpfulness"],
+  systemPrompt: `You are evaluating a customer support agent.
+Score each criterion 0-1 based on whether the response:
+- faithfulness: only states verifiable facts
+- relevance: addresses the user's specific question
+- helpfulness: provides actionable next steps`,
+});
+```
+
 ## Reporters
 
 | Reporter | Output |
 |----------|--------|
 | `ConsoleReporter` | Pretty-printed table in the terminal |
 | `JsonReporter` | JSON file with detailed results |
+
+### JSON Reporter Output
+
+```typescript
+const reporter = new JsonReporter({ outputPath: "./eval-results.json" });
+const result = await suite.run([reporter]);
+
+// eval-results.json:
+// {
+//   "suite": "Quality Suite",
+//   "timestamp": "2026-02-26T10:30:00Z",
+//   "passed": 8,
+//   "failed": 2,
+//   "total": 10,
+//   "passRate": 0.8,
+//   "cases": [
+//     {
+//       "name": "Capital",
+//       "input": "What is the capital of France?",
+//       "output": "The capital of France is Paris.",
+//       "expected": "Paris",
+//       "scores": { "contains": 1.0, "llm-judge": 0.95 },
+//       "pass": true,
+//       "duration": 1240
+//     },
+//     ...
+//   ]
+// }
+```
 
 ## Custom Scorer
 
@@ -83,4 +126,98 @@ custom("word-count", async (input, output) => {
   const pass = count >= 10 && count <= 200;
   return { score: pass ? 1 : 0, pass, reason: `${count} words` };
 });
+```
+
+---
+
+## Full Eval Suite Example
+
+A comprehensive eval setup testing a support agent across multiple dimensions:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import {
+  EvalSuite, contains, regexMatch, llmJudge, custom,
+  semanticSimilarity, ConsoleReporter, JsonReporter,
+} from "@radaros/eval";
+
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a helpful customer support agent for an e-commerce platform.",
+});
+
+const suite = new EvalSuite({
+  name: "Support Agent Quality",
+  agent,
+  cases: [
+    {
+      name: "Return policy",
+      input: "What is your return policy?",
+      expected: "30-day return policy",
+    },
+    {
+      name: "Order tracking",
+      input: "Where is my order #12345?",
+      expected: "tracking information",
+    },
+    {
+      name: "Refund timeline",
+      input: "How long do refunds take?",
+      expected: "5-10 business days",
+    },
+    {
+      name: "Greeting",
+      input: "Hi there",
+      expected: "polite greeting",
+    },
+    {
+      name: "Out of scope",
+      input: "What's the weather like?",
+      expected: "redirect to relevant topic",
+    },
+  ],
+  scorers: [
+    contains(),
+    llmJudge({
+      model: openai("gpt-4o"),
+      criteria: ["relevance", "helpfulness", "professionalism"],
+    }),
+    custom("not-too-long", async (input, output) => {
+      const words = output.text.split(/\s+/).length;
+      const pass = words <= 150;
+      return { score: pass ? 1 : 0, pass, reason: `${words} words (max 150)` };
+    }),
+  ],
+  threshold: 0.7,
+  concurrency: 3,
+});
+
+const result = await suite.run([
+  new ConsoleReporter(),
+  new JsonReporter({ outputPath: "./eval-results.json" }),
+]);
+
+console.log(`\nResults: ${result.passed}/${result.total} passed (${(result.passRate * 100).toFixed(0)}%)`);
+if (!result.allPassed) {
+  console.log("Failed cases:", result.failures.map(f => f.name).join(", "));
+  process.exit(1);
+}
+```
+
+---
+
+## Running Evals in CI
+
+Add eval runs to your CI pipeline:
+
+```typescript
+// eval.ts
+const result = await suite.run([new JsonReporter({ outputPath: "./eval-results.json" })]);
+process.exit(result.allPassed ? 0 : 1);
+```
+
+```bash
+# In your CI config (GitHub Actions, etc.)
+npx tsx eval.ts
 ```

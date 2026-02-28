@@ -66,6 +66,39 @@ const tools = store.getTools();
 
 These tools let the agent autonomously save and search learned skills during conversations.
 
+### How Agents Use These Tools
+
+When `save_skill` and `search_skills` are in the agent's toolset, the agent can autonomously learn from successful interactions:
+
+```typescript
+import { Agent, openai, LearnedSkillStore, MongoDBStorage } from "@radaros/core";
+
+const skillStore = new LearnedSkillStore(new MongoDBStorage({ uri: "..." }));
+
+const agent = new Agent({
+  name: "devops-assistant",
+  model: openai("gpt-4o"),
+  tools: [
+    ...skillStore.getTools(), // Adds save_skill, search_skills
+    runTestsTool,
+    buildTool,
+    deployTool,
+    notifyTool,
+  ],
+  instructions: `You are a DevOps assistant. When you complete a multi-step task successfully,
+save it as a learned skill so you can replay it faster next time.
+Before starting a complex task, search for existing skills that might help.`,
+});
+
+// First interaction:
+// User: "Deploy the auth service to production"
+// Agent: Runs tests → builds → deploys → notifies team → saves as "deploy-auth-service" skill
+
+// Second interaction (days later):
+// User: "Deploy the auth service again"
+// Agent: Searches skills → finds "deploy-auth-service" → replays the saved steps
+```
+
 ## Success Tracking
 
 Each skill tracks `successCount` and `failCount`. After replaying a skill, the outcome is automatically recorded:
@@ -74,4 +107,78 @@ Each skill tracks `successCount` and `failCount`. After replaying a skill, the o
 const skill = await store.getSkill(id);
 console.log(skill.successCount); // 5
 console.log(skill.failCount);    // 1
+```
+
+### Tracking and Improving Skills
+
+```typescript
+// After replay, outcomes are tracked automatically
+const skill = await store.getSkill("skill-abc");
+
+console.log(skill.successCount); // 12 — replayed successfully 12 times
+console.log(skill.failCount);    // 2  — failed twice
+console.log(skill.lastUsed);     // 2026-02-25T10:30:00Z
+
+// Success rate helps prioritize which skills to suggest
+const successRate = skill.successCount / (skill.successCount + skill.failCount);
+console.log(`Success rate: ${(successRate * 100).toFixed(0)}%`); // "85%"
+```
+
+Skills with low success rates can be pruned or updated. High-success skills are prioritized in search results.
+
+---
+
+## Full Lifecycle Example
+
+End-to-end: agent learns a workflow, stores it, and replays it later.
+
+```typescript
+import {
+  Agent, openai, LearnedSkillStore, MongoDBStorage, defineTool,
+} from "@radaros/core";
+import { z } from "zod";
+
+const storage = new MongoDBStorage({ uri: "mongodb://localhost/radaros" });
+const skillStore = new LearnedSkillStore(storage);
+
+// Define the tools the agent can use
+const tools = [
+  defineTool({
+    name: "run_tests",
+    description: "Run test suite",
+    parameters: z.object({ suite: z.string() }),
+    execute: async ({ suite }) => `All ${suite} tests passed (42/42)`,
+  }),
+  defineTool({
+    name: "build_service",
+    description: "Build a service for deployment",
+    parameters: z.object({ service: z.string(), env: z.string() }),
+    execute: async ({ service, env }) => `Built ${service} for ${env} (v2.3.1)`,
+  }),
+  defineTool({
+    name: "deploy",
+    description: "Deploy to environment",
+    parameters: z.object({ service: z.string(), env: z.string() }),
+    execute: async ({ service, env }) => `Deployed ${service} to ${env} successfully`,
+  }),
+];
+
+const agent = new Agent({
+  name: "deploy-bot",
+  model: openai("gpt-4o"),
+  tools: [...tools, ...skillStore.getTools()],
+  instructions: "You are a deployment assistant. Save successful multi-step workflows as skills.",
+});
+
+// Run 1: Agent figures out the deployment workflow
+await agent.run("Deploy the payment service to staging", {
+  sessionId: "deploy-1",
+});
+// Agent runs: run_tests → build_service → deploy → save_skill
+
+// Run 2: Agent replays the saved workflow
+await agent.run("Deploy the payment service to staging again", {
+  sessionId: "deploy-2",
+});
+// Agent: search_skills("deploy payment staging") → found → replay steps
 ```

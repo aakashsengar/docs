@@ -62,4 +62,65 @@ const agent = new Agent({
 
 ## Safety
 
-The `allowedPins` config restricts which pins the agent can access, preventing accidental writes to system-critical pins.
+### Pin Allowlisting
+
+The `allowedPins` config restricts which GPIO pins the agent can access. This prevents accidental writes to system-critical pins (e.g., I2C, SPI, UART lines):
+
+```typescript
+const gpio = new GpioToolkit({
+  chipNumber: 4,
+  allowedPins: [17, 27, 22], // Only these pins can be read/written
+  maxPwmFrequency: 1000,
+});
+```
+
+If the agent tries to access a pin not in `allowedPins`, the tool returns an error:
+
+```
+Error: Pin 14 is not in the allowed pin list [17, 27, 22]
+```
+
+### Best Practices
+
+- **Always set `allowedPins`** in production to prevent unintended hardware interaction
+- **Use descriptive instructions** that tell the agent which pins correspond to which hardware:
+  ```typescript
+  instructions: `You control GPIO on a Raspberry Pi.
+  Pin 17 = LED (output), Pin 27 = Button (input), Pin 22 = Buzzer (PWM).
+  Never write to pin 27 (it's an input).`
+  ```
+- **Limit PWM frequency** with `maxPwmFrequency` to protect sensitive components
+- **Test in simulation first** — use a breadboard with LEDs before connecting to production hardware
+
+### Example: LED and Button
+
+```typescript
+import { Agent, ollama } from "@radaros/core";
+import { GpioToolkit } from "@radaros/edge";
+
+const gpio = new GpioToolkit({
+  chipNumber: 4,
+  allowedPins: [17, 27],
+  maxPwmFrequency: 500,
+});
+
+const agent = new Agent({
+  name: "hardware-agent",
+  model: ollama("llama3.1"),
+  instructions: `You control a Raspberry Pi. Pin 17 is an LED (output). Pin 27 is a button (input).
+When asked about the button, read pin 27. When asked to control the LED, write to pin 17.`,
+  tools: [...gpio.getTools()],
+});
+
+// Read button state
+await agent.run("Is the button pressed?");
+// Agent calls gpio_read({ pin: 27 }) → "Pin 27 is LOW (button not pressed)"
+
+// Control LED
+await agent.run("Turn on the LED");
+// Agent calls gpio_write({ pin: 17, value: 1 }) → "Pin 17 set to HIGH"
+
+// PWM for dimming
+await agent.run("Dim the LED to 50%");
+// Agent calls gpio_pwm({ pin: 17, frequency: 500, dutyCycle: 0.5 })
+```

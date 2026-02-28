@@ -61,3 +61,58 @@ const result = await agent.run("Search for meeting notes from last week");
 ```bash
 export NOTION_API_KEY="ntn_..."
 ```
+
+---
+
+## Tool Usage Examples
+
+### Search Pages
+
+```typescript
+const result = await agent.run("Find meeting notes from last week about the product roadmap");
+
+// The agent calls notion_search with:
+// { query: "product roadmap meeting notes" }
+//
+// Returns matching pages with titles, IDs, and snippets
+```
+
+### Create a Page
+
+```typescript
+const result = await agent.run(
+  "Create a new page in the Meeting Notes database titled 'Sprint Planning - Feb 26' " +
+  "with sections for Attendees, Agenda, and Action Items"
+);
+
+// The agent calls notion_create_page with:
+// {
+//   parentDatabaseId: "abc123...",
+//   title: "Sprint Planning - Feb 26",
+//   content: "## Attendees\n\n## Agenda\n\n## Action Items\n"
+// }
+```
+
+### Query Database
+
+```typescript
+const result = await agent.run(
+  "Show me all tasks in the Project Tracker database that are marked 'In Progress'"
+);
+
+// The agent calls notion_query_database with:
+// {
+//   databaseId: "def456...",
+//   filter: { property: "Status", status: { equals: "In Progress" } }
+// }
+```
+
+### Read Page Content
+
+```typescript
+const result = await agent.run("Read the content of our API documentation page");
+
+// The agent calls notion_search to find the page,
+// then notion_get_page with the page ID
+// Returns the full text content of the page
+```

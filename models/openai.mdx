@@ -134,6 +134,114 @@ See the [Voice Agents](/voice/overview) docs for full details.
 
 ---
 
+## Multi-Modal Support
+
+OpenAI GPT-4o models support **images**, **audio**, and **files** as input.
+
+### Images
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "Describe this image." },
+  { type: "image", data: "https://example.com/photo.jpg", mimeType: "image/jpeg" },
+]);
+```
+
+### Audio
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "Transcribe this audio." },
+  { type: "audio", data: base64AudioData, mimeType: "audio/mp3" },
+]);
+```
+
+### Files
+
+Files are sent using OpenAI's native file input type. Both URLs and base64 data are supported:
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "Summarize this document." },
+  { type: "file", data: "https://example.com/report.pdf", mimeType: "application/pdf", filename: "report.pdf" },
+]);
+```
+
+For base64 files, the provider automatically wraps them as `data:` URIs for the API.
+
+---
+
+## Reasoning Models (o-series)
+
+OpenAI's o-series models (o1, o3) have built-in chain-of-thought reasoning. Configure them via the `reasoning` config:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "reasoning-agent",
+  model: openai("o3-mini"),
+  instructions: "You are a precise, analytical assistant.",
+  reasoning: {
+    effort: "high", // "low" | "medium" | "high"
+  },
+});
+
+const result = await agent.run(
+  "If a train travels at 120 km/h for 2.5 hours, then slows to 80 km/h for 1.75 hours, what is the total distance?"
+);
+
+console.log(result.text);
+// "The total distance is 440 km. (120 × 2.5 = 300 km) + (80 × 1.75 = 140 km)"
+```
+
+The `effort` parameter controls how much computation the model spends on reasoning:
+- `"low"` — Quick answers, minimal reasoning
+- `"medium"` — Balanced reasoning
+- `"high"` — Maximum reasoning depth, best for complex problems
+
+<Note>
+Reasoning models may not support system prompts or streaming depending on the version. RadarOS handles these constraints automatically.
+</Note>
+
+---
+
+## Structured Outputs
+
+OpenAI supports strict structured output via JSON mode. When using `defineTool` with Zod schemas, RadarOS automatically uses OpenAI's strict mode for more reliable function calling:
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const extractTool = defineTool({
+  name: "extractContact",
+  description: "Extract contact information from text",
+  parameters: z.object({
+    name: z.string().describe("Full name"),
+    email: z.string().email().describe("Email address"),
+    phone: z.string().optional().describe("Phone number"),
+    company: z.string().optional().describe("Company name"),
+  }),
+  execute: async (contact) => JSON.stringify(contact),
+});
+
+const agent = new Agent({
+  name: "extractor",
+  model: openai("gpt-4o"),
+  tools: [extractTool],
+  instructions: "Extract contact info from the user's message using the extractContact tool.",
+});
+
+const result = await agent.run(
+  "Reach out to Jane Doe at jane@acme.com, she works at Acme Corp"
+);
+```
+
+Zod schemas are converted to JSON Schema with `strict: true`, ensuring the model always returns valid, well-typed arguments.
+
+---
+
 ## Full Example
 
 ```typescript

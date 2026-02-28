@@ -116,6 +116,84 @@ const model = vertex("gemini-2.5-flash", {
 
 ---
 
+## Multi-Modal Support
+
+Vertex AI supports the same multi-modal capabilities as the Gemini API — images, audio, and files (including XLSX). All content is processed via `inlineData`.
+
+### Images
+
+```typescript
+import { Agent, vertex, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: vertex("gemini-2.5-flash", {
+    project: "my-project",
+    location: "us-central1",
+  }),
+  instructions: "Describe images in detail.",
+});
+
+const imageData = readFileSync("photo.jpg").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "What's happening in this photo?" },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+```
+
+### Audio
+
+```typescript
+const audioData = readFileSync("meeting.mp3").toString("base64");
+const result = await agent.run([
+  { type: "text", text: "Transcribe this meeting recording and list action items." },
+  { type: "audio", data: audioData, mimeType: "audio/mp3" },
+] as ContentPart[]);
+```
+
+### Files & Documents
+
+Vertex AI supports PDF, CSV, XLSX, and other formats natively:
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "Analyze the quarterly revenue trends." },
+  {
+    type: "file",
+    data: readFileSync("financials.xlsx").toString("base64"),
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    filename: "financials.xlsx",
+  },
+] as ContentPart[]);
+```
+
+All multi-modal features work identically to the `google()` provider. See the [Google Gemini](/models/google) docs for the full supported file type list.
+
+---
+
+## Reasoning
+
+Vertex AI Gemini models support thinking/reasoning via the same `reasoning` config:
+
+```typescript
+const agent = new Agent({
+  name: "analyst",
+  model: vertex("gemini-2.5-pro", {
+    project: "my-project",
+    location: "us-central1",
+  }),
+  reasoning: { enabled: true, budgetTokens: 4000 },
+  instructions: "You are a precise financial analyst.",
+});
+
+const result = await agent.run("Calculate the IRR of a $10K investment returning $3K/year for 5 years.");
+console.log(result.thinking); // Model's step-by-step reasoning
+console.log(result.text);     // Final answer
+```
+
+---
+
 ## Full Example
 
 ```typescript

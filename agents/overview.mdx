@@ -225,3 +225,122 @@ console.log(result.text);
 ```
 
 </CodeGroup>
+
+---
+
+### Full-Featured Agent Example
+
+A comprehensive example showing all major config options together:
+
+```typescript
+import {
+  Agent, anthropic, CostTracker, MongoDBStorage,
+  defineTool, type ContentPart,
+} from "@radaros/core";
+import { z } from "zod";
+
+const storage = new MongoDBStorage("mongodb://localhost:27017/myapp");
+const costTracker = new CostTracker({
+  budget: { maxCostPerSession: 2.0, onBudgetExceeded: "warn" },
+});
+
+const searchTool = defineTool({
+  name: "searchDatabase",
+  description: "Search the product database by query",
+  parameters: z.object({
+    query: z.string().describe("Search query"),
+    limit: z.number().optional().describe("Max results (default 10)"),
+  }),
+  execute: async ({ query, limit }) => {
+    const results = await db.search(query, limit ?? 10);
+    return JSON.stringify(results);
+  },
+});
+
+const agent = new Agent({
+  name: "product-assistant",
+  model: anthropic("claude-sonnet-4-6"),
+  instructions: "You help customers find products. Be concise and helpful.",
+  tools: [searchTool],
+
+  // Memory: persistent sessions + summaries + user personalization
+  memory: {
+    storage,
+    maxMessages: 20,
+    summaries: true,
+    userFacts: true,
+    userProfile: true,
+    model: anthropic("claude-haiku-4-5-20251001"),
+  },
+
+  // Tool routing: only send relevant tools to the model
+  toolRouter: {
+    model: anthropic("claude-haiku-4-5-20251001"),
+    maxTools: 5,
+  },
+
+  // Tool result limits: summarize large API responses
+  toolResultLimit: {
+    maxChars: 20000,
+    strategy: "summarize",
+    model: anthropic("claude-haiku-4-5-20251001"),
+  },
+
+  // Extended thinking for complex queries
+  reasoning: { enabled: true, budgetTokens: 2000 },
+
+  // Cost tracking with session budget
+  costTracker,
+
+  // Lifecycle hooks
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(`[${ctx.runId}] Starting run for session ${ctx.sessionId}`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(`[${ctx.runId}] Completed in ${output.durationMs}ms, ${output.usage.totalTokens} tokens`);
+    },
+    onError: async (ctx, error) => {
+      console.error(`[${ctx.runId}] Error: ${error.message}`);
+    },
+  },
+
+  logLevel: "info",
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Find me wireless headphones under $100", {
+  sessionId: "session-abc",
+  userId: "user-42",
+});
+
+console.log(result.text);
+console.log(`Cost: $${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+---
+
+### Dynamic Instructions
+
+Instructions can be a function that receives `RunContext`, allowing you to customize the system prompt per request:
+
+```typescript
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o"),
+  instructions: (ctx) => {
+    const role = ctx.metadata?.role ?? "customer";
+    const lang = ctx.metadata?.language ?? "English";
+    return `You are a support agent. The user's role is "${role}".
+Respond in ${lang}. Be concise and professional.
+Session state: ${JSON.stringify(ctx.sessionState)}`;
+  },
+});
+
+// The instructions function is called fresh on every run
+const result = await agent.run("How do I reset my password?", {
+  metadata: { role: "admin", language: "Spanish" },
+});
+```
+
+This is useful for multi-tenant apps, internationalization, or injecting session-specific context into the prompt.

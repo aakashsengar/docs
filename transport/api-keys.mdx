@@ -72,28 +72,62 @@ socket.emit("agent.run", {
 
 ## Provider Matching
 
-For `x-api-key` (generic), the transport may match it to the agent's provider. For provider-specific headers:
+The transport layer uses a priority-based matching system:
 
-- `x-openai-api-key` → used when agent uses OpenAI
-- `x-google-api-key` → used when agent uses Google
-- `x-anthropic-api-key` → used when agent uses Anthropic
+1. **Provider-specific headers** — Highest priority. Matched directly to the provider:
+   - `x-openai-api-key` → used when agent uses an OpenAI model
+   - `x-google-api-key` → used when agent uses a Google/Vertex model
+   - `x-anthropic-api-key` → used when agent uses an Anthropic model
 
-This allows a single request to carry keys for multiple providers if needed (e.g., agent + embedding provider).
+2. **Generic header** — `x-api-key` is used as a fallback when no provider-specific header is found. The transport passes it to whatever provider the agent uses.
+
+3. **Body parameter** — `apiKey` in the request body is the final fallback.
+
+This allows a single request to carry keys for multiple providers — useful when an agent uses one provider for the main model and another for embeddings or memory extraction:
+
+```typescript
+// Client sends keys for both OpenAI (main model) and Google (embeddings)
+fetch("/api/agents/assistant/run", {
+  method: "POST",
+  headers: {
+    "x-openai-api-key": "sk-...",
+    "x-google-api-key": "AIza...",
+  },
+  body: JSON.stringify({ input: "Hello!" }),
+});
+```
 
 ---
 
 ## Security Notes
 
 <CardGroup cols={2}>
-  <Card title="HTTPS" icon="lock">
-    Always use HTTPS in production so API keys are not sent in cleartext.
+  <Card title="HTTPS Required" icon="lock">
+    Always use HTTPS in production. API keys sent over HTTP are visible to network intermediaries.
   </Card>
-  <Card title="Logging" icon="warning">
-    Avoid logging request headers or bodies that may contain API keys.
+  <Card title="No Key Logging" icon="warning">
+    Never log request headers or bodies that may contain API keys. Configure your logging middleware to redact sensitive headers.
+  </Card>
+  <Card title="Key Rotation" icon="rotate">
+    Support key rotation by accepting new keys without downtime. Per-request keys make this seamless — clients switch to new keys immediately.
+  </Card>
+  <Card title="Rate Limiting" icon="gauge">
+    Apply rate limiting per API key to prevent abuse in multi-tenant setups.
   </Card>
 </CardGroup>
 
-Consider middleware to strip or redact API key headers before logging.
+```typescript
+// Example: Express middleware to strip API keys from logs
+app.use((req, res, next) => {
+  const sanitized = { ...req.headers };
+  delete sanitized["x-openai-api-key"];
+  delete sanitized["x-google-api-key"];
+  delete sanitized["x-anthropic-api-key"];
+  delete sanitized["x-api-key"];
+  req.sanitizedHeaders = sanitized;
+  next();
+});
+```
 
 ---
 

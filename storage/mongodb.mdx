@@ -137,13 +137,48 @@ A unique index on `(namespace, key)` ensures fast lookups and prevents duplicate
 
 ## Atlas & Replica Sets
 
-MongoDBStorage works with:
+MongoDBStorage works seamlessly with all MongoDB deployment types:
 
-- Local MongoDB
-- MongoDB Atlas
-- Replica sets and sharded clusters
+### MongoDB Atlas (Cloud)
 
-Use `mongodb+srv://` for Atlas connection strings.
+```typescript
+const storage = new MongoDBStorage(
+  "mongodb+srv://user:pass@cluster0.abc123.mongodb.net/",
+  "production",
+  "agent_data"
+);
+await storage.initialize();
+```
+
+Atlas features like auto-scaling, backups, and global clusters work transparently — MongoDBStorage uses the standard MongoDB driver.
+
+### Replica Sets
+
+For self-hosted replica sets, include all members in the connection string:
+
+```typescript
+const storage = new MongoDBStorage(
+  "mongodb://host1:27017,host2:27017,host3:27017/?replicaSet=rs0",
+  "radaros"
+);
+```
+
+Reads are directed to the primary by default. For read-heavy workloads, the MongoDB driver can be configured with read preferences.
+
+### Sharded Clusters
+
+MongoDBStorage works with sharded clusters via `mongos` routers. For optimal performance, shard the `kv_store` collection on the `namespace` field:
+
+```bash
+sh.shardCollection("radaros.kv_store", { namespace: 1 })
+```
+
+### Best Practices
+
+- Use `mongodb+srv://` connection strings for Atlas (handles DNS-based discovery)
+- Enable SSL/TLS for production connections
+- Set `retryWrites=true` in the connection string for automatic retry on transient errors
+- Use a dedicated database for RadarOS data to simplify backup and access control
 
 ---
 

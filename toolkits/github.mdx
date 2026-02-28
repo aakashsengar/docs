@@ -61,3 +61,61 @@ export GITHUB_TOKEN="ghp_..."
 ```
 
 Create a token at [github.com/settings/tokens](https://github.com/settings/tokens). Required scopes depend on your use case — `repo` for private repos, `public_repo` for public only.
+
+---
+
+## Tool Usage Examples
+
+### List Issues
+
+```typescript
+const result = await agent.run("List all open bugs in xhipment/radar-os");
+
+// The agent calls github_list_issues with:
+// { owner: "xhipment", repo: "radar-os", state: "open", labels: "bug" }
+//
+// Returns:
+// #42 — Memory leak in SessionManager (bug, high-priority)
+// #38 — Tool router fails with empty tool list (bug)
+// #35 — CostTracker reports zero tokens (bug, fixed)
+```
+
+### Create Issue
+
+```typescript
+const result = await agent.run(
+  "Create an issue in xhipment/radar-os titled 'Add retry logic to MCP client' " +
+  "with label 'enhancement'. The body should describe adding exponential backoff."
+);
+
+// The agent calls github_create_issue with:
+// {
+//   owner: "xhipment",
+//   repo: "radar-os",
+//   title: "Add retry logic to MCP client",
+//   body: "Add exponential backoff retry logic to the MCP client...",
+//   labels: ["enhancement"]
+// }
+```
+
+### Search Repos
+
+```typescript
+const result = await agent.run("Find popular TypeScript AI agent frameworks on GitHub");
+
+// The agent calls github_search_repos with:
+// { query: "AI agent framework language:typescript", sort: "stars" }
+//
+// Returns top repositories with stars, descriptions, and URLs
+```
+
+### Read File Content
+
+```typescript
+const result = await agent.run(
+  "Show me the package.json from xhipment/radar-os"
+);
+
+// The agent calls github_get_file_content with:
+// { owner: "xhipment", repo: "radar-os", path: "package.json" }
+```

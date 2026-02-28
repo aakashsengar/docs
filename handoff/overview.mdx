@@ -70,7 +70,28 @@ interface HandoffTarget {
 For managed teams, use `TeamMode.Handoff`:
 
 ```typescript
-import { Team, TeamMode } from "@radaros/core";
+import { Agent, Team, TeamMode, openai } from "@radaros/core";
+
+const billing = new Agent({
+  name: "billing",
+  model: openai("gpt-4o-mini"),
+  instructions: `You are a billing specialist. Handle invoices, payments, and refunds.
+When the issue is resolved, use the complete tool to end the conversation.`,
+});
+
+const support = new Agent({
+  name: "technical-support",
+  model: openai("gpt-4o-mini"),
+  instructions: `You are a tech support agent. Troubleshoot software and hardware issues.
+When the issue is resolved, use the complete tool to end the conversation.`,
+});
+
+const frontDesk = new Agent({
+  name: "front-desk",
+  model: openai("gpt-4o"),
+  instructions: `You are the front desk receptionist. Understand the user's needs
+and route them to the right specialist. Do not try to solve issues yourself.`,
+});
 
 const team = new Team({
   name: "support-team",
@@ -80,7 +101,11 @@ const team = new Team({
   maxRounds: 5,
 });
 
-const result = await team.run("I need to upgrade my plan");
+const result = await team.run("I got charged twice for my subscription");
+console.log(result.text);
+// The front-desk routes to billing, which handles the duplicate charge
+console.log(result.handoffChain);
+// ["front-desk", "billing"]
 ```
 
 ## Events
@@ -89,3 +114,100 @@ const result = await team.run("I need to upgrade my plan");
 |-------|---------|
 | `handoff.transfer` | `{ runId, fromAgent, toAgent, reason }` |
 | `handoff.complete` | `{ runId, chain: string[], finalAgent }` |
+
+---
+
+## Cycle Detection
+
+RadarOS prevents infinite handoff loops automatically. If agent A hands off to agent B, which hands off back to A, the system detects the cycle and stops:
+
+```typescript
+const agentA = new Agent({
+  name: "agent-a",
+  model: openai("gpt-4o-mini"),
+  instructions: "Transfer to agent-b for everything.",
+  handoff: {
+    targets: [{ agent: agentB, description: "Agent B" }],
+    maxHandoffs: 5,
+  },
+});
+
+const agentB = new Agent({
+  name: "agent-b",
+  model: openai("gpt-4o-mini"),
+  instructions: "Transfer to agent-a for everything.",
+  handoff: {
+    targets: [{ agent: agentA, description: "Agent A" }],
+    maxHandoffs: 5,
+  },
+});
+
+// This won't loop forever — stops after maxHandoffs is reached
+const result = await agentA.run("Help me");
+// result.handoffChain: ["agent-a", "agent-b", "agent-a", "agent-b", "agent-a"]
+```
+
+---
+
+## onHandoff Callback
+
+Use `onHandoff` to log, validate, or modify behavior when a handoff occurs:
+
+```typescript
+const frontDesk = new Agent({
+  name: "front-desk",
+  model: openai("gpt-4o"),
+  instructions: "Route users to the right agent.",
+  handoff: {
+    targets: [
+      {
+        agent: billing,
+        description: "Billing and payment issues",
+        onHandoff: async (ctx) => {
+          console.log(`[Handoff] ${ctx.runId}: front-desk → billing`);
+          // Log to analytics
+          await analytics.track("agent_handoff", {
+            from: "front-desk",
+            to: "billing",
+            sessionId: ctx.sessionId,
+          });
+        },
+      },
+      {
+        agent: support,
+        description: "Technical issues",
+        onHandoff: async (ctx) => {
+          console.log(`[Handoff] ${ctx.runId}: front-desk → support`);
+        },
+      },
+    ],
+  },
+});
+```
+
+---
+
+## The Complete Tool
+
+Each agent in a handoff chain receives a `complete` tool. Calling it signals that the task is done and no further handoffs are needed:
+
+```typescript
+const billing = new Agent({
+  name: "billing",
+  model: openai("gpt-4o-mini"),
+  instructions: `You handle billing. When the issue is resolved,
+call the complete tool with a summary of what was done.`,
+  handoff: { targets: [] }, // No further handoff targets
+});
+
+// When the agent calls complete({ summary: "Refund of $12.99 issued" }),
+// the handoff chain ends and the result is returned to the caller.
+```
+
+---
+
+## Cross-References
+
+- [Teams](/teams/overview) — Team orchestration modes (Handoff, Broadcast, Sequential)
+- [Events](/webhooks/overview) — Listen for `handoff.transfer` and `handoff.complete` events
+- [Observability](/observability/overview) — Trace handoff chains across agents

@@ -96,6 +96,115 @@ const remoteModel = ollama("mistral", {
 
 ---
 
+## Multi-Modal Support
+
+Ollama supports **image** input for vision-capable models like `llava`, `bakllava`, and `llama3.2-vision`.
+
+### Images
+
+Pass images as base64 data in `ContentPart[]`:
+
+```typescript
+import { Agent, ollama, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "VisionBot",
+  model: ollama("llava"),
+  instructions: "Describe images in detail.",
+});
+
+const imageData = readFileSync("photo.jpg").toString("base64");
+
+const result = await agent.run([
+  { type: "text", text: "What's in this image?" },
+  { type: "image", data: imageData, mimeType: "image/jpeg" },
+] as ContentPart[]);
+```
+
+### Unsupported: Audio & Files
+
+Audio and file inputs are not supported by Ollama. If passed, the provider logs a warning and skips them.
+
+---
+
+## Tool Calling
+
+Ollama supports function calling with select models. Enable tools on your agent as usual — RadarOS handles the tool call protocol automatically:
+
+```typescript
+import { Agent, ollama, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "local-assistant",
+  model: ollama("llama3.1"), // Supports tool calling
+  tools: [
+    defineTool({
+      name: "getWeather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 22°C, Sunny`,
+    }),
+  ],
+  instructions: "You are a helpful assistant. Use tools when needed.",
+});
+
+const result = await agent.run("What's the weather in Paris?");
+console.log(result.text);
+```
+
+### Models with Tool Support
+
+| Model | Tool Calling |
+|-------|-------------|
+| `llama3.1` | Yes |
+| `llama3.2` | Yes |
+| `mistral` | Yes |
+| `mixtral` | Yes |
+| `codellama` | No |
+| `phi3` | No |
+| `llava` | No (vision only) |
+
+<Warning>
+Tool calling quality varies by model. Larger models (70B+) are more reliable for complex tool use. For production tool-calling workflows, consider `llama3.1:70b` or a cloud provider.
+</Warning>
+
+---
+
+## Performance Tips
+
+### GPU Acceleration
+
+Ollama automatically uses GPU when available. Check GPU usage with:
+
+```bash
+ollama ps  # Shows running models and their GPU/CPU split
+```
+
+For best performance, ensure your model fits entirely in GPU memory. A 7B model typically needs ~4GB VRAM, 13B needs ~8GB, and 70B needs ~40GB.
+
+### Context Size
+
+By default, Ollama uses a 2048-token context window. For agents with long conversations or large tool results, increase it:
+
+```bash
+# In your Modelfile or via the API
+ollama run llama3.1 --ctx-size 8192
+```
+
+### Model Selection Guidelines
+
+| Scenario | Recommended Model |
+|----------|-------------------|
+| General chat + tools | `llama3.1` or `llama3.1:70b` |
+| Code generation | `codellama:13b` or `codellama:34b` |
+| Vision tasks | `llava:13b` or `llama3.2-vision` |
+| Fast responses (edge) | `phi3:mini` or `llama3.2:1b` |
+| Complex reasoning | `mixtral:8x7b` or `llama3.1:70b` |
+
+---
+
 ## Full Example
 
 ```typescript

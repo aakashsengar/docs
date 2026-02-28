@@ -162,3 +162,107 @@ import { instrumentBus } from "@radaros/observability";
 const team = new Team({ ... });
 const obs = instrumentBus(team.eventBus, { exporters: ["langfuse", "console"] });
 ```
+
+---
+
+## Langfuse Integration Example
+
+[Langfuse](https://langfuse.com) provides an open-source LLM observability dashboard. Set up in 3 steps:
+
+```bash
+# 1. Set environment variables
+export LANGFUSE_PUBLIC_KEY="pk-..."
+export LANGFUSE_SECRET_KEY="sk-..."
+export LANGFUSE_BASE_URL="https://cloud.langfuse.com" # or self-hosted URL
+```
+
+```typescript
+// 2. Instrument your agent
+import { Agent, openai } from "@radaros/core";
+import { instrument } from "@radaros/observability";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const obs = instrument(agent, {
+  exporters: ["langfuse"],
+});
+
+// 3. Every run is now traced in Langfuse
+await agent.run("What is quantum computing?", {
+  sessionId: "session-abc",
+  userId: "user-42",
+});
+
+// Flush traces before process exit
+await obs.tracer.flush();
+```
+
+In the Langfuse dashboard, you'll see:
+- **Traces** for each `agent.run()` with duration, token usage, and cost
+- **Generations** for each LLM call within a run
+- **Spans** for tool calls, handoffs, and other operations
+- **Sessions** grouping traces by `sessionId`
+
+---
+
+## OpenTelemetry Export
+
+Send traces to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.):
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer my-token"
+```
+
+```typescript
+import { instrument } from "@radaros/observability";
+
+const obs = instrument(agent, {
+  exporters: ["otel"],
+});
+```
+
+Traces follow the [OpenTelemetry semantic conventions for GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/), making them compatible with standard OTLP tooling.
+
+---
+
+## Building a Custom Dashboard
+
+Combine metrics and events to build a real-time dashboard:
+
+```typescript
+import { Agent, openai, CostTracker } from "@radaros/core";
+import { instrument } from "@radaros/observability";
+
+const tracker = new CostTracker();
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+const obs = instrument(agent, { exporters: ["console"] });
+
+// Periodic metrics snapshot
+setInterval(() => {
+  const m = obs.metrics.getMetrics();
+  const cost = tracker.getSummary();
+
+  console.log({
+    totalRuns: m.counters.runs_total,
+    successRate: (1 - m.rates.error_rate) * 100,
+    cacheHitRate: m.rates.cache_hit_ratio * 100,
+    avgLatency: average(m.histograms.run_duration_ms),
+    totalCost: cost.totalCost,
+    totalTokens: m.gauges.total_tokens,
+  });
+}, 30_000);
+
+function average(arr: number[]): number {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+```

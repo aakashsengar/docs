@@ -77,7 +77,9 @@ getWeather({ unit: "celsius", city: "Mumbai" })
 
 ## Clearing the Cache
 
-The `ToolExecutor` exposes a `clearCache()` method for programmatic cache invalidation. This is useful in testing or when you know external data has changed.
+Tool result caches are scoped to each `ToolExecutor` instance, which is recreated per request when using `toolRouter`. For agents without a tool router, the cache persists across runs on the same agent instance.
+
+Cache entries expire automatically based on `ttl`. To manually clear all cached results, create a fresh agent or call `setTools()` to rebuild the tool executor.
 
 ---
 
@@ -112,3 +114,69 @@ interface ToolCacheConfig {
 ## Logging
 
 When `logLevel` is `"info"` or higher, cached tool results are prefixed with `[cached]` in the logs, making it easy to verify caching behavior during development.
+
+---
+
+## Cache Behavior Example
+
+When the same tool is called with identical arguments within the TTL window, the cached result is returned instantly without re-executing:
+
+```typescript
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get current weather",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => {
+    console.log(`[API CALL] Fetching weather for ${city}`);
+    const data = await weatherAPI.get(city);
+    return `${city}: ${data.temp}°C, ${data.condition}`;
+  },
+  cache: { ttl: 60_000 }, // 1 minute
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [weatherTool],
+});
+
+// First call — executes the tool, logs "[API CALL]"
+await agent.run("What's the weather in Tokyo?");
+
+// Second call within 60s — returns cached result, no API call
+await agent.run("Tell me Tokyo's weather again");
+
+// After 60s — cache expired, executes again
+```
+
+---
+
+## Different TTLs per Tool
+
+Each tool can have its own cache duration based on how frequently the data changes:
+
+```typescript
+const tools = [
+  defineTool({
+    name: "getExchangeRate",
+    description: "Get currency exchange rate",
+    parameters: z.object({ from: z.string(), to: z.string() }),
+    execute: async ({ from, to }) => { /* ... */ },
+    cache: { ttl: 300_000 }, // 5 minutes — rates change slowly
+  }),
+  defineTool({
+    name: "getStockPrice",
+    description: "Get current stock price",
+    parameters: z.object({ symbol: z.string() }),
+    execute: async ({ symbol }) => { /* ... */ },
+    cache: { ttl: 30_000 }, // 30 seconds — prices change fast
+  }),
+  defineTool({
+    name: "getCurrentTime",
+    description: "Get the current date and time",
+    parameters: z.object({}),
+    execute: async () => new Date().toISOString(),
+    // No cache — always fresh
+  }),
+];
+```

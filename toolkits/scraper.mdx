@@ -50,3 +50,66 @@ const result = await agent.run("Summarize the content of https://radaros.dev");
 |------|-------------|
 | `scrape_url` | Fetch a URL and extract text content. Scripts, styles, nav, and footer are stripped. |
 | `scrape_links` | Extract all links from a page. Returns link text and absolute URLs. |
+
+---
+
+## Tool Usage Examples
+
+### Scrape and Summarize
+
+```typescript
+const result = await agent.run(
+  "Read https://radaros.dev/docs/getting-started and give me a quick summary"
+);
+
+// The agent calls scrape_url with:
+// { url: "https://radaros.dev/docs/getting-started" }
+//
+// Returns extracted text (HTML stripped, max 15000 chars):
+// "Getting Started\n\nRadarOS is an open-source framework for building AI agents..."
+//
+// The agent then summarizes the content for the user
+```
+
+### Extract Links
+
+```typescript
+const result = await agent.run(
+  "What documentation pages are linked from https://radaros.dev/docs?"
+);
+
+// The agent calls scrape_links with:
+// { url: "https://radaros.dev/docs" }
+//
+// Returns:
+// [
+//   { text: "Getting Started", url: "https://radaros.dev/docs/getting-started" },
+//   { text: "Agents", url: "https://radaros.dev/docs/agents/overview" },
+//   { text: "Tools", url: "https://radaros.dev/docs/agents/tools" },
+//   ...
+// ]
+```
+
+### Research Agent
+
+Combine the scraper with other toolkits for a research agent:
+
+```typescript
+import { Agent, openai, ScraperToolkit, HttpToolkit } from "@radaros/core";
+
+const agent = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  tools: [
+    ...new ScraperToolkit({ maxLength: 15_000 }).getTools(),
+    ...new HttpToolkit({ baseUrl: "https://api.example.com" }).getTools(),
+  ],
+  instructions: `You are a research assistant. Use the scraper to read web pages
+and the HTTP toolkit to query APIs. Synthesize information from multiple sources.`,
+  toolResultLimit: { maxChars: 20_000, strategy: "summarize", model: openai("gpt-4o-mini") },
+});
+
+const result = await agent.run(
+  "Research the latest trends in AI agents and summarize the key findings"
+);
+```

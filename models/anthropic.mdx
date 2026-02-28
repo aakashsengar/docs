@@ -79,6 +79,84 @@ const model = anthropic("claude-sonnet-4-20250514", {
 
 ---
 
+## Multi-Modal Support
+
+Anthropic Claude supports **images** and **files/documents** as input. Audio is not supported.
+
+### Images
+
+Pass images as base64 or URL in `ContentPart[]`:
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "What's in this image?" },
+  { type: "image", data: "https://example.com/photo.jpg", mimeType: "image/jpeg" },
+]);
+```
+
+### Files & Documents
+
+PDF and other documents can be sent via URL or base64. Anthropic processes them natively as document blocks:
+
+```typescript
+const result = await agent.run([
+  { type: "text", text: "Summarize this PDF." },
+  { type: "file", data: "https://example.com/report.pdf", mimeType: "application/pdf", filename: "report.pdf" },
+]);
+```
+
+Both URL-based and base64-encoded files are supported. The provider auto-detects the format.
+
+### Unsupported: Audio
+
+Audio input is not supported by Anthropic. If passed, the provider logs a warning and substitutes a placeholder text block.
+
+---
+
+## Reasoning / Extended Thinking
+
+Claude supports extended thinking — the model "thinks" step-by-step before responding. Enable it via the `reasoning` config on your agent:
+
+```typescript
+import { Agent, anthropic } from "@radaros/core";
+
+const agent = new Agent({
+  name: "deep-thinker",
+  model: anthropic("claude-sonnet-4-6"),
+  instructions: "Solve problems step by step.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 4000, // Max tokens for thinking (not shown to user)
+  },
+});
+
+const result = await agent.run(
+  "A farmer has 17 sheep. All but 9 run away. How many does he have left?"
+);
+
+console.log(result.thinking);
+// "Let me parse this carefully... 'all but 9 run away' means 9 remain..."
+console.log(result.text);
+// "The farmer has 9 sheep left."
+```
+
+<Warning>
+When `reasoning` is enabled, `maxTokens` is automatically adjusted. If your `maxTokens` is lower than `budgetTokens + 4096`, it's overridden to ensure room for both thinking and response. See [Reasoning](/agents/reasoning) for details.
+</Warning>
+
+---
+
+## Prompt Caching
+
+Anthropic automatically caches prompt prefixes for repeated conversations. This reduces cost and latency when the system prompt or conversation history is reused across requests. No configuration is needed — the SDK handles this transparently.
+
+Benefits are most significant when:
+- System prompts are long (e.g., detailed instructions, few-shot examples)
+- Conversations span many turns (the prefix is cached across requests in the same session)
+- Multiple users share the same agent instructions
+
+---
+
 ## Full Example
 
 ```typescript

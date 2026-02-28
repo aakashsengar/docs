@@ -39,6 +39,26 @@ Example extracted facts:
 - "Lives in Mumbai"
 - "Works on logistics software"
 
+The memory system automatically extracts facts from conversations:
+
+```typescript
+// Conversation:
+// User: "I'm based in Mumbai and usually work late, so schedule meetings after 6 PM IST."
+
+// Extracted facts:
+// - "Based in Mumbai"
+// - "Prefers meetings after 6 PM IST"
+// - "Works late hours"
+
+// The agent sees in its next run:
+// "User Facts:
+//  - Based in Mumbai
+//  - Prefers meetings after 6 PM IST
+//  - Works late hours"
+```
+
+User facts are deduplicated automatically — if the user says "I'm in Mumbai" twice, only one fact is stored.
+
 ## User Profile
 
 Structured user data — name, role, company, timezone, language, custom fields.
@@ -76,6 +96,21 @@ memory: {
 
 Provides tools: `search_entities`, `create_entity`.
 
+Entities are automatically extracted from conversations:
+
+```typescript
+// Conversation:
+// User: "We need to update the Xhipment dashboard. Talk to Raj from the frontend team."
+
+// Extracted entities:
+// - Xhipment (type: "product", attributes: { category: "dashboard" })
+// - Raj (type: "person", attributes: { team: "frontend" })
+
+// Agent can search entities using the auto-exposed tool:
+// search_entities({ query: "frontend" })
+// → [{ name: "Raj", type: "person", attributes: { team: "frontend" } }]
+```
+
 ## Decision Log
 
 Audit trail of agent decisions — what was decided, why, and what happened.
@@ -90,6 +125,28 @@ memory: {
 ```
 
 Provides tools: `log_decision`, `record_outcome`, `search_decisions`.
+
+Decisions are logged with context for audit trails:
+
+```typescript
+// The agent automatically logs decisions using the log_decision tool:
+// log_decision({
+//   decision: "Approved refund of $45.99 for order #12345",
+//   reasoning: "Order was delayed by 7 days, exceeding the 5-day SLA",
+//   context: "Customer reported non-delivery on Dec 22",
+// })
+
+// Later, search past decisions:
+// search_decisions({ query: "refund policy" })
+// → [{ decision: "Approved refund of $45.99...", reasoning: "..." }]
+
+// Record outcomes to track decision quality:
+// record_outcome({
+//   decisionId: "dec-abc123",
+//   outcome: "success",
+//   notes: "Customer confirmed receipt of refund",
+// })
+```
 
 ## Learned Knowledge
 
@@ -112,3 +169,54 @@ memory: {
 ```
 
 Both auto-injects relevant learnings into context AND exposes `save_learning` / `search_learnings` tools.
+
+### How Learnings Work
+
+```typescript
+// Setup with vector store
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    learnings: {
+      vectorStore: new QdrantVectorStore({
+        url: "http://localhost:6333",
+        embedding: new OpenAIEmbedding(),
+      }),
+      topK: 3, // Inject top 3 most relevant learnings
+    },
+  },
+});
+
+// During a conversation, the agent discovers a useful pattern:
+// Agent uses save_learning tool:
+// save_learning({
+//   content: "For delayed international shipments, check customs hold status
+//             before issuing refunds. 80% of 'lost' packages are stuck in customs.",
+//   tags: ["shipping", "customs", "refund"],
+// })
+
+// In a FUTURE conversation about a different delayed shipment:
+// The vector store finds this learning is relevant
+// and injects it into the system prompt:
+// "Relevant Learnings:
+//  - For delayed international shipments, check customs hold status
+//    before issuing refunds. 80% of 'lost' packages are stuck in customs."
+```
+
+The agent now proactively checks customs status before approving refunds — even though it learned this from a completely different conversation.
+
+---
+
+## All Auto-Exposed Tools
+
+When memory stores are enabled, these tools become available to the agent:
+
+| Store | Tools | Description |
+|-------|-------|-------------|
+| Entity Memory | `search_entities`, `create_entity` | Search and create entity records |
+| Decision Log | `log_decision`, `record_outcome`, `search_decisions` | Log decisions and track outcomes |
+| Learnings | `save_learning`, `search_learnings` | Save and retrieve vector-backed insights |
+
+These tools are automatically added to the agent's tool set — no manual registration needed.

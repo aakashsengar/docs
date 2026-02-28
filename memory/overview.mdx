@@ -53,9 +53,64 @@ const agent = new Agent({
 
 ## How It Works
 
-1. **Before each run** — `MemoryManager.buildContext()` assembles a context string from all enabled stores and injects it into the system prompt.
-2. **After each run** — `MemoryManager.afterRun()` fires background extraction for all enabled stores. This is non-blocking (fire-and-forget) so it never adds latency.
-3. **Session overflow** — When the session exceeds `maxMessages`, overflow messages are automatically summarized.
+Memory operates in a cycle around each agent run:
+
+### 1. Context Assembly (Before Run)
+
+`MemoryManager.buildContext()` gathers relevant data from all enabled stores and creates a context string injected into the system prompt:
+
+```typescript
+// What buildContext() produces (approximate):
+`
+## Memory Context
+
+### Session Summary
+The user previously discussed shipping delays for order #12345
+and requested a refund, which was processed successfully.
+
+### About This User
+- Name: Akash Sengar
+- Role: Product Manager
+- Company: Xhipment
+- Prefers dark mode
+- Timezone: Asia/Kolkata
+
+### Relevant Entities
+- Xhipment (company): Logistics platform, user's employer
+- Order #12345: Delayed shipment from Dec 15
+
+### Recent Decisions
+- Approved refund for order #12345 (reason: 7-day delay exceeded SLA)
+
+### Relevant Learnings
+- Refunds for delays >5 days should be auto-approved per company policy
+`
+```
+
+This context is appended to the system prompt, giving the model persistent awareness across sessions.
+
+### 2. Background Extraction (After Run)
+
+After each run completes, `MemoryManager.afterRun()` fires in the background (non-blocking). It sends the conversation to a cheaper model (`memory.model`) to extract:
+- New user facts and profile updates
+- Entity mentions (companies, people, projects)
+- Decision records
+- Learnings worth remembering
+
+```typescript
+// Background extraction happens automatically — no code needed.
+// To use a cheaper model for extraction:
+memory: {
+  storage,
+  model: openai("gpt-4o-mini"), // Uses ~10x less tokens than the main model
+  summaries: true,
+  userFacts: true,
+}
+```
+
+### 3. Session Overflow
+
+When the session exceeds `maxMessages`, the oldest messages are summarized into a single summary entry, then removed from the session. This keeps the active history small while preserving context through summaries.
 
 ## Works Everywhere
 
@@ -95,3 +150,34 @@ const facts = await mm?.getUserFacts()?.getFacts("user-123");
 const profile = await mm?.getUserProfile()?.getProfile("user-123");
 const entities = await mm?.getEntityMemory()?.listEntities();
 ```
+
+---
+
+## Inspecting Memory Context
+
+You can call `buildContext()` directly to see what the model receives:
+
+```typescript
+const mm = agent.memory;
+if (mm) {
+  const ctx = await mm.buildContext({
+    sessionId: "session-abc",
+    userId: "user-42",
+    agentName: "assistant",
+  });
+  console.log(ctx);
+  // Prints the full context string that would be injected into the system prompt
+}
+```
+
+This is useful for debugging — if the model seems to "forget" something, check if the relevant store is enabled and producing context.
+
+---
+
+## Cross-References
+
+- [Memory Stores](/memory/stores) — Deep dive into each store type
+- [Memory Curator](/memory/curator) — Pruning, dedup, and maintenance
+- [Learned Skills](/skills/learned-skills) — Vector-backed skill storage
+- [Cost Tracking](/cost/overview) — Memory extraction uses tokens; track the cost
+- [Storage Backends](/storage/overview) — MongoDB, Postgres, in-memory options

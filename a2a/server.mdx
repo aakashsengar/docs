@@ -172,6 +172,48 @@ When multiple agents are registered, the server resolves which agent to use:
 2. **Name matching** — The server checks if the message text mentions an agent name
 3. **Default** — Falls back to the first registered agent
 
+### Examples
+
+```bash
+# Explicit routing via metadata
+curl -X POST http://localhost:3001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{ "kind": "text", "text": "What is 2 + 2?" }],
+        "metadata": { "agentName": "calculator" }
+      }
+    }
+  }'
+```
+
+```typescript
+// A2A client routing example
+import { A2AClient } from "@radaros/transport";
+
+const client = new A2AClient("http://localhost:3001");
+
+// Discover available agents from the Agent Card
+const card = await client.getAgentCard();
+console.log("Available agents:", card.skills.map(s => s.name));
+// ["assistant", "calculator"]
+
+// Route to a specific agent
+const result = await client.sendMessage("What is 15 * 7?", {
+  agentName: "calculator",
+});
+console.log(result.text); // "105"
+
+// Without agentName — uses the default agent
+const result2 = await client.sendMessage("Hello!");
+// Routes to "assistant" (first registered)
+```
+
 ---
 
 ## Task Lifecycle

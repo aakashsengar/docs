@@ -62,3 +62,52 @@ const result = await agent.run("Send 'Hello team!' to #general");
 ```bash
 export SLACK_BOT_TOKEN="xoxb-..."
 ```
+
+---
+
+## Tool Usage Examples
+
+### Send a Message
+
+```typescript
+const result = await agent.run("Send 'Deployment complete! v2.3.1 is live.' to #deployments");
+
+// The agent calls slack_send_message with:
+// { channel: "#deployments", text: "Deployment complete! v2.3.1 is live." }
+```
+
+### Reply in Thread
+
+```typescript
+const result = await agent.run(
+  "Reply to the latest message in #support with " +
+  "'Thanks for reporting this. We're looking into it now.'"
+);
+
+// The agent calls slack_read_messages to find the latest message,
+// then calls slack_reply_thread with:
+// {
+//   channel: "#support",
+//   threadTs: "1709234567.123456",
+//   text: "Thanks for reporting this. We're looking into it now."
+// }
+```
+
+### List Channels
+
+```typescript
+const result = await agent.run("What channels do we have for the engineering team?");
+
+// The agent calls slack_list_channels
+// Returns: #engineering, #eng-frontend, #eng-backend, #eng-devops, #eng-standup
+```
+
+### Read Recent Messages
+
+```typescript
+const result = await agent.run("What's been discussed in #product today?");
+
+// The agent calls slack_read_messages with:
+// { channel: "#product", limit: 20 }
+// Then summarizes the conversation
+```

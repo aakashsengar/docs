@@ -74,3 +74,49 @@ export GOOGLE_CALENDAR_TOKEN_PATH="./token.json"
 ```
 
 See the [Gmail toolkit setup guide](/toolkits/gmail) for OAuth2 credential instructions — the process is identical.
+
+---
+
+## Tool Usage Examples
+
+### List Today's Events
+
+```typescript
+const result = await agent.run("What meetings do I have today?");
+
+// The agent calls calendar_list_events with:
+// { timeMin: "2026-02-26T00:00:00Z", timeMax: "2026-02-26T23:59:59Z" }
+//
+// Response:
+// "You have 3 meetings today:
+//  - 10:00 AM — Sprint Planning (Conference Room A)
+//  - 1:00 PM — 1:1 with Manager (Zoom)
+//  - 3:30 PM — Design Review (Conference Room B)"
+```
+
+### Create Event
+
+```typescript
+const result = await agent.run(
+  "Schedule a 30-minute meeting with sarah@company.com tomorrow at 2 PM " +
+  "titled 'Quick Sync'. Add a Zoom link in the description."
+);
+
+// The agent calls calendar_create_event with:
+// {
+//   summary: "Quick Sync",
+//   start: { dateTime: "2026-02-27T14:00:00+05:30" },
+//   end: { dateTime: "2026-02-27T14:30:00+05:30" },
+//   attendees: [{ email: "sarah@company.com" }],
+//   description: "Join via Zoom: https://..."
+// }
+```
+
+### Check Availability
+
+```typescript
+const result = await agent.run("Am I free next Monday afternoon?");
+
+// The agent calls calendar_list_events for Monday's time range
+// and reports availability gaps
+```

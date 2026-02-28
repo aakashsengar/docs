@@ -154,7 +154,50 @@ execute: async ({ query }, ctx) => {
 
 ## Tool Artifacts
 
-Artifacts are optional metadata attached to a tool result. They are stored in `ToolCallResult` and can be used by your application (e.g., for rendering charts, displaying images, or logging). The LLM only sees the `content` string.
+Artifacts are structured data attached to a tool result. The LLM only sees the `content` string, but your application receives the full artifacts in `ToolCallResult`. Use artifacts to pass structured data (JSON, images, charts) through the agent pipeline without polluting the LLM context.
+
+```typescript
+const chartTool = defineTool({
+  name: "generateChart",
+  description: "Generate a sales chart for a given time period",
+  parameters: z.object({
+    period: z.enum(["week", "month", "quarter"]).describe("Time period"),
+  }),
+  execute: async ({ period }) => {
+    const data = await getSalesData(period);
+    const chartUrl = await renderChart(data);
+
+    return {
+      content: `Generated ${period}ly sales chart. Total revenue: $${data.total.toLocaleString()}.`,
+      artifacts: [
+        {
+          type: "chart",
+          data: { url: chartUrl, period, dataPoints: data.points },
+          mimeType: "image/png",
+        },
+        {
+          type: "raw_data",
+          data: data.points,
+          mimeType: "application/json",
+        },
+      ],
+    };
+  },
+});
+
+const result = await agent.run("Show me this month's sales chart");
+console.log(result.text); // LLM's summary
+
+// Access artifacts from tool calls
+for (const tc of result.toolCalls) {
+  const artifacts = tc.result?.artifacts ?? [];
+  for (const artifact of artifacts) {
+    if (artifact.type === "chart") {
+      displayChart(artifact.data.url);
+    }
+  }
+}
+```
 
 ---
 
@@ -230,6 +273,40 @@ const riskyTool = defineTool({
   requiresApproval: true,
 });
 ```
+
+---
+
+## Tool Error Handling
+
+When a tool's `execute` function throws an error, RadarOS catches it and returns the error message as the tool result. The LLM sees the error and can decide how to respond — often retrying with different arguments or explaining the failure to the user.
+
+```typescript
+const flightTool = defineTool({
+  name: "searchFlights",
+  description: "Search for available flights",
+  parameters: z.object({
+    origin: z.string().describe("Airport code (e.g. LAX)"),
+    destination: z.string().describe("Airport code (e.g. JFK)"),
+    date: z.string().describe("Date in YYYY-MM-DD format"),
+  }),
+  execute: async ({ origin, destination, date }) => {
+    const flights = await flightAPI.search(origin, destination, date);
+    if (flights.length === 0) {
+      throw new Error(`No flights found from ${origin} to ${destination} on ${date}`);
+    }
+    return JSON.stringify(flights.slice(0, 5));
+  },
+});
+```
+
+When the tool throws, the LLM receives:
+```
+Error: No flights found from LAX to JFK on 2026-03-15
+```
+
+The LLM can then inform the user or try alternative dates. Tool errors do **not** abort the run — they are treated as informational results.
+
+For schema validation errors (wrong argument types), RadarOS returns a descriptive validation error so the model can self-correct.
 
 ---
 

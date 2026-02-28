@@ -113,3 +113,68 @@ When `logLevel` is `"info"` or higher, the agent logger displays:
 
 - Thinking content (truncated, italic, dimmed)
 - Reasoning token count with a brain icon in the usage summary
+
+---
+
+## Accessing Thinking Content
+
+When reasoning is enabled, the model's internal thinking is available in `RunOutput.thinking`:
+
+```typescript
+const agent = new Agent({
+  name: "analyst",
+  model: anthropic("claude-sonnet-4-6"),
+  reasoning: { enabled: true, budgetTokens: 4000 },
+  instructions: "You are a financial analyst. Think through problems step by step.",
+});
+
+const result = await agent.run("Should I invest in AAPL at current prices?");
+
+console.log("Thinking:", result.thinking);
+// "Let me analyze AAPL's current fundamentals... P/E ratio is..."
+
+console.log("Response:", result.text);
+// The final response the user sees
+
+console.log("Reasoning tokens:", result.usage.reasoningTokens);
+// Number of tokens used for thinking (not billed as output on some providers)
+```
+
+The `thinking` content is never shown to end users by default — it's available for debugging, logging, or advanced use cases.
+
+---
+
+## Reasoning with maxTokens
+
+When reasoning is enabled on Anthropic, `maxTokens` must accommodate both thinking and response tokens. RadarOS handles this automatically:
+
+- If `maxTokens` is set but too small for the thinking budget, it's overridden to `budgetTokens + 4096`
+- For example: `maxTokens: 1024` with `budgetTokens: 2000` results in an effective `max_tokens` of `6096` sent to the Anthropic API
+
+```typescript
+const agent = new Agent({
+  name: "thinker",
+  model: anthropic("claude-sonnet-4-6"),
+  maxTokens: 1024, // This will be overridden to 6096
+  reasoning: { enabled: true, budgetTokens: 2000 },
+});
+```
+
+If you want precise control over `max_tokens`, set `maxTokens` to a value larger than `budgetTokens + 1024`.
+
+---
+
+## Logging Reasoning Output
+
+Enable `logLevel: "debug"` to see thinking content in the console:
+
+```typescript
+const agent = new Agent({
+  name: "debugger",
+  model: anthropic("claude-sonnet-4-6"),
+  reasoning: { enabled: true, budgetTokens: 3000 },
+  logLevel: "debug", // Prints thinking content to console
+});
+```
+
+At `"info"` level, only token usage summaries are logged. At `"debug"`, the full thinking content is printed.

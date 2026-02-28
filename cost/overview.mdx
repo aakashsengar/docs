@@ -85,3 +85,163 @@ summary.byUser["user-42"];     // { cost, tokens }
 |-------|---------|
 | `cost.tracked` | `{ runId, agentName, modelId, usage }` |
 | `cost.budget.exceeded` | `{ runId, agentName, budget, current, limit }` |
+
+---
+
+## Subscribing to Cost Events
+
+Listen for cost events to build dashboards, alerts, or analytics:
+
+```typescript
+import { Agent, openai, CostTracker } from "@radaros/core";
+
+const tracker = new CostTracker({
+  budget: { maxCostPerSession: 2.0, onBudgetExceeded: "warn" },
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+// Track every LLM call's cost
+agent.on("cost.tracked", ({ runId, agentName, modelId, usage }) => {
+  console.log(
+    `[Cost] ${agentName} / ${modelId}: ` +
+    `${usage.promptTokens} prompt + ${usage.completionTokens} completion = $${usage.cost.toFixed(4)}`
+  );
+});
+
+// Alert when budget is exceeded
+agent.on("cost.budget.exceeded", ({ agentName, budget, current, limit }) => {
+  console.warn(
+    `[Budget] ${agentName} exceeded ${budget}: $${current.toFixed(2)} / $${limit.toFixed(2)}`
+  );
+  // Send alert to Slack, PagerDuty, etc.
+});
+```
+
+---
+
+## Per-Agent and Per-Model Breakdown
+
+The cost summary provides granular breakdowns:
+
+```typescript
+const tracker = new CostTracker();
+
+// Run multiple agents with different models
+const assistantAgent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+const routerAgent = new Agent({
+  name: "router",
+  model: openai("gpt-4o-mini"),
+  costTracker: tracker,
+});
+
+await assistantAgent.run("Complex analysis task", { userId: "user-42" });
+await routerAgent.run("Route this request", { userId: "user-42" });
+
+const summary = tracker.getSummary();
+
+// Per-agent costs
+console.log("By Agent:");
+for (const [name, data] of Object.entries(summary.byAgent)) {
+  console.log(`  ${name}: $${data.cost.toFixed(4)} (${data.runs} runs)`);
+}
+// assistant: $0.0245 (1 runs)
+// router:    $0.0003 (1 runs)
+
+// Per-model costs
+console.log("By Model:");
+for (const [model, data] of Object.entries(summary.byModel)) {
+  console.log(`  ${model}: $${data.cost.toFixed(4)}`);
+}
+// gpt-4o:      $0.0245
+// gpt-4o-mini: $0.0003
+
+// Per-user costs
+console.log("By User:");
+for (const [user, data] of Object.entries(summary.byUser)) {
+  console.log(`  ${user}: $${data.cost.toFixed(4)}`);
+}
+// user-42: $0.0248
+```
+
+---
+
+## Custom Pricing for Non-Built-in Models
+
+Add pricing for self-hosted, fine-tuned, or new models:
+
+```typescript
+const tracker = new CostTracker({
+  pricing: {
+    // Fine-tuned model
+    "ft:gpt-4o-mini:my-org:custom:abc123": {
+      promptPer1k: 0.0003,
+      completionPer1k: 0.0012,
+    },
+    // Self-hosted model via Ollama (cost = electricity, but track tokens)
+    "llama3.1": {
+      promptPer1k: 0,
+      completionPer1k: 0,
+    },
+    // New model not yet in built-in pricing
+    "claude-opus-next": {
+      promptPer1k: 0.015,
+      completionPer1k: 0.075,
+    },
+  },
+});
+```
+
+If a model has no pricing entry (built-in or custom), the cost is recorded as $0 but token counts are still tracked.
+
+---
+
+## Budget Enforcement in Practice
+
+```typescript
+const tracker = new CostTracker({
+  budget: {
+    maxCostPerRun: 0.50,       // No single run should cost more than $0.50
+    maxCostPerSession: 2.00,   // Session budget of $2
+    maxCostPerUser: 20.00,     // Monthly user budget
+    maxTokensPerRun: 50_000,   // Hard token limit
+    onBudgetExceeded: "throw", // Throws CostBudgetExceededError
+  },
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+try {
+  await agent.run("Analyze this massive dataset...", {
+    sessionId: "s1",
+    userId: "user-42",
+  });
+} catch (error) {
+  if (error.name === "CostBudgetExceededError") {
+    console.log("Budget exceeded — inform the user or switch to a cheaper model");
+  }
+}
+```
+
+With `onBudgetExceeded: "warn"`, the run continues but emits a `cost.budget.exceeded` event instead of throwing.
+
+---
+
+## Cross-References
+
+- [Agent Overview](/agents/overview) — `costTracker` in AgentConfig
+- [Tool Result Limits](/agents/tools#tool-result-limits) — Reduce token costs from large tool results
+- [Observability](/observability/overview) — Track costs alongside traces and metrics

@@ -115,7 +115,42 @@ Primary key: `(namespace, key)`.
 
 ## Multi-Instance Deployments
 
-PostgresStorage is suitable for horizontal scaling. Multiple Node.js processes can share the same PostgreSQL database. Use connection pooling (handled by `pg` internally) for efficient concurrent access.
+PostgresStorage is designed for horizontal scaling. Multiple Node.js processes can safely share the same PostgreSQL database.
+
+### Connection Pooling
+
+The `pg` driver manages a connection pool internally. For high-concurrency deployments, configure the pool size:
+
+```typescript
+import { PostgresStorage } from "@radaros/core";
+
+const storage = new PostgresStorage(
+  process.env.DATABASE_URL!,
+  { max: 20 } // Max 20 connections in the pool (default: 10)
+);
+await storage.initialize();
+```
+
+### Load Balancer Setup
+
+```
+┌─────────────┐     ┌──────────────┐
+│  Instance 1  │────▶│              │
+├─────────────┤     │  PostgreSQL  │
+│  Instance 2  │────▶│              │
+├─────────────┤     │   (shared)   │
+│  Instance 3  │────▶│              │
+└─────────────┘     └──────────────┘
+```
+
+All instances read and write to the same `kv_store` table. The `(namespace, key)` primary key ensures consistency, and `JSONB` values allow atomic updates.
+
+### Best Practices
+
+- Use a managed PostgreSQL service (RDS, Cloud SQL, Supabase) for production
+- Enable SSL for database connections: `?sslmode=require` in the connection string
+- Monitor connection pool usage to avoid exhaustion under load
+- Run `VACUUM ANALYZE kv_store` periodically for optimal query performance
 
 ---
 

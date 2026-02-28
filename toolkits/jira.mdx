@@ -67,3 +67,61 @@ export JIRA_API_TOKEN="ATATT..."
 ```
 
 Create an API token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+
+---
+
+## Tool Usage Examples
+
+### Search Issues with JQL
+
+```typescript
+const result = await agent.run("Find all high-priority bugs assigned to me in the PROJ project");
+
+// The agent calls jira_search_issues with:
+// { jql: "project = PROJ AND type = Bug AND priority = High AND assignee = currentUser() ORDER BY created DESC" }
+//
+// Returns:
+// PROJ-142 — Login timeout on slow networks (High, In Progress)
+// PROJ-138 — Dashboard charts not rendering (High, Open)
+```
+
+### Create Issue
+
+```typescript
+const result = await agent.run(
+  "Create a story in PROJ: 'Add dark mode support' with high priority. " +
+  "Description: Implement dark mode toggle in user settings."
+);
+
+// The agent calls jira_create_issue with:
+// {
+//   project: "PROJ",
+//   summary: "Add dark mode support",
+//   issueType: "Story",
+//   priority: "High",
+//   description: "Implement dark mode toggle in user settings."
+// }
+```
+
+### Transition Issue
+
+```typescript
+const result = await agent.run("Move PROJ-142 to 'In Review'");
+
+// The agent calls jira_update_issue with:
+// { issueKey: "PROJ-142", transition: "In Review" }
+```
+
+### Add Comment
+
+```typescript
+const result = await agent.run(
+  "Add a comment to PROJ-138: 'Root cause identified — missing polyfill for Chart.js. Fix in PR #245.'"
+);
+
+// The agent calls jira_add_comment with:
+// {
+//   issueKey: "PROJ-138",
+//   body: "Root cause identified — missing polyfill for Chart.js. Fix in PR #245."
+// }
+```

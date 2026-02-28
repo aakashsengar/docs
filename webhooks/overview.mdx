@@ -79,13 +79,37 @@ emailWebhook({
 
 ### Custom Destination
 
+Build your own destination by implementing the `WebhookDestination` interface:
+
 ```typescript
-const myDestination: WebhookDestination = {
-  name: "my-system",
-  async send(event, payload) {
-    // Your custom logic
+import type { WebhookDestination } from "@radaros/core";
+
+const datadogDestination: WebhookDestination = {
+  name: "datadog",
+  async send(event: string, payload: Record<string, unknown>) {
+    await fetch("https://http-intake.logs.datadoghq.com/api/v2/logs", {
+      method: "POST",
+      headers: {
+        "DD-API-KEY": process.env.DD_API_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ddsource: "radaros",
+        ddtags: `event:${event},agent:${payload.agentName}`,
+        message: JSON.stringify(payload),
+      }),
+    });
   },
 };
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  webhooks: {
+    destinations: [datadogDestination],
+    events: ["run.complete", "run.error", "cost.tracked"],
+  },
+});
 ```
 
 ## Configuration
@@ -105,3 +129,81 @@ interface WebhookConfig {
 All events from the `AgentEventMap` are supported, including:
 
 `run.start`, `run.complete`, `run.error`, `tool.call`, `tool.result`, `team.delegate`, `handoff.transfer`, `handoff.complete`, `cost.tracked`, `cache.hit`, `cache.miss`, `memory.stored`, `skill.loaded`, and more.
+
+---
+
+## Event Filtering
+
+Only forward specific events to specific destinations:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  webhooks: {
+    destinations: [
+      httpWebhook({ url: "https://api.example.com/all-events" }),
+      slackWebhook({
+        webhookUrl: "https://hooks.slack.com/...",
+        channel: "#alerts",
+      }),
+    ],
+    events: [
+      "run.complete",
+      "run.error",
+      "cost.budget.exceeded",
+      "handoff.transfer",
+    ],
+    retries: 3,
+    onError: "log",
+  },
+});
+```
+
+Only the listed events are forwarded. Omit `events` to forward everything.
+
+---
+
+## Batching
+
+For high-throughput agents, batch events before sending to reduce HTTP calls:
+
+```typescript
+webhooks: {
+  destinations: [httpWebhook({ url: "https://api.example.com/events" })],
+  batchInterval: 5000, // Batch events for 5 seconds before sending
+}
+```
+
+Batched events are sent as an array in a single HTTP request. The batch flushes either when `batchInterval` elapses or when 100 events accumulate (whichever comes first).
+
+---
+
+## HMAC Signature Verification
+
+When using `httpWebhook` with a `secret`, every request includes a `X-Webhook-Signature` header. Verify it on your server:
+
+```typescript
+import crypto from "node:crypto";
+
+function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string,
+): boolean {
+  const expected = "sha256=" +
+    crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
+// In your Express handler:
+app.post("/webhooks", (req, res) => {
+  const sig = req.headers["x-webhook-signature"] as string;
+  if (!verifyWebhookSignature(JSON.stringify(req.body), sig, "my-hmac-secret")) {
+    return res.status(401).send("Invalid signature");
+  }
+  // Process the event
+  console.log(req.body.event, req.body.payload);
+  res.sendStatus(200);
+});
+```

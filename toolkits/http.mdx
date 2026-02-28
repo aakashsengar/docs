@@ -56,3 +56,67 @@ const result = await agent.run("Get the list of users from the API");
 | Tool | Description |
 |------|-------------|
 | `http_request` | Make an HTTP request (GET, POST, PUT, PATCH, DELETE). Returns status, headers, and body. |
+
+---
+
+## Tool Usage Examples
+
+### GET Request
+
+```typescript
+const result = await agent.run("Get the list of products from our API");
+
+// The agent calls http_request with:
+// { method: "GET", url: "/products?limit=20" }
+//
+// baseUrl is prepended: https://api.example.com/products?limit=20
+```
+
+### POST Request
+
+```typescript
+const result = await agent.run(
+  "Create a new user with name 'Jane Doe' and email 'jane@example.com'"
+);
+
+// The agent calls http_request with:
+// {
+//   method: "POST",
+//   url: "/users",
+//   body: { name: "Jane Doe", email: "jane@example.com" },
+//   headers: { "Content-Type": "application/json" }
+// }
+```
+
+### Error Handling
+
+The tool returns the full HTTP response including status code, so the agent can interpret errors:
+
+```typescript
+const result = await agent.run("Delete user 999 from the API");
+
+// The agent calls http_request with:
+// { method: "DELETE", url: "/users/999" }
+//
+// If the API returns 404:
+// "The user with ID 999 was not found. The API returned a 404 Not Found error."
+```
+
+### Response Truncation
+
+Large API responses are automatically truncated to `maxResponseSize` (default 20,000 characters). Combine with `toolResultLimit` for further control:
+
+```typescript
+const http = new HttpToolkit({
+  baseUrl: "https://api.example.com",
+  headers: { Authorization: "Bearer sk-..." },
+  maxResponseSize: 10_000,
+});
+
+const agent = new Agent({
+  name: "api-agent",
+  model: openai("gpt-4o"),
+  tools: [...http.getTools()],
+  toolResultLimit: { maxChars: 20_000, strategy: "truncate" },
+});
+```

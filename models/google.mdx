@@ -118,6 +118,67 @@ const response = await model.generate(messages);
   </CodeGroup.Item>
 </CodeGroup>
 
+### Files & Documents
+
+Gemini handles files natively — including PDF, CSV, XLSX, and more. It's the only provider that supports XLSX directly:
+
+```typescript
+import { Agent, google, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "file-analyzer",
+  model: google("gemini-2.5-flash"),
+  instructions: "Analyze documents and data files thoroughly.",
+});
+
+// PDF analysis
+const pdfResult = await agent.run([
+  { type: "text", text: "Summarize the key findings." },
+  {
+    type: "file",
+    data: readFileSync("report.pdf").toString("base64"),
+    mimeType: "application/pdf",
+    filename: "report.pdf",
+  },
+] as ContentPart[]);
+
+// Excel file (XLSX) — only Gemini supports this natively
+const xlsxResult = await agent.run([
+  { type: "text", text: "What are the total sales by region?" },
+  {
+    type: "file",
+    data: readFileSync("sales.xlsx").toString("base64"),
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    filename: "sales.xlsx",
+  },
+] as ContentPart[]);
+
+// CSV file
+const csvResult = await agent.run([
+  { type: "text", text: "Find the outliers in this dataset." },
+  {
+    type: "file",
+    data: readFileSync("data.csv").toString("base64"),
+    mimeType: "text/csv",
+    filename: "data.csv",
+  },
+] as ContentPart[]);
+```
+
+### Supported File Types
+
+| Format | MIME Type | Support |
+|--------|-----------|---------|
+| PDF | `application/pdf` | Full |
+| CSV | `text/csv` | Full |
+| XLSX | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | Full (unique to Gemini) |
+| Plain text | `text/plain` | Full |
+| HTML | `text/html` | Full |
+| JSON | `application/json` | Full |
+
+Gemini processes file content natively via `inlineData`, making it the most versatile provider for document analysis tasks.
+
 ---
 
 ## Realtime / Voice (Gemini Live)

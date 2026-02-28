@@ -44,6 +44,24 @@ await agent.memory.curator.clearAll({
 });
 ```
 
+### Scoping
+
+You can scope `clearAll` to different levels:
+
+```typescript
+// Clear everything for a specific user across all agents
+await curator.clearAll({ userId: "user-123" });
+
+// Clear everything for a specific agent (all users)
+await curator.clearAll({ agentName: "assistant" });
+
+// Clear a specific user's data for a specific agent
+await curator.clearAll({ userId: "user-123", agentName: "assistant" });
+
+// Nuclear option: clear ALL memory data
+await curator.clearAll({});
+```
+
 ## Scheduling Maintenance
 
 For production use, run curator operations on a schedule:
@@ -56,3 +74,66 @@ new CronJob("0 3 * * *", async () => {
   await agent.memory.curator.deduplicate({ userId: "user-123" });
 }).start();
 ```
+
+---
+
+## Full Maintenance Example
+
+A production-ready maintenance script that runs daily:
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage({ uri: process.env.MONGODB_URI! });
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    summaries: true,
+    userFacts: true,
+    entities: true,
+    decisions: true,
+  },
+});
+
+async function runMaintenance() {
+  const curator = agent.memory!.curator;
+
+  // Step 1: Prune old data (older than 90 days)
+  const pruned = await curator.prune({
+    maxAgeDays: 90,
+    agentName: "assistant",
+  });
+  console.log(`Pruned ${pruned} old entries`);
+
+  // Step 2: Deduplicate user facts for all active users
+  const activeUsers = await storage.listUsers("assistant");
+  let totalDeduped = 0;
+  for (const userId of activeUsers) {
+    const removed = await curator.deduplicate({ userId });
+    totalDeduped += removed;
+  }
+  console.log(`Removed ${totalDeduped} duplicate facts across ${activeUsers.length} users`);
+
+  // Step 3: Log maintenance results
+  console.log(`Maintenance complete: ${pruned} pruned, ${totalDeduped} deduped`);
+}
+
+// Run daily at 3 AM
+import { CronJob } from "cron";
+new CronJob("0 3 * * *", runMaintenance).start();
+```
+
+---
+
+## Why Maintenance Matters
+
+Without periodic maintenance:
+- **User facts accumulate** — duplicate or stale facts waste context tokens
+- **Old sessions pile up** — storage costs increase
+- **Entity memory grows** — irrelevant entities dilute search results
+- **Decision logs expand** — outdated decisions may mislead the agent
+
+A weekly or monthly maintenance run keeps memory lean and context relevant.
