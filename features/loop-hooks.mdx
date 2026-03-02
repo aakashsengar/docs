@@ -1,0 +1,56 @@
+---
+title: "Loop Hooks"
+description: "Per-roundtrip hooks for fine-grained LLM loop control"
+---
+
+# Loop Hooks
+
+Loop hooks provide 5 intercept points inside the LLM tool-calling loop, enabling per-roundtrip control over messages, tool execution, and cost management.
+
+## Hook Interface
+
+```typescript
+interface LoopHooks {
+  beforeLLMCall?: (messages: ChatMessage[], roundtrip: number) => Promise<ChatMessage[] | void>;
+  afterLLMCall?: (response: { finishReason: string; usage: TokenUsage }, roundtrip: number) => Promise<void>;
+  beforeToolExec?: (toolName: string, args: unknown) => Promise<{ skip?: boolean; result?: string } | void>;
+  afterToolExec?: (toolName: string, result: string) => Promise<string | void>;
+  onRoundtripComplete?: (roundtrip: number, tokensSoFar: TokenUsage) => Promise<{ stop?: boolean } | void>;
+}
+```
+
+## Usage
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "monitored-agent",
+  model: openai("gpt-4o"),
+  loopHooks: {
+    beforeLLMCall: async (messages, roundtrip) => {
+      console.log(`Roundtrip ${roundtrip}: ${messages.length} messages`);
+    },
+    afterToolExec: async (toolName, result) => {
+      console.log(`Tool ${toolName} returned ${result.length} chars`);
+    },
+    onRoundtripComplete: async (roundtrip, tokens) => {
+      if (tokens.totalTokens > 50000) {
+        return { stop: true }; // graceful early exit
+      }
+    },
+  },
+});
+```
+
+## Hook Points
+
+| Hook | When | Can Modify |
+|------|------|------------|
+| `beforeLLMCall` | Before each LLM API call | Return new messages array |
+| `afterLLMCall` | After LLM response | Read-only |
+| `beforeToolExec` | Before each tool execution | Skip tool, provide mock result |
+| `afterToolExec` | After each tool execution | Transform the result string |
+| `onRoundtripComplete` | After all tools in a roundtrip | Stop the loop early |
+
+These hooks are the foundation for context compaction, cost auto-stop, PII scrubbing, and checkpointing.

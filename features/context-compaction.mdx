@@ -1,0 +1,47 @@
+---
+title: "Context Compaction"
+description: "Token-aware context auto-compaction to prevent context window overflow"
+---
+
+# Token-aware Context Compaction
+
+Agents with long conversations or large tool results can exceed the model's context window. The `ContextCompactor` automatically manages context size before each LLM call.
+
+## Configuration
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "long-conversation-bot",
+  model: openai("gpt-4o"),
+  contextCompactor: {
+    maxContextTokens: 120_000, // for 128k context window
+    reserveTokens: 4096,      // leave room for the response
+    strategy: "hybrid",       // "trim" | "summarize" | "hybrid"
+    summarizeModel: openai("gpt-4o-mini"), // cheap model for summaries
+  },
+});
+```
+
+## Strategies
+
+### Trim
+Drops oldest non-system messages first, keeping the system prompt and most recent exchanges intact.
+
+### Summarize
+Uses a cheap model to summarize older messages into a single compact summary, preserving key context while reducing token count.
+
+### Hybrid
+Trims first, then summarizes if still over budget. Best balance of speed and context preservation.
+
+## How It Works
+
+The compactor hooks into the `beforeLLMCall` loop hook and runs before every LLM API call:
+
+1. Estimates token count of all messages
+2. If under budget, passes through unchanged
+3. If over budget, applies the configured strategy
+4. Returns the compacted messages to the LLM
+
+System messages are always preserved. The most recent user/assistant exchanges are prioritized.

@@ -1,0 +1,55 @@
+---
+title: "Approval Gates"
+description: "Human-in-the-loop approval for tool calls"
+---
+
+# Human-in-the-Loop Approval Gates
+
+RadarOS supports requiring human approval before executing sensitive tool calls. Approvals work via callbacks, events, or REST API.
+
+## Configuration
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "careful-bot",
+  model: openai("gpt-4o"),
+  tools: [deleteTool, readTool],
+  approval: {
+    policy: ["delete_record"], // only this tool needs approval
+    timeout: 60_000,
+    timeoutAction: "deny", // "approve" | "deny" | "throw"
+  },
+});
+```
+
+## REST API
+
+When using the transport layer, three approval endpoints are automatically available:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/approvals/pending` | GET | List all pending approval requests |
+| `/approvals/:requestId/approve` | POST | Approve a pending request |
+| `/approvals/:requestId/deny` | POST | Deny a pending request |
+| `/approvals/stream` | GET (SSE) | Real-time stream of new approval requests |
+
+## SSE Integration
+
+```javascript
+const source = new EventSource("/approvals/stream");
+source.onmessage = (event) => {
+  const request = JSON.parse(event.data);
+  // Show approval UI to human reviewer
+  showApprovalDialog(request);
+};
+```
+
+## Timeout Actions
+
+| Action | Behavior |
+|--------|----------|
+| `"deny"` (default) | Auto-deny when timeout expires |
+| `"approve"` | Auto-approve when timeout expires |
+| `"throw"` | Throw an error when timeout expires |

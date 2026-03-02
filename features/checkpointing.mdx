@@ -1,0 +1,74 @@
+---
+title: "Checkpointing"
+description: "Agent checkpointing and rollback for fault tolerance"
+---
+
+# Agent Checkpointing & Rollback
+
+The `CheckpointManager` saves agent state after each tool roundtrip, enabling rollback to any previous point in a run.
+
+## Configuration
+
+```typescript
+import { Agent, openai, CheckpointManager } from "@radaros/core";
+
+const checkpoints = new CheckpointManager(); // uses in-memory storage
+
+const agent = new Agent({
+  name: "resilient-bot",
+  model: openai("gpt-4o"),
+  checkpointing: true, // enable auto-checkpointing
+});
+```
+
+## Checkpoint Data
+
+Each checkpoint captures:
+- `messages` — the full conversation history at that point
+- `tokenUsage` — cumulative token usage
+- `sessionState` — the agent's session state
+- `roundtrip` — which roundtrip this checkpoint was taken after
+- `timestamp` — when the checkpoint was created
+
+## REST Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/agents/:name/checkpoints?runId=X` | GET | List checkpoints for a run |
+| `/agents/:name/rollback/:checkpointId` | POST | Rollback to a checkpoint |
+
+## Programmatic Usage
+
+```typescript
+const manager = new CheckpointManager(storage);
+
+// Save a checkpoint
+const id = await manager.save({
+  runId: "run-123",
+  roundtrip: 2,
+  messages: [...currentMessages],
+  tokenUsage: { promptTokens: 5000, completionTokens: 2000, totalTokens: 7000 },
+  sessionState: { step: "analysis" },
+});
+
+// List checkpoints for a run
+const checkpoints = await manager.list("run-123");
+
+// Rollback (deletes all later checkpoints)
+const restored = await manager.rollback(id);
+
+// Prune old checkpoints (older than 24 hours)
+const pruned = await manager.prune(86_400_000);
+```
+
+## Storage
+
+By default, checkpoints use in-memory storage. For persistence, pass any `StorageDriver`:
+
+```typescript
+import { SqliteStorage } from "@radaros/core";
+
+const checkpoints = new CheckpointManager(
+  new SqliteStorage({ path: "./checkpoints.db" })
+);
+```

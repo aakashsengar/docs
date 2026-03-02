@@ -1,0 +1,59 @@
+---
+title: "Metrics Export"
+description: "Real-time agent metrics for dashboards and monitoring"
+---
+
+# Real-time Metrics Export
+
+The `MetricsExporter` provides per-agent metrics in Prometheus, JSON, and real-time streaming formats.
+
+## Setup
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { MetricsExporter } from "@radaros/observability";
+import { createAgentRouter } from "@radaros/transport";
+
+const exporter = new MetricsExporter();
+const agent = new Agent({ name: "bot", model: openai("gpt-4o") });
+exporter.attach(agent.eventBus);
+
+const router = createAgentRouter({
+  metricsExporter: exporter,
+  cors: true,
+});
+```
+
+## REST Endpoints
+
+| Endpoint | Format | Description |
+|----------|--------|-------------|
+| `GET /metrics` | Prometheus text | Scrape-ready for Prometheus/Grafana |
+| `GET /metrics/json` | JSON | Dashboard-friendly JSON |
+| `GET /metrics/json?agent=bot` | JSON | Per-agent metrics |
+| `GET /metrics/stream` | SSE | Real-time event stream |
+
+## Available Metrics
+
+- **runs** — total agent runs
+- **errors** — total errors
+- **avgDurationMs** — average run duration
+- **p95DurationMs** — 95th percentile latency
+- **totalCost** — accumulated USD cost
+- **totalTokens** — total tokens consumed
+- **toolCallCount** — total tool invocations
+- **toolUsageFrequency** — per-tool call counts
+- **errorRate** — error ratio
+- **tokensPerRun** — average tokens per successful run
+
+## Prometheus Format
+
+```
+radaros_agent_runs_total{agent="bot"} 42
+radaros_agent_errors_total{agent="bot"} 1
+radaros_agent_duration_ms_avg{agent="bot"} 1250
+radaros_agent_duration_ms_p95{agent="bot"} 3200
+radaros_agent_tokens_total{agent="bot"} 125000
+radaros_agent_cost_usd_total{agent="bot"} 0.85
+radaros_agent_tool_calls_total{agent="bot"} 156
+```

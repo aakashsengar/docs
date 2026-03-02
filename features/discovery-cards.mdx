@@ -1,0 +1,54 @@
+---
+title: "Discovery Cards"
+description: "A2A-style agent discovery cards for inter-agent communication"
+---
+
+# Agent Discovery Cards
+
+Every registered agent automatically gets a discovery card — a JSON descriptor following the A2A (Agent-to-Agent) pattern. This enables agents to discover each other's capabilities.
+
+## REST Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /agents/:name/card` | Get a single agent's discovery card |
+| `GET /.well-known/agent-cards.json` | List all agent cards |
+
+## Card Format
+
+```json
+{
+  "name": "research-bot",
+  "description": "Helps with research tasks using web search and knowledge bases",
+  "model": "gpt-4o",
+  "provider": "openai",
+  "url": "/agents/research-bot",
+  "capabilities": ["tools", "memory", "streaming", "cost_tracking"],
+  "tools": [
+    { "name": "web_search", "description": "Search the web" },
+    { "name": "knowledge_query", "description": "Query the knowledge base" }
+  ],
+  "hasStructuredOutput": false,
+  "outputSchema": "text",
+  "version": "1.0.0"
+}
+```
+
+## Auto-detected Capabilities
+
+The card automatically detects and lists:
+- `memory` — agent has MemoryManager configured
+- `tools` — agent has tools registered
+- `structured_output` — agent uses Zod schema for structured output
+- `handoff` — agent supports handoff to other agents
+- `cost_tracking` — agent has a CostTracker
+- `caching` — agent uses semantic caching
+- `context_compaction` — agent uses context compaction
+- `checkpointing` — agent has checkpointing enabled
+- `streaming` — always present (all agents support streaming)
+
+## Extended Registry
+
+`registry.describeAgents()` now returns additional fields:
+- `description` — first sentence of the agent's instructions
+- `capabilities` — auto-detected list of capabilities

@@ -1,0 +1,148 @@
+---
+title: PageIndex
+description: Vectorless, reasoning-based RAG — submit PDFs, build tree indexes, and retrieve via LLM reasoning.
+---
+
+# PageIndex
+
+Reasoning-based RAG for complex, long-form documents. Unlike vector search, PageIndex builds a hierarchical tree index and uses LLM reasoning to navigate it — delivering significantly better accuracy on financial reports, legal filings, technical manuals, and research papers.
+
+<Info>
+  Uses the PageIndex cloud API — no vector database or embedding pipeline needed.
+</Info>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, PageIndexToolkit } from "@radaros/core";
+
+const pageindex = new PageIndexToolkit({
+  apiKey: process.env.PAGEINDEX_API_KEY,
+});
+
+const agent = new Agent({
+  name: "document-analyst",
+  model: openai("gpt-4o"),
+  instructions: "Analyze uploaded documents. Answer questions accurately with citations.",
+  tools: [...pageindex.getTools()],
+});
+
+const result = await agent.run(
+  "Submit https://example.com/annual-report.pdf and then summarize the revenue breakdown by segment."
+);
+```
+
+---
+
+## Config
+
+<ParamField body="apiKey" type="string" required>
+  PageIndex API key. Falls back to `PAGEINDEX_API_KEY` env var. Get yours at [dash.pageindex.ai](https://dash.pageindex.ai).
+</ParamField>
+
+<ParamField body="apiBase" type="string" default="https://api.pageindex.ai">
+  API base URL. Override for self-hosted PageIndex deployments.
+</ParamField>
+
+<ParamField body="timeout" type="number" default="120000">
+  Request timeout in milliseconds. PDF processing can take time — the default is 2 minutes.
+</ParamField>
+
+<ParamField body="maxResponseSize" type="number" default="50000">
+  Max response characters returned per tool call.
+</ParamField>
+
+---
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `pageindex_submit` | Submit a PDF document for tree indexing. Returns a `doc_id` for subsequent operations. |
+| `pageindex_status` | Check document processing status — returns tree structure when complete. |
+| `pageindex_tree` | Get the hierarchical tree structure of a processed document (semantic table of contents). |
+| `pageindex_list` | List all documents with IDs, names, statuses, and page counts. |
+| `pageindex_chat` | Ask questions about documents using reasoning-based RAG with optional citations. |
+| `pageindex_retrieve` | Retrieve specific sections from a document using tree-based search. |
+| `pageindex_delete` | Delete a document and all associated data. |
+
+---
+
+## How It Works
+
+PageIndex takes a fundamentally different approach from traditional vector RAG:
+
+1. **Tree Indexing** — Documents are parsed into a hierarchical tree of sections, subsections, and paragraphs with summaries at each level
+2. **LLM Tree Search** — At query time, an LLM navigates the tree from root to relevant leaves, using reasoning instead of embedding similarity
+3. **No Vectors Needed** — No embedding model, no vector database, no chunking strategy to tune
+
+This approach excels on documents where structure matters: financial reports with complex tables, legal contracts with nested clauses, and technical specs with cross-references.
+
+---
+
+## Use Cases
+
+### Document Q&A
+
+```typescript
+// After submitting a document
+await agent.run("What were the total operating expenses in Q3 2024?");
+```
+
+### Multi-Document Analysis
+
+```typescript
+await agent.run(
+  "Compare the risk factors section between the 2023 and 2024 annual reports."
+);
+```
+
+### Structured Extraction
+
+```typescript
+const agent = new Agent({
+  name: "extractor",
+  model: openai("gpt-4o"),
+  instructions: "Extract structured data from documents with page citations.",
+  tools: [...pageindex.getTools()],
+  outputType: z.object({
+    items: z.array(z.object({
+      field: z.string(),
+      value: z.string(),
+      page: z.number(),
+    })),
+  }),
+});
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PAGEINDEX_API_KEY` | PageIndex API key from [dash.pageindex.ai](https://dash.pageindex.ai) |
+
+---
+
+## Combining with RadarOS Knowledge
+
+PageIndex works best for complex professional documents. For simpler content or when you need a fully local pipeline, combine it with RadarOS's built-in vector knowledge base:
+
+```typescript
+import { Agent, openai, PageIndexToolkit, InMemoryKnowledge } from "@radaros/core";
+
+const agent = new Agent({
+  name: "hybrid-knowledge",
+  model: openai("gpt-4o"),
+  tools: [...new PageIndexToolkit({ apiKey: "..." }).getTools()],
+  knowledge: new InMemoryKnowledge({ /* local vector search for quick lookups */ }),
+  instructions: "Use PageIndex for complex document analysis. Use knowledge search for quick factual lookups.",
+});
+```
+
+<Tip>
+  PageIndex is ideal for **complex, structured documents** (100+ pages). For short text snippets and FAQ-style retrieval, the built-in vector knowledge base is faster and cheaper.
+</Tip>

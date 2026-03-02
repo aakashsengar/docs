@@ -1,0 +1,56 @@
+---
+title: "Cost Auto-Stop"
+description: "Per-roundtrip budget enforcement to prevent runaway costs"
+---
+
+# Cost Budget Auto-Stop
+
+The `CostTracker` now checks budgets after **every tool roundtrip**, not just before the loop starts. This prevents a multi-roundtrip agent from blowing through its budget.
+
+## How It Works
+
+When a `costTracker` is configured on an agent, the `onRoundtripComplete` loop hook automatically:
+
+1. Tracks incremental token usage after each roundtrip
+2. Checks if any budget limit is exceeded
+3. If exceeded, gracefully stops the LLM loop and returns the last assistant message
+
+## Configuration
+
+```typescript
+import { Agent, openai, CostTracker } from "@radaros/core";
+
+const tracker = new CostTracker({
+  pricing: { "gpt-4o": { promptPer1k: 0.0025, completionPer1k: 0.01 } },
+  budget: {
+    maxCostPerRun: 0.50,     // $0.50 max per run
+    maxTokensPerRun: 100_000, // 100K tokens max per run
+  },
+});
+
+const agent = new Agent({
+  name: "budget-bot",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+```
+
+## New CostTracker Methods
+
+```typescript
+// Track mid-loop usage
+tracker.trackIncremental({ runId, agentName, modelId, usage });
+
+// Check without throwing
+const exceeded = tracker.isBudgetExceeded(runId, sessionId, userId);
+
+// See remaining budget
+const { costRemaining, tokensRemaining } = tracker.estimateRemaining(runId);
+```
+
+## Behavior
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| 10-roundtrip loop, budget hit at roundtrip 3 | Budget only checked before loop | Loop stops at roundtrip 3 |
+| Cost tracking | Only after full loop completes | Tracked incrementally each roundtrip |

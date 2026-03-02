@@ -1,0 +1,82 @@
+---
+title: "PII Guard"
+description: "PII anonymization middleware for agent messages"
+---
+
+# PII Anonymization
+
+The `PiiGuard` scrubs personally identifiable information from messages before they reach the LLM, preventing accidental PII exposure in model interactions.
+
+## Configuration
+
+```typescript
+import { PiiGuard } from "@radaros/core";
+
+const guard = new PiiGuard({
+  builtIn: ["email", "phone", "ssn", "creditCard"],
+  action: "placeholder", // "redact" | "hash" | "placeholder"
+  rehydrate: true,       // restore PII in final output
+});
+```
+
+## Built-in PII Types
+
+| Type | Pattern |
+|------|---------|
+| `email` | Standard email addresses |
+| `phone` | US phone numbers (with optional country code) |
+| `ssn` | Social Security Numbers (XXX-XX-XXXX) |
+| `creditCard` | Credit card numbers (XXXX-XXXX-XXXX-XXXX) |
+| `ipAddress` | IPv4 addresses |
+| `name` | Two-word proper names (Capitalized) |
+
+## Actions
+
+| Action | Example Input | Example Output |
+|--------|--------------|----------------|
+| `placeholder` | `john@example.com` | `[EMAIL_1]` |
+| `redact` | `john@example.com` | `[REDACTED]` |
+| `hash` | `john@example.com` | `[HASH_a1b2c3d4]` |
+
+## Integration
+
+### As a beforeLLMCall hook (scrubs every roundtrip)
+
+```typescript
+const agent = new Agent({
+  name: "safe-bot",
+  model: openai("gpt-4o"),
+  loopHooks: {
+    beforeLLMCall: guard.toBeforeLLMCallHook(),
+    afterToolExec: guard.toAfterToolExecHook(),
+  },
+});
+```
+
+### As an Input Guardrail
+
+```typescript
+const agent = new Agent({
+  name: "safe-bot",
+  model: openai("gpt-4o"),
+  guardrails: {
+    input: [guard.toInputGuardrail()],
+  },
+});
+```
+
+### Custom Patterns
+
+```typescript
+const guard = new PiiGuard({
+  patterns: [
+    { name: "employee_id", regex: /EMP-\d{6}/g },
+    { name: "project_code", regex: /PRJ-[A-Z]{3}-\d{4}/g },
+  ],
+  action: "placeholder",
+});
+```
+
+## Rehydration
+
+When `rehydrate: true`, the guard maintains a mapping of placeholders to original values. Call `guard.rehydrate(text)` on the final output to restore PII before returning to the user.

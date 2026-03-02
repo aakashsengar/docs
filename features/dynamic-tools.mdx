@@ -1,0 +1,61 @@
+---
+title: "Dynamic Tools"
+description: "Add, remove, and resolve tools at runtime"
+---
+
+# Dynamic Runtime Tools
+
+Agents can have their tool sets modified after creation, enabling context-dependent tooling.
+
+## Runtime Mutation
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "adaptive-bot",
+  model: openai("gpt-4o"),
+  tools: [searchTool],
+});
+
+// Add a tool dynamically
+agent.addTool(defineTool({
+  name: "admin_panel",
+  description: "Access admin functions",
+  parameters: z.object({ action: z.string() }),
+  execute: async ({ action }) => `Executed: ${action}`,
+}));
+
+// Remove a tool
+agent.removeTool("admin_panel");
+
+// List current tools
+console.log(agent.listTools()); // ["search"]
+```
+
+## Tool Resolver
+
+For context-dependent tools, use `toolResolver` — a function called at the start of each `run()`:
+
+```typescript
+const agent = new Agent({
+  name: "role-aware-bot",
+  model: openai("gpt-4o"),
+  tools: [searchTool],
+  toolResolver: async (ctx) => {
+    const role = ctx.metadata.userRole;
+    if (role === "admin") {
+      return [adminTool, deleteTool];
+    }
+    return [];
+  },
+});
+
+// Admin gets search + admin + delete tools
+await agent.run("Delete old records", {
+  metadata: { userRole: "admin" },
+});
+```
+
+The resolver's tools are merged with static tools, with duplicates (by name) filtered out.

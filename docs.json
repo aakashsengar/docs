@@ -197,7 +197,8 @@
               "toolkits/notion",
               "toolkits/calendar",
               "toolkits/stripe",
-              "toolkits/image-generation"
+              "toolkits/image-generation",
+              "toolkits/pageindex"
             ]
           },
           {
@@ -251,6 +252,20 @@
             "group": "Scheduling",
             "pages": [
               "schedules/overview"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "features/loop-hooks",
+              "features/context-compaction",
+              "features/cost-autostop",
+              "features/dynamic-tools",
+              "features/approval-gates",
+              "features/metrics-export",
+              "features/discovery-cards",
+              "features/pii-guard",
+              "features/checkpointing"
             ]
           }
         ]
