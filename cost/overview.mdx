@@ -1,11 +1,11 @@
 ---
 title: Cost Tracking
-description: Track token usage, compute costs, and enforce budgets
+description: Track token usage, compute costs, and enforce budgets across all agent types
 ---
 
 # Cost Tracking
 
-The `CostTracker` tracks token usage and costs across agent runs. It supports budget enforcement, per-model pricing, and detailed summaries.
+The `CostTracker` tracks token usage and costs across agent runs. It supports budget enforcement, per-model pricing, detailed cost breakdowns by category, and per-agent/model/user summaries.
 
 ## Quick Start
 
@@ -32,9 +32,57 @@ const summary = tracker.getSummary();
 console.log(`Total cost: $${summary.totalCost.toFixed(4)}`);
 ```
 
+## Token Types Tracked
+
+The `CostTracker` captures all token types returned by the API:
+
+| Token Type | Field | Description |
+|-----------|-------|-------------|
+| Input | `promptTokens` | Tokens in the prompt / input |
+| Output | `completionTokens` | Tokens generated in the response |
+| Reasoning | `reasoningTokens` | Tokens used for chain-of-thought (o1, o3) |
+| Cached | `cachedTokens` | Prompt tokens served from API cache |
+| Audio Input | `audioInputTokens` | Tokens from audio input (Realtime API) |
+| Audio Output | `audioOutputTokens` | Tokens for audio output (Realtime API) |
+
+All token types are tracked per-message, per-run, and per-session. The `getSummary()` method aggregates totals across all tracked dimensions.
+
+## Cost Breakdown
+
+Each cost entry includes a 6-category breakdown:
+
+```typescript
+interface CostBreakdown {
+  input: number;       // Prompt token cost
+  output: number;      // Completion token cost
+  reasoning: number;   // Reasoning token cost
+  cached: number;      // Cached prompt cost (discounted rate)
+  audioInput: number;  // Audio input token cost
+  audioOutput: number; // Audio output token cost
+  total: number;       // Sum of all categories
+}
+```
+
+Access per-run or aggregated:
+
+```typescript
+// Per-entry breakdown
+const entry = tracker.getEntries()[0];
+console.log(entry.breakdown.input);    // $0.000375
+console.log(entry.breakdown.output);   // $0.004956
+console.log(entry.breakdown.total);    // $0.005331
+
+// Aggregated summary
+const summary = tracker.getSummary();
+console.log(summary.totalBreakdown.total);       // Total across all entries
+console.log(summary.byAgent["assistant"].breakdown); // Per-agent breakdown
+console.log(summary.byModel["gpt-4o"].breakdown);   // Per-model breakdown
+console.log(summary.byUser["user-42"].breakdown);    // Per-user breakdown
+```
+
 ## Built-in Pricing
 
-Pricing is included for major models:
+Pricing is included for 50+ models:
 
 | Model | Prompt / 1K | Completion / 1K |
 |-------|------------|-----------------|
@@ -48,14 +96,21 @@ Override or extend pricing:
 ```typescript
 const tracker = new CostTracker({
   pricing: {
-    "my-custom-model": { promptPer1k: 0.005, completionPer1k: 0.02 },
+    "my-custom-model": {
+      promptPer1k: 0.005,
+      completionPer1k: 0.02,
+      reasoningPer1k: 0.06,        // Optional: reasoning token pricing
+      cachedPromptPer1k: 0.0005,   // Optional: cached prompt pricing
+      audioInputPer1k: 0.1,        // Optional: audio input pricing
+      audioOutputPer1k: 0.2,       // Optional: audio output pricing
+    },
   },
 });
 ```
 
 ## Budget Enforcement
 
-Budgets are checked before each LLM call:
+Budgets are checked before each LLM call and mid-run during tool-calling loops:
 
 ```typescript
 interface CostBudget {
@@ -67,6 +122,52 @@ interface CostBudget {
 }
 ```
 
+See [Cost Auto-Stop](/features/cost-autostop) for mid-run enforcement details.
+
+## Works Across All Agent Types
+
+The same `CostTracker` instance can be shared across different agent types:
+
+```typescript
+import { Agent, VoiceAgent, openai, openaiRealtime, CostTracker } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+
+const tracker = new CostTracker({
+  budget: { maxCostPerUser: 10.0 },
+});
+
+// Text agent
+const textAgent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+// Voice agent
+const voiceAgent = new VoiceAgent({
+  name: "voice-assistant",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+  costTracker: tracker,
+});
+
+// Browser agent
+const browserAgent = new BrowserAgent({
+  name: "web-scraper",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+});
+
+// All three agents report to the same tracker
+await textAgent.run("Hello!", { userId: "user-42" });
+const session = await voiceAgent.connect({ userId: "user-42" });
+await browserAgent.run("Search for flights", { userId: "user-42" });
+
+const summary = tracker.getSummary();
+console.log(summary.byAgent);
+// { assistant: {...}, "voice-assistant": {...}, "web-scraper": {...} }
+console.log(summary.byUser["user-42"].cost); // Combined cost across all agents
+```
+
 ## Cost Summary
 
 ```typescript
@@ -74,16 +175,17 @@ const summary = tracker.getSummary({ userId: "user-42" });
 
 summary.totalCost;              // Total USD
 summary.totalTokens;            // Aggregated TokenUsage
-summary.byAgent["assistant"];   // { cost, tokens, runs }
-summary.byModel["gpt-4o"];     // { cost, tokens }
-summary.byUser["user-42"];     // { cost, tokens }
+summary.totalBreakdown;         // Aggregated CostBreakdown
+summary.byAgent["assistant"];   // { cost, breakdown, tokens, runs }
+summary.byModel["gpt-4o"];     // { cost, breakdown, tokens }
+summary.byUser["user-42"];     // { cost, breakdown, tokens }
 ```
 
 ## Events
 
 | Event | Payload |
 |-------|---------|
-| `cost.tracked` | `{ runId, agentName, modelId, usage }` |
+| `cost.tracked` | `{ runId, agentName, modelId, usage, cost }` |
 | `cost.budget.exceeded` | `{ runId, agentName, budget, current, limit }` |
 
 ---
@@ -105,20 +207,17 @@ const agent = new Agent({
   costTracker: tracker,
 });
 
-// Track every LLM call's cost
 agent.on("cost.tracked", ({ runId, agentName, modelId, usage }) => {
   console.log(
     `[Cost] ${agentName} / ${modelId}: ` +
-    `${usage.promptTokens} prompt + ${usage.completionTokens} completion = $${usage.cost.toFixed(4)}`
+    `${usage.promptTokens} prompt + ${usage.completionTokens} completion`
   );
 });
 
-// Alert when budget is exceeded
 agent.on("cost.budget.exceeded", ({ agentName, budget, current, limit }) => {
   console.warn(
     `[Budget] ${agentName} exceeded ${budget}: $${current.toFixed(2)} / $${limit.toFixed(2)}`
   );
-  // Send alert to Slack, PagerDuty, etc.
 });
 ```
 
@@ -126,12 +225,9 @@ agent.on("cost.budget.exceeded", ({ agentName, budget, current, limit }) => {
 
 ## Per-Agent and Per-Model Breakdown
 
-The cost summary provides granular breakdowns:
-
 ```typescript
 const tracker = new CostTracker();
 
-// Run multiple agents with different models
 const assistantAgent = new Agent({
   name: "assistant",
   model: openai("gpt-4o"),
@@ -149,53 +245,43 @@ await routerAgent.run("Route this request", { userId: "user-42" });
 
 const summary = tracker.getSummary();
 
-// Per-agent costs
-console.log("By Agent:");
+// Per-agent costs with breakdowns
 for (const [name, data] of Object.entries(summary.byAgent)) {
-  console.log(`  ${name}: $${data.cost.toFixed(4)} (${data.runs} runs)`);
+  console.log(`${name}: $${data.cost.toFixed(4)} (${data.runs} runs)`);
+  console.log(`  input: $${data.breakdown.input.toFixed(6)}`);
+  console.log(`  output: $${data.breakdown.output.toFixed(6)}`);
 }
-// assistant: $0.0245 (1 runs)
-// router:    $0.0003 (1 runs)
 
 // Per-model costs
-console.log("By Model:");
 for (const [model, data] of Object.entries(summary.byModel)) {
-  console.log(`  ${model}: $${data.cost.toFixed(4)}`);
+  console.log(`${model}: $${data.cost.toFixed(4)}`);
 }
-// gpt-4o:      $0.0245
-// gpt-4o-mini: $0.0003
 
 // Per-user costs
-console.log("By User:");
 for (const [user, data] of Object.entries(summary.byUser)) {
-  console.log(`  ${user}: $${data.cost.toFixed(4)}`);
+  console.log(`${user}: $${data.cost.toFixed(4)}`);
 }
-// user-42: $0.0248
 ```
 
 ---
 
 ## Custom Pricing for Non-Built-in Models
 
-Add pricing for self-hosted, fine-tuned, or new models:
-
 ```typescript
 const tracker = new CostTracker({
   pricing: {
-    // Fine-tuned model
     "ft:gpt-4o-mini:my-org:custom:abc123": {
       promptPer1k: 0.0003,
       completionPer1k: 0.0012,
     },
-    // Self-hosted model via Ollama (cost = electricity, but track tokens)
     "llama3.1": {
       promptPer1k: 0,
       completionPer1k: 0,
     },
-    // New model not yet in built-in pricing
     "claude-opus-next": {
       promptPer1k: 0.015,
       completionPer1k: 0.075,
+      reasoningPer1k: 0.06,
     },
   },
 });
@@ -210,11 +296,11 @@ If a model has no pricing entry (built-in or custom), the cost is recorded as $0
 ```typescript
 const tracker = new CostTracker({
   budget: {
-    maxCostPerRun: 0.50,       // No single run should cost more than $0.50
-    maxCostPerSession: 2.00,   // Session budget of $2
-    maxCostPerUser: 20.00,     // Monthly user budget
-    maxTokensPerRun: 50_000,   // Hard token limit
-    onBudgetExceeded: "throw", // Throws CostBudgetExceededError
+    maxCostPerRun: 0.50,
+    maxCostPerSession: 2.00,
+    maxCostPerUser: 20.00,
+    maxTokensPerRun: 50_000,
+    onBudgetExceeded: "throw",
   },
 });
 
@@ -240,8 +326,16 @@ With `onBudgetExceeded: "warn"`, the run continues but emits a `cost.budget.exce
 
 ---
 
+## Token Accuracy
+
+RadarOS verifies 100% accuracy between `CostTracker` recorded tokens and raw API response tokens across all scenarios — simple completion, tool calling, multi-turn memory, and prompt caching. See [benchmarks](/performance) for detailed validation results.
+
+---
+
 ## Cross-References
 
 - [Agent Overview](/agents/overview) — `costTracker` in AgentConfig
-- [Tool Result Limits](/agents/tools#tool-result-limits) — Reduce token costs from large tool results
+- [Voice Agents](/voice/overview) — `costTracker` in VoiceAgentConfig
+- [Browser Agents](/browser/overview) — `costTracker` in BrowserAgentConfig
+- [Cost Auto-Stop](/features/cost-autostop) — Mid-run budget enforcement
 - [Observability](/observability/overview) — Track costs alongside traces and metrics

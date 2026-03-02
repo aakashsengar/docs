@@ -1,0 +1,812 @@
+---
+title: "Knowledge & RAG Examples"
+description: "Retrieval-augmented generation patterns with vector stores and embeddings"
+---
+
+Complete, runnable examples for building RAG systems with RadarOS. Covers knowledge bases, vector stores, embeddings, hybrid search, and full agent-powered retrieval pipelines.
+
+---
+
+## 1. Basic KnowledgeBase
+
+Create a knowledge base, add documents, and query by semantic similarity.
+
+```typescript
+import {
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(embedder);
+
+const kb = new KnowledgeBase({
+  name: "Product Docs",
+  vectorStore,
+});
+
+await kb.initialize();
+
+await kb.addDocuments([
+  {
+    id: "pricing",
+    content: "The Pro plan costs $49/month and includes unlimited agents, 100k API calls, and priority support.",
+    metadata: { category: "pricing" },
+  },
+  {
+    id: "features",
+    content: "RadarOS supports multi-agent teams, workflows, RAG, voice, and multi-modal inputs.",
+    metadata: { category: "features" },
+  },
+  {
+    id: "setup",
+    content: "Install with npm install @radaros/core. Set OPENAI_API_KEY to get started.",
+    metadata: { category: "getting-started" },
+  },
+]);
+
+// Search by semantic similarity
+const results = await kb.search("How much does it cost?", { topK: 3 });
+
+for (const r of results) {
+  console.log(`[${r.id}] (score: ${r.score.toFixed(3)}) ${r.content}`);
+}
+```
+
+---
+
+## 2. Knowledge as Tool
+
+Turn a KnowledgeBase into a tool the agent calls automatically during runs.
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(embedder);
+
+const kb = new KnowledgeBase({
+  name: "Support KB",
+  vectorStore,
+});
+
+await kb.initialize();
+
+await kb.addDocuments([
+  { id: "reset", content: "To reset your password, go to Settings > Security > Reset Password." },
+  { id: "billing", content: "Invoices are generated on the 1st of each month and sent to the account email." },
+  { id: "api-limits", content: "Free plan: 1,000 API calls/day. Pro plan: 100,000 API calls/day." },
+]);
+
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o"),
+  instructions: "Answer user questions using the knowledge base. Always cite the source document.",
+  tools: [
+    kb.asTool({
+      toolName: "search_support",
+      description: "Search the support knowledge base for answers",
+      topK: 3,
+      minScore: 0.5,
+    }),
+  ],
+});
+
+const result = await agent.run("How do I reset my password?");
+console.log(result.text);
+```
+
+### Custom result formatting
+
+```typescript
+const tool = kb.asTool({
+  toolName: "search_docs",
+  topK: 5,
+  formatResults: (results) =>
+    results
+      .map((r) => `[${r.id}] (relevance: ${(r.score * 100).toFixed(0)}%) ${r.content}`)
+      .join("\n\n"),
+});
+```
+
+---
+
+## 3. OpenAI Embeddings
+
+Use OpenAI's embedding models to convert text into vectors.
+
+```typescript
+import { OpenAIEmbedding } from "@radaros/core";
+
+// Default model: text-embedding-3-small (1536 dimensions)
+const embedder = new OpenAIEmbedding({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: "text-embedding-3-small",
+});
+
+// Embed a single string
+const vector = await embedder.embed("What is RadarOS?");
+console.log(`Dimensions: ${vector.length}`); // 1536
+
+// Batch embed multiple strings
+const vectors = await embedder.embedBatch([
+  "RadarOS is a TypeScript agent framework.",
+  "It supports RAG, tools, and multi-agent teams.",
+  "Install with npm install @radaros/core.",
+]);
+console.log(`Batch size: ${vectors.length}`); // 3
+```
+
+### Higher accuracy model
+
+```typescript
+const highAccuracy = new OpenAIEmbedding({
+  model: "text-embedding-3-large", // 3072 dimensions
+});
+
+const vector = await highAccuracy.embed("Detailed technical analysis...");
+console.log(`Dimensions: ${vector.length}`); // 3072
+```
+
+---
+
+## 4. Google Embeddings
+
+Use Google's embedding models as an alternative to OpenAI.
+
+```typescript
+import { GoogleEmbedding } from "@radaros/core";
+
+const embedder = new GoogleEmbedding({
+  apiKey: process.env.GOOGLE_API_KEY,
+  model: "text-embedding-004", // 768 dimensions
+});
+
+const vector = await embedder.embed("What is RadarOS?");
+console.log(`Dimensions: ${vector.length}`); // 768
+
+const vectors = await embedder.embedBatch([
+  "First document.",
+  "Second document.",
+]);
+console.log(`Batch size: ${vectors.length}`); // 2
+```
+
+### Using Google embeddings with a knowledge base
+
+```typescript
+import { KnowledgeBase, InMemoryVectorStore, GoogleEmbedding } from "@radaros/core";
+
+const embedder = new GoogleEmbedding();
+const vectorStore = new InMemoryVectorStore(embedder);
+
+const kb = new KnowledgeBase({
+  name: "docs",
+  vectorStore,
+});
+
+await kb.initialize();
+await kb.addDocuments([
+  { id: "intro", content: "RadarOS is a TypeScript agent framework." },
+]);
+
+const results = await kb.search("What is RadarOS?");
+console.log(results[0].content);
+```
+
+---
+
+## 5. In-Memory Vector Store
+
+Quickstart with in-memory vectors. No external dependencies — data is lost on restart.
+
+```typescript
+import { InMemoryVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const store = new InMemoryVectorStore(embedder);
+
+await store.initialize();
+
+// Upsert documents
+await store.upsert("articles", {
+  id: "article-1",
+  content: "TypeScript 5.4 introduces the NoInfer utility type for better generic inference.",
+  metadata: { author: "TS Team", year: 2024 },
+});
+
+await store.upsertBatch("articles", [
+  { id: "article-2", content: "Bun 1.2 adds native S3 support and improved Node.js compatibility." },
+  { id: "article-3", content: "Deno 2.0 focuses on Node.js compatibility and workspaces." },
+]);
+
+// Search by semantic similarity
+const results = await store.search("articles", "TypeScript generics improvements", {
+  topK: 2,
+  minScore: 0.5,
+});
+
+for (const r of results) {
+  console.log(`[${r.id}] score=${r.score.toFixed(3)}: ${r.content}`);
+}
+
+// Get a specific document
+const doc = await store.get("articles", "article-1");
+console.log(doc?.content);
+
+// Delete a document
+await store.delete("articles", "article-3");
+```
+
+---
+
+## 6. PgVector Store
+
+PostgreSQL-backed vector store using the `pgvector` extension. Persists across restarts.
+
+```bash
+npm install pg pgvector
+```
+
+```typescript
+import { PgVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+const store = new PgVectorStore(
+  {
+    connectionString: process.env.DATABASE_URL!,
+    dimensions: 1536,
+  },
+  embedder
+);
+
+await store.initialize(); // Creates pgvector extension + tables
+
+await store.upsertBatch("knowledge", [
+  {
+    id: "security-policy",
+    content: "All employees must use 2FA and complete annual security training.",
+    metadata: { department: "IT", updated: "2026-01-15" },
+  },
+  {
+    id: "remote-work",
+    content: "Remote work is allowed up to 3 days per week with manager approval.",
+    metadata: { department: "HR", updated: "2025-11-01" },
+  },
+  {
+    id: "expenses",
+    content: "Travel expenses over $500 require VP approval before booking.",
+    metadata: { department: "Finance", updated: "2026-02-10" },
+  },
+]);
+
+const results = await store.search("knowledge", "work from home policy", {
+  topK: 3,
+});
+
+for (const r of results) {
+  console.log(`[${r.id}] ${r.score.toFixed(3)}: ${r.content}`);
+}
+
+await store.close();
+```
+
+---
+
+## 7. MongoDB Vector Store
+
+MongoDB Atlas-backed vector store. Requires an Atlas Search index for production.
+
+```bash
+npm install mongodb
+```
+
+```typescript
+import { MongoDBVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+const store = new MongoDBVectorStore(
+  {
+    uri: process.env.MONGO_URI!,
+    dbName: "myapp",
+    indexName: "vector_index",
+    dimensions: 1536,
+  },
+  embedder
+);
+
+await store.initialize();
+
+await store.upsertBatch("products", [
+  {
+    id: "laptop-1",
+    content: "MacBook Pro 16-inch with M4 Max chip, 48GB RAM, 1TB SSD. $3,499.",
+    metadata: { category: "electronics", price: 3499 },
+  },
+  {
+    id: "laptop-2",
+    content: "ThinkPad X1 Carbon Gen 12, Intel Ultra 7, 32GB RAM, 512GB SSD. $1,849.",
+    metadata: { category: "electronics", price: 1849 },
+  },
+  {
+    id: "desk-1",
+    content: "Standing desk with programmable height presets, bamboo top, 60x30 inches. $599.",
+    metadata: { category: "furniture", price: 599 },
+  },
+]);
+
+const results = await store.search("products", "powerful laptop for development", {
+  topK: 2,
+});
+
+for (const r of results) {
+  console.log(`[${r.id}] ${r.score.toFixed(3)}: ${r.content}`);
+}
+
+await store.close();
+```
+
+---
+
+## 8. Qdrant Vector Store
+
+Qdrant cloud or self-hosted vector database. Ideal for dedicated vector search workloads.
+
+```bash
+npm install @qdrant/js-client-rest
+```
+
+```typescript
+import { QdrantVectorStore, OpenAIEmbedding } from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+const store = new QdrantVectorStore(
+  {
+    url: process.env.QDRANT_URL ?? "http://localhost:6333",
+    apiKey: process.env.QDRANT_API_KEY,
+    dimensions: 1536,
+  },
+  embedder
+);
+
+await store.initialize();
+
+await store.upsertBatch("support-tickets", [
+  {
+    id: "ticket-101",
+    content: "Customer unable to log in after password reset. Error: invalid_grant.",
+    metadata: { priority: "high", status: "open" },
+  },
+  {
+    id: "ticket-102",
+    content: "Billing page shows incorrect subscription tier after upgrade.",
+    metadata: { priority: "medium", status: "open" },
+  },
+  {
+    id: "ticket-103",
+    content: "API rate limit exceeded during bulk import. Need temporary limit increase.",
+    metadata: { priority: "low", status: "resolved" },
+  },
+]);
+
+const results = await store.search("support-tickets", "login authentication issue", {
+  topK: 2,
+  minScore: 0.7,
+});
+
+for (const r of results) {
+  console.log(`[${r.id}] ${r.score.toFixed(3)}: ${r.content}`);
+}
+```
+
+---
+
+## 9. Hybrid Search
+
+Combine vector (semantic) and BM25 (keyword) search with Reciprocal Rank Fusion for the best retrieval accuracy.
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const kb = new KnowledgeBase({
+  name: "Company Policies",
+  vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+  searchMode: "hybrid",
+  hybridConfig: {
+    vectorWeight: 1.0,
+    keywordWeight: 1.0,
+    rrfK: 60,
+  },
+});
+
+await kb.initialize();
+
+await kb.addDocuments([
+  { id: "pto", content: "Employees accrue 20 days of PTO per year. Unused PTO carries over up to 5 days." },
+  { id: "401k", content: "The company matches 401(k) contributions up to 6% of base salary." },
+  { id: "security", content: "All employees must complete SOC 2 compliance training annually. 2FA is mandatory." },
+  { id: "remote", content: "Remote work is allowed up to 3 days per week with manager approval." },
+]);
+
+// Compare all three search modes
+const vectorResults  = await kb.search("401k matching", { topK: 3, searchMode: "vector" });
+const keywordResults = await kb.search("401k matching", { topK: 3, searchMode: "keyword" });
+const hybridResults  = await kb.search("401k matching", { topK: 3, searchMode: "hybrid" });
+
+console.log("Vector results:", vectorResults.map((r) => r.id));
+console.log("Keyword results:", keywordResults.map((r) => r.id));
+console.log("Hybrid results:", hybridResults.map((r) => r.id));
+```
+
+### Hybrid search with an agent
+
+```typescript
+const agent = new Agent({
+  name: "policy-bot",
+  model: openai("gpt-4o"),
+  instructions: "Answer questions about company policies. Always search first.",
+  tools: [
+    kb.asTool({ topK: 3, searchMode: "hybrid" }),
+  ],
+});
+
+const result = await agent.run("What's the 401k match and how many PTO days do we get?");
+console.log(result.text);
+```
+
+### Tuning for technical docs
+
+```typescript
+const technicalKb = new KnowledgeBase({
+  name: "API Reference",
+  vectorStore: new InMemoryVectorStore(new OpenAIEmbedding()),
+  searchMode: "hybrid",
+  hybridConfig: {
+    vectorWeight: 1.0,
+    keywordWeight: 2.0, // favor exact term matches for API names, error codes
+    rrfK: 40,
+  },
+});
+```
+
+---
+
+## 10. PageIndex Toolkit
+
+Reasoning-based document retrieval without vectors. Best for complex, structured documents like financial reports and legal filings.
+
+```typescript
+import { Agent, openai, PageIndexToolkit } from "@radaros/core";
+
+const pageindex = new PageIndexToolkit({
+  apiKey: process.env.PAGEINDEX_API_KEY!,
+  timeout: 120_000,
+});
+
+const agent = new Agent({
+  name: "document-analyst",
+  model: openai("gpt-4o"),
+  instructions: "Analyze uploaded documents. Answer questions with page citations.",
+  tools: [...pageindex.getTools()],
+});
+
+// Submit and analyze a document
+const result = await agent.run(
+  "Submit https://example.com/annual-report-2025.pdf and summarize the revenue breakdown by business segment."
+);
+console.log(result.text);
+
+// Multi-document comparison
+const comparison = await agent.run(
+  "Compare the risk factors section between the 2024 and 2025 annual reports."
+);
+console.log(comparison.text);
+```
+
+---
+
+## 11. RAG Agent
+
+A full agent with a knowledge base for answering questions grounded in your documents.
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(embedder);
+
+const kb = new KnowledgeBase({
+  name: "company-docs",
+  vectorStore,
+  searchMode: "hybrid",
+});
+
+await kb.initialize();
+
+await kb.addDocuments([
+  {
+    id: "pricing-pro",
+    content: "The Pro plan costs $49/month. Includes unlimited agents, 100k API calls/day, and priority support.",
+    metadata: { category: "pricing" },
+  },
+  {
+    id: "pricing-enterprise",
+    content: "Enterprise plan is custom-priced. Includes SSO, SLA, dedicated support, and on-premise deployment.",
+    metadata: { category: "pricing" },
+  },
+  {
+    id: "api-auth",
+    content: "API authentication uses Bearer tokens. Generate keys at Settings > API Keys. Keys can be scoped to specific agents.",
+    metadata: { category: "api" },
+  },
+  {
+    id: "webhooks",
+    content: "Webhooks notify your server of agent events. Configure at Settings > Webhooks. Supports run.completed, tool.called, and error events.",
+    metadata: { category: "api" },
+  },
+  {
+    id: "teams",
+    content: "Multi-agent teams support four patterns: coordinate, broadcast, route, and collaborate. Use Teams for complex multi-step workflows.",
+    metadata: { category: "features" },
+  },
+]);
+
+const agent = new Agent({
+  name: "docs-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You are a helpful assistant for RadarOS documentation.
+- Always search the knowledge base before answering.
+- Cite the source document ID in your response.
+- If the knowledge base doesn't have the answer, say so clearly.`,
+  tools: [
+    kb.asTool({
+      toolName: "search_docs",
+      description: "Search RadarOS documentation",
+      topK: 3,
+      searchMode: "hybrid",
+    }),
+  ],
+});
+
+const result = await agent.run("How do I set up API authentication and webhooks?");
+console.log(result.text);
+```
+
+---
+
+## 12. Multi-Source RAG
+
+An agent with multiple knowledge bases, each specialized for different document types.
+
+```typescript
+import {
+  Agent,
+  openai,
+  KnowledgeBase,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const embedder = new OpenAIEmbedding();
+
+// Knowledge base for product documentation
+const productKb = new KnowledgeBase({
+  name: "Product Docs",
+  vectorStore: new InMemoryVectorStore(embedder),
+  searchMode: "hybrid",
+});
+await productKb.initialize();
+await productKb.addDocuments([
+  { id: "install", content: "Install RadarOS: npm install @radaros/core. Requires Node.js 20+." },
+  { id: "agents", content: "Create agents with new Agent({ name, model, tools, instructions })." },
+  { id: "tools", content: "Define custom tools with defineTool({ name, description, parameters, execute })." },
+]);
+
+// Knowledge base for support tickets
+const supportKb = new KnowledgeBase({
+  name: "Support Tickets",
+  vectorStore: new InMemoryVectorStore(embedder),
+  searchMode: "hybrid",
+});
+await supportKb.initialize();
+await supportKb.addDocuments([
+  { id: "ticket-201", content: "Issue: Agent times out on large contexts. Fix: Enable context compaction." },
+  { id: "ticket-202", content: "Issue: MCP tools not discovered. Fix: Check MCP server is running and accessible." },
+  { id: "ticket-203", content: "Issue: High token costs. Fix: Use toolRouter and toolResultLimit to reduce prompt tokens." },
+]);
+
+// Knowledge base for internal processes
+const processKb = new KnowledgeBase({
+  name: "Internal Processes",
+  vectorStore: new InMemoryVectorStore(embedder),
+  searchMode: "hybrid",
+});
+await processKb.initialize();
+await processKb.addDocuments([
+  { id: "deploy", content: "Deployments happen every Tuesday. Hotfixes can be deployed anytime with VP approval." },
+  { id: "oncall", content: "On-call rotation is weekly. Primary gets paged first, secondary after 15 min." },
+]);
+
+const agent = new Agent({
+  name: "unified-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You have access to three knowledge bases:
+- Product Docs: how to use RadarOS
+- Support Tickets: known issues and fixes
+- Internal Processes: company procedures
+
+Search the most relevant knowledge base for each question. You can search multiple if needed.`,
+  tools: [
+    productKb.asTool({
+      toolName: "search_product_docs",
+      description: "Search RadarOS product documentation",
+      topK: 3,
+    }),
+    supportKb.asTool({
+      toolName: "search_support_tickets",
+      description: "Search past support tickets for known issues and fixes",
+      topK: 3,
+    }),
+    processKb.asTool({
+      toolName: "search_processes",
+      description: "Search internal company processes and procedures",
+      topK: 3,
+    }),
+  ],
+});
+
+const result = await agent.run(
+  "My agent is timing out and I also need to know when the next deployment window is."
+);
+console.log(result.text);
+```
+
+---
+
+## 13. Document Ingestion Pipeline
+
+A workflow to ingest documents from multiple sources, chunk them, and embed into a vector store.
+
+```typescript
+import {
+  KnowledgeBase,
+  PgVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+import { readFile, readdir } from "node:fs/promises";
+import { join, extname } from "node:path";
+
+const embedder = new OpenAIEmbedding();
+
+const store = new PgVectorStore(
+  { connectionString: process.env.DATABASE_URL!, dimensions: 1536 },
+  embedder
+);
+
+const kb = new KnowledgeBase({
+  name: "ingested-docs",
+  vectorStore: store,
+  searchMode: "hybrid",
+});
+
+await kb.initialize();
+
+// --- Chunking utility ---
+function chunkText(text: string, maxChars = 1000, overlap = 200): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + maxChars, text.length);
+    chunks.push(text.slice(start, end));
+    start += maxChars - overlap;
+  }
+  return chunks;
+}
+
+// --- Ingest a directory of text/markdown files ---
+async function ingestDirectory(dirPath: string) {
+  const files = await readdir(dirPath);
+  const textFiles = files.filter((f) =>
+    [".txt", ".md", ".mdx"].includes(extname(f))
+  );
+
+  let totalChunks = 0;
+
+  for (const file of textFiles) {
+    const content = await readFile(join(dirPath, file), "utf-8");
+    const chunks = chunkText(content, 1000, 200);
+
+    const docs = chunks.map((chunk, i) => ({
+      id: `${file}-chunk-${i}`,
+      content: chunk,
+      metadata: {
+        source: file,
+        chunkIndex: i,
+        totalChunks: chunks.length,
+      },
+    }));
+
+    await kb.addDocuments(docs);
+    totalChunks += docs.length;
+    console.log(`Ingested ${file}: ${chunks.length} chunks`);
+  }
+
+  console.log(`Total: ${totalChunks} chunks from ${textFiles.length} files`);
+}
+
+// --- Ingest from a URL ---
+async function ingestUrl(url: string, docId: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+  const text = await res.text();
+
+  const chunks = chunkText(text, 1000, 200);
+  const docs = chunks.map((chunk, i) => ({
+    id: `${docId}-chunk-${i}`,
+    content: chunk,
+    metadata: { source: url, chunkIndex: i },
+  }));
+
+  await kb.addDocuments(docs);
+  console.log(`Ingested ${url}: ${chunks.length} chunks`);
+}
+
+// --- Run the pipeline ---
+await ingestDirectory("./docs/content");
+await ingestUrl("https://example.com/faq.txt", "faq");
+
+// Verify
+const results = await kb.search("How do I get started?", { topK: 3 });
+for (const r of results) {
+  console.log(`[${r.id}] (${r.score.toFixed(3)}) ${r.content.slice(0, 100)}...`);
+}
+
+await store.close();
+```
+
+### Using the ingested KB with an agent
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "ingested-docs-agent",
+  model: openai("gpt-4o"),
+  instructions: "Answer questions using the ingested document collection. Cite sources.",
+  tools: [
+    kb.asTool({
+      topK: 5,
+      searchMode: "hybrid",
+      formatResults: (results) =>
+        results
+          .map((r) => `[${r.metadata?.source ?? r.id}] ${r.content}`)
+          .join("\n---\n"),
+    }),
+  ],
+});
+
+const result = await agent.run("Summarize the key topics covered in our documentation.");
+console.log(result.text);
+```

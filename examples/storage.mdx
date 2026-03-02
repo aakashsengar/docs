@@ -1,0 +1,393 @@
+---
+title: "Storage Examples"
+description: "Storage driver configuration for every persistence backend"
+---
+
+## In-Memory Storage
+
+Zero-config ephemeral storage — the default for development and testing. Data is lost on restart.
+
+```typescript
+import { InMemoryStorage } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+await storage.set("myapp", "config", { theme: "dark", lang: "en" });
+const config = await storage.get("myapp", "config");
+console.log(config); // { theme: "dark", lang: "en" }
+
+await storage.set("sessions", "user-1", { active: true });
+await storage.set("sessions", "user-2", { active: false });
+
+const allSessions = await storage.list("sessions");
+console.log(allSessions);
+// [{ key: "user-1", value: { active: true } }, { key: "user-2", value: { active: false } }]
+
+const activeSessions = await storage.list("sessions", "user-1");
+console.log(activeSessions);
+// [{ key: "user-1", value: { active: true } }]
+
+await storage.delete("sessions", "user-2");
+```
+
+---
+
+## SQLite Storage
+
+File-based persistence with `better-sqlite3`. No `initialize()` call needed — the table is created automatically on first use.
+
+```typescript
+import { SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("./data/radaros.db");
+
+await storage.set("sessions", "user-123", {
+  lastActive: Date.now(),
+  preferences: { theme: "dark" },
+});
+
+const session = await storage.get("sessions", "user-123");
+console.log(session);
+
+const allSessions = await storage.list("sessions");
+console.log(`Active sessions: ${allSessions.length}`);
+
+// In-memory SQLite for tests (no disk I/O)
+const testStorage = new SqliteStorage(":memory:");
+await testStorage.set("test", "key", { value: 42 });
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  await storage.close();
+  process.exit(0);
+});
+```
+
+---
+
+## PostgreSQL Storage
+
+Production-grade relational persistence. Requires the `pg` package and an `initialize()` call before use.
+
+```typescript
+import { PostgresStorage } from "@radaros/core";
+
+const storage = new PostgresStorage(
+  process.env.DATABASE_URL ?? "postgresql://user:pass@localhost:5432/mydb",
+);
+
+await storage.initialize();
+
+await storage.set("cache", "pricing-v2", {
+  plans: ["free", "pro", "enterprise"],
+  updatedAt: new Date().toISOString(),
+});
+
+const pricing = await storage.get("cache", "pricing-v2");
+console.log(pricing);
+
+const allKeys = await storage.list("cache");
+console.log(`Cached entries: ${allKeys.length}`);
+
+await storage.delete("cache", "pricing-v2");
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  await storage.close();
+  process.exit(0);
+});
+```
+
+---
+
+## MongoDB Storage
+
+Document-based persistence for scale. Requires the `mongodb` package and an `initialize()` call.
+
+```typescript
+import { MongoDBStorage } from "@radaros/core";
+
+const storage = new MongoDBStorage(
+  process.env.MONGO_URI ?? "mongodb://localhost:27017",
+  "myapp",
+  "agent_data",
+);
+
+await storage.initialize();
+
+await storage.set("users", "prefs-42", {
+  theme: "dark",
+  notifications: true,
+  language: "en",
+});
+
+const prefs = await storage.get("users", "prefs-42");
+console.log(prefs);
+
+const allPrefs = await storage.list("users", "prefs-");
+console.log(`User preference records: ${allPrefs.length}`);
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  await storage.close();
+  process.exit(0);
+});
+```
+
+---
+
+## Storage with Agent
+
+Pass any storage driver to an agent for session persistence across requests and restarts.
+
+```typescript
+import { Agent, openai, SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("./data/agent.db");
+
+const agent = new Agent({
+  name: "persistent-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant. Remember user preferences across sessions.",
+  memory: {
+    storage,
+    maxMessages: 50,
+    summaries: true,
+    userFacts: true,
+  },
+});
+
+const result1 = await agent.run("My name is Alice and I prefer dark mode.", {
+  sessionId: "session-abc",
+  userId: "user-42",
+});
+console.log(result1.text);
+
+// Later — even after server restart — the agent remembers the conversation
+const result2 = await agent.run("What's my name and preferred theme?", {
+  sessionId: "session-abc",
+  userId: "user-42",
+});
+console.log(result2.text);
+```
+
+---
+
+## Storage with Memory
+
+Use storage to persist long-term memory — summaries and user facts survive restarts.
+
+```typescript
+import { Agent, Memory, openai, PostgresStorage } from "@radaros/core";
+
+const storage = new PostgresStorage(process.env.DATABASE_URL!);
+await storage.initialize();
+
+const memory = new Memory({
+  storage,
+  maxShortTermMessages: 50,
+  enableLongTerm: true,
+});
+
+const agent = new Agent({
+  name: "memory-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "You remember everything users tell you. Use long-term memory to recall facts from past sessions.",
+  storage,
+  memory,
+});
+
+await agent.run("I'm allergic to peanuts and I live in San Francisco.", {
+  sessionId: "s1",
+  userId: "user-99",
+});
+
+// New session — long-term memory carries forward
+await agent.run("Can you recommend a restaurant for me?", {
+  sessionId: "s2",
+  userId: "user-99",
+});
+// The agent remembers the peanut allergy and SF location from long-term memory
+```
+
+---
+
+## Storage with Admin
+
+Use storage with the admin API to persist dynamically created agents and their configurations.
+
+```typescript
+import { InMemoryStorage } from "@radaros/core";
+import { createAdminRouter } from "@radaros/transport";
+import express from "express";
+
+const storage = new InMemoryStorage();
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api/admin",
+  createAdminRouter({
+    storage,
+    toolLibrary: {
+      weather: {
+        name: "get_weather",
+        description: "Get current weather",
+        parameters: { type: "object", properties: { city: { type: "string" } } },
+      },
+    },
+  }),
+);
+
+app.listen(3000, () => console.log("Admin API running on :3000"));
+
+// POST /api/admin/agents — creates an agent definition stored in `storage`
+// GET  /api/admin/agents — lists all stored agent definitions
+// PUT  /api/admin/agents/:name — updates an agent definition
+```
+
+---
+
+## Storage Migration
+
+Swap storage drivers without changing application code. All drivers implement the same `StorageDriver` interface.
+
+```typescript
+import {
+  InMemoryStorage, SqliteStorage, PostgresStorage, MongoDBStorage,
+  type StorageDriver,
+} from "@radaros/core";
+import { Agent, openai } from "@radaros/core";
+
+async function createStorage(): Promise<StorageDriver> {
+  const driver = process.env.STORAGE_DRIVER ?? "memory";
+
+  switch (driver) {
+    case "sqlite":
+      return new SqliteStorage(process.env.SQLITE_PATH ?? "./data/radaros.db");
+
+    case "postgres": {
+      const pg = new PostgresStorage(process.env.DATABASE_URL!);
+      await pg.initialize();
+      return pg;
+    }
+
+    case "mongodb": {
+      const mongo = new MongoDBStorage(process.env.MONGO_URI!, "radaros", "kv_store");
+      await mongo.initialize();
+      return mongo;
+    }
+
+    default:
+      return new InMemoryStorage();
+  }
+}
+
+const storage = await createStorage();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: { storage, summaries: true },
+});
+
+const result = await agent.run("Hello!", { sessionId: "s1" });
+console.log(result.text);
+
+process.on("SIGTERM", async () => {
+  await storage.close();
+  process.exit(0);
+});
+```
+
+Set the driver via environment variable:
+
+```bash
+# Development
+STORAGE_DRIVER=memory
+
+# Staging
+STORAGE_DRIVER=sqlite SQLITE_PATH=./data/staging.db
+
+# Production
+STORAGE_DRIVER=postgres DATABASE_URL=postgresql://user:pass@db:5432/radaros
+
+# Document store
+STORAGE_DRIVER=mongodb MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/
+```
+
+---
+
+## Custom Storage Driver
+
+Implement the `StorageDriver` interface to add any persistence backend — Redis, DynamoDB, Firestore, etc.
+
+```typescript
+import type { StorageDriver } from "@radaros/core";
+import { Agent, openai } from "@radaros/core";
+
+class RedisStorage implements StorageDriver {
+  private client: any;
+
+  constructor(private redisUrl: string) {}
+
+  async initialize() {
+    const { createClient } = await import("redis");
+    this.client = createClient({ url: this.redisUrl });
+    await this.client.connect();
+  }
+
+  async get<T>(namespace: string, key: string): Promise<T | null> {
+    const raw = await this.client.get(`${namespace}:${key}`);
+    return raw ? JSON.parse(raw) : null;
+  }
+
+  async set<T>(namespace: string, key: string, value: T): Promise<void> {
+    await this.client.set(`${namespace}:${key}`, JSON.stringify(value));
+  }
+
+  async delete(namespace: string, key: string): Promise<void> {
+    await this.client.del(`${namespace}:${key}`);
+  }
+
+  async list<T>(
+    namespace: string,
+    prefix?: string,
+  ): Promise<Array<{ key: string; value: T }>> {
+    const pattern = prefix
+      ? `${namespace}:${prefix}*`
+      : `${namespace}:*`;
+    const keys = await this.client.keys(pattern);
+    const results: Array<{ key: string; value: T }> = [];
+    for (const fullKey of keys) {
+      const shortKey = fullKey.replace(`${namespace}:`, "");
+      const raw = await this.client.get(fullKey);
+      if (raw) results.push({ key: shortKey, value: JSON.parse(raw) });
+    }
+    return results;
+  }
+
+  async close(): Promise<void> {
+    await this.client.quit();
+  }
+}
+
+const storage = new RedisStorage(process.env.REDIS_URL ?? "redis://localhost:6379");
+await (storage as any).initialize();
+
+const agent = new Agent({
+  name: "redis-backed-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant with Redis-backed persistence.",
+  memory: { storage, summaries: true },
+});
+
+const result = await agent.run("Remember: my project deadline is March 15.", {
+  sessionId: "s1",
+  userId: "user-1",
+});
+console.log(result.text);
+```

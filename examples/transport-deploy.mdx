@@ -1,0 +1,418 @@
+---
+title: "Transport & Deployment Examples"
+description: "Serve agents via REST APIs, WebSockets, Swagger UI, and file uploads"
+---
+
+## Express REST Server
+
+Serve any agent over HTTP with `createAgentRouter`. It auto-generates `/agents/:name/run` and `/agents/:name/stream` endpoints for every agent passed in.
+
+```typescript
+import express from "express";
+import { Agent, openai, defineTool } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+
+const lookupOrder = defineTool({
+  name: "lookup_order",
+  description: "Look up an order by ID",
+  parameters: z.object({ orderId: z.string() }),
+  execute: async ({ orderId }) => `Order ${orderId}: shipped, arriving Friday`,
+});
+
+const agent = new Agent({
+  name: "support",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful customer-support agent.",
+  tools: [lookupOrder],
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ agents: { support: agent } }));
+
+app.listen(3000, () => console.log("Listening on :3000"));
+// POST /api/agents/support/run  { "input": "Where is order 42?" }
+```
+
+## Streaming Responses
+
+The router exposes an SSE streaming endpoint at `/agents/:name/stream` automatically. Clients receive incremental `data:` frames as the model generates tokens.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "writer",
+  model: openai("gpt-4o"),
+  instructions: "Write creative short stories.",
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ agents: { writer: agent } }));
+app.listen(3000);
+
+// Client-side consumption:
+// const es = new EventSource("/api/agents/writer/stream");
+// es.onmessage = (e) => {
+//   if (e.data === "[DONE]") return es.close();
+//   const chunk = JSON.parse(e.data);
+//   process.stdout.write(chunk.text ?? "");
+// };
+```
+
+Or call the streaming endpoint directly with `fetch`:
+
+```typescript
+const res = await fetch("http://localhost:3000/api/agents/writer/stream", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ input: "Tell me a story about a robot." }),
+});
+
+const reader = res.body!.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  const text = decoder.decode(value);
+  for (const line of text.split("\n")) {
+    if (line.startsWith("data: ") && line !== "data: [DONE]") {
+      const chunk = JSON.parse(line.slice(6));
+      process.stdout.write(chunk.text ?? "");
+    }
+  }
+}
+```
+
+## Socket.IO Gateway
+
+For real-time bidirectional communication, use `createAgentGateway` with Socket.IO. Agents registered in the global registry are immediately available.
+
+```typescript
+import http from "node:http";
+import { Server as SocketIO } from "socket.io";
+import { Agent, openai } from "@radaros/core";
+import { createAgentGateway } from "@radaros/transport";
+
+const server = http.createServer();
+const io = new SocketIO(server, { cors: { origin: "*" } });
+
+createAgentGateway({ io });
+
+new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+server.listen(3001, () => console.log("WebSocket gateway on :3001"));
+
+// Client:
+// const socket = io("http://localhost:3001");
+// socket.emit("agent:run", { agent: "assistant", input: "Hello!" });
+// socket.on("agent:response", (data) => console.log(data));
+// socket.on("agent:stream", (chunk) => process.stdout.write(chunk.text));
+```
+
+## Swagger UI
+
+Enable auto-generated OpenAPI docs with interactive Swagger UI by passing `swagger` config. The spec is derived from your registered agents, teams, and workflows.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o"),
+  instructions: "You are a data analyst.",
+});
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { analyst: agent },
+    swagger: {
+      enabled: true,
+      title: "Agent API",
+      description: "AI agent endpoints",
+      version: "1.0.0",
+      docsPath: "/docs",
+      specPath: "/docs/spec.json",
+      servers: [{ url: "http://localhost:3000/api", description: "Local" }],
+    },
+  }),
+);
+
+app.listen(3000, () => {
+  console.log("API:     http://localhost:3000/api");
+  console.log("Swagger: http://localhost:3000/api/docs");
+});
+```
+
+## File Upload
+
+Accept multimodal inputs (images, PDFs, audio) alongside text by enabling `fileUpload`. Files are automatically converted into multi-part content arrays.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "vision",
+  model: openai("gpt-4o"),
+  instructions: "Describe uploaded images in detail.",
+});
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { vision: agent },
+    fileUpload: {
+      maxFileSize: 10 * 1024 * 1024, // 10 MB
+      allowedMimeTypes: ["image/png", "image/jpeg", "application/pdf"],
+    },
+  }),
+);
+
+app.listen(3000);
+// curl -X POST http://localhost:3000/api/agents/vision/run \
+//   -F 'input=What is in this image?' \
+//   -F 'file=@photo.jpg'
+```
+
+## Per-Request API Keys
+
+In multi-tenant deployments, each request can supply its own API key via headers. The router extracts provider-specific keys and forwards them to the model.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ agents: { assistant: agent } }));
+app.listen(3000);
+
+// Clients forward their own OpenAI key:
+// POST /api/agents/assistant/run
+// Headers:
+//   X-OpenAI-API-Key: sk-tenant-abc123...
+//   Content-Type: application/json
+// Body: { "input": "Hello!" }
+//
+// Supported headers:
+//   X-OpenAI-API-Key    → OpenAI
+//   X-Google-API-Key    → Google
+//   X-Anthropic-API-Key → Anthropic
+//   X-API-Key           → Generic fallback
+```
+
+## Multiple Agents on One Server
+
+Serve several agents under distinct routes from a single Express app. Each agent gets its own `/run` and `/stream` endpoints.
+
+```typescript
+import express from "express";
+import { Agent, openai, google, defineTool } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+
+const getWeather = defineTool({
+  name: "get_weather",
+  description: "Get weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => `${city}: 72°F, sunny`,
+});
+
+const weatherBot = new Agent({
+  name: "weather",
+  model: openai("gpt-4o-mini"),
+  instructions: "You provide weather forecasts.",
+  tools: [getWeather],
+});
+
+const codeBot = new Agent({
+  name: "coder",
+  model: openai("gpt-4o"),
+  instructions: "You are an expert TypeScript programmer.",
+});
+
+const researchBot = new Agent({
+  name: "researcher",
+  model: google("gemini-2.0-flash"),
+  instructions: "You research topics and provide summaries.",
+});
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: {
+      weather: weatherBot,
+      coder: codeBot,
+      researcher: researchBot,
+    },
+    swagger: { enabled: true, title: "Multi-Agent API" },
+  }),
+);
+
+app.listen(3000);
+// POST /api/agents/weather/run
+// POST /api/agents/coder/run
+// POST /api/agents/researcher/run
+// GET  /api/agents          → list all agents
+```
+
+## Teams and Workflows via REST
+
+Serve teams and workflows alongside agents. Each gets typed endpoints under `/teams/:name/run` and `/workflows/:name/run`.
+
+```typescript
+import express from "express";
+import { Agent, Team, TeamMode, Workflow, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const researcher = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o-mini"),
+  instructions: "Research the given topic.",
+});
+
+const writer = new Agent({
+  name: "writer",
+  model: openai("gpt-4o"),
+  instructions: "Write a polished article from research notes.",
+});
+
+const team = new Team({
+  name: "content-team",
+  agents: [researcher, writer],
+  mode: TeamMode.SEQUENTIAL,
+  instructions: "Research a topic, then write an article about it.",
+});
+
+const workflow = new Workflow({
+  name: "publish-pipeline",
+  steps: [
+    { type: "agent", agent: researcher, input: "Research AI trends" },
+    { type: "agent", agent: writer },
+  ],
+});
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { researcher, writer },
+    teams: { "content-team": team },
+    workflows: { "publish-pipeline": workflow },
+    swagger: { enabled: true, title: "Content Platform API" },
+  }),
+);
+
+app.listen(3000);
+// POST /api/teams/content-team/run       { "input": "Write about quantum computing" }
+// POST /api/teams/content-team/stream    (SSE)
+// POST /api/workflows/publish-pipeline/run
+```
+
+## CORS and Security
+
+Configure CORS origins, rate limiting, and custom auth middleware through `createAgentRouter` options.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "secure-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a secure assistant.",
+});
+
+function authMiddleware(req: any, res: any, next: any) {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (!token || token !== process.env.API_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { "secure-bot": agent },
+    cors: ["https://app.example.com", "https://admin.example.com"],
+    rateLimit: { windowMs: 60_000, max: 50 },
+    middleware: [authMiddleware],
+  }),
+);
+
+app.listen(3000);
+```
+
+## Health Check Endpoint
+
+Add a health and readiness probe alongside the agent router for production deployments behind load balancers.
+
+```typescript
+import express from "express";
+import { Agent, openai, registry } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful bot.",
+});
+
+const app = express();
+app.use(express.json());
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.get("/ready", (_req, res) => {
+  const agents = registry.list().agents;
+  if (agents.length === 0) {
+    return res.status(503).json({ status: "not_ready", reason: "No agents registered" });
+  }
+  res.json({ status: "ready", agents });
+});
+
+app.use("/api", createAgentRouter({ cors: true }));
+
+app.listen(3000, () => console.log("Server ready on :3000"));
+// GET /health → { "status": "ok", "timestamp": "..." }
+// GET /ready  → { "status": "ready", "agents": ["bot"] }
+```

@@ -1,0 +1,698 @@
+---
+title: "Advanced Features Examples"
+description: "Loop hooks, context compaction, approval gates, PII guard, checkpointing, and more"
+---
+
+## Loop Hooks
+
+Intercept the LLM loop at every roundtrip with `loopHooks`. Use `onRoundtripComplete` to inspect token usage and optionally stop early, or `onToolCall` (via `AgentHooks`) to log each tool invocation.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const search = defineTool({
+  name: "search",
+  description: "Search the web",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for: ${query}`,
+});
+
+const agent = new Agent({
+  name: "hooked-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a thorough researcher.",
+  tools: [search],
+  maxToolRoundtrips: 10,
+  hooks: {
+    onToolCall: async (_ctx, toolName, args) => {
+      console.log(`[hook] Tool called: ${toolName}`, args);
+    },
+    afterRun: async (_ctx, output) => {
+      console.log(`[hook] Run complete — ${output.usage.totalTokens} tokens`);
+    },
+  },
+  loopHooks: {
+    beforeLLMCall: async (messages, roundtrip) => {
+      console.log(`[loop] Roundtrip ${roundtrip}: ${messages.length} messages`);
+    },
+    afterLLMCall: async (response, roundtrip) => {
+      console.log(`[loop] Roundtrip ${roundtrip} done: ${response.finishReason}`);
+    },
+    onRoundtripComplete: async (roundtrip, tokensSoFar) => {
+      console.log(`[loop] After roundtrip ${roundtrip}: ${tokensSoFar.totalTokens} tokens`);
+      if (tokensSoFar.totalTokens > 10_000) {
+        console.log("[loop] Token limit reached, stopping early.");
+        return { stop: true };
+      }
+    },
+    beforeToolExec: async (toolName, args) => {
+      console.log(`[loop] About to execute: ${toolName}`);
+      // Return { skip: true, result: "..." } to skip execution
+    },
+    afterToolExec: async (toolName, result) => {
+      console.log(`[loop] ${toolName} returned ${result.length} chars`);
+      // Return a string to replace the result
+    },
+  },
+});
+
+await agent.run("Find the top 3 programming languages in 2025.");
+```
+
+## Context Compaction
+
+Automatically compact conversation history when it approaches the model's context window limit. Choose between trimming old messages, summarizing them, or a hybrid strategy.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "long-conversation",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant for long conversations.",
+  contextCompactor: {
+    maxContextTokens: 32_000,
+    reserveTokens: 4096,
+    strategy: "hybrid",
+    summarizeModel: openai("gpt-4o-mini"),
+    priorityOrder: ["system", "recentHistory", "memory", "tools"],
+  },
+});
+
+// Even with hundreds of exchanges, the agent stays within the context window
+for (let i = 0; i < 100; i++) {
+  await agent.run(`Message number ${i}: Tell me something interesting.`, {
+    sessionId: "long-session",
+  });
+}
+```
+
+The three strategies:
+
+- **`trim`** — drops oldest non-system messages to fit the budget (fast, no LLM call)
+- **`summarize`** — condenses older messages into a summary using a cheap model
+- **`hybrid`** — trims first, then summarizes the remaining middle section if still over budget
+
+## Approval Gates
+
+Require human approval before the agent executes specific tools. Approval can be handled via a callback or through the REST API's event-driven approval endpoints.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const deleteUser = defineTool({
+  name: "delete_user",
+  description: "Permanently delete a user account",
+  parameters: z.object({ userId: z.string() }),
+  execute: async ({ userId }) => `User ${userId} deleted.`,
+});
+
+const sendEmail = defineTool({
+  name: "send_email",
+  description: "Send an email",
+  parameters: z.object({
+    to: z.string(),
+    subject: z.string(),
+    body: z.string(),
+  }),
+  execute: async ({ to, subject }) => `Email sent to ${to}: ${subject}`,
+});
+
+// Callback-based approval
+const agent = new Agent({
+  name: "admin-agent",
+  model: openai("gpt-4o"),
+  instructions: "You manage user accounts.",
+  tools: [deleteUser, sendEmail],
+  approval: {
+    policy: ["delete_user"],
+    timeout: 60_000,
+    timeoutAction: "deny",
+    onApproval: async (request) => {
+      console.log(`Approval needed for ${request.toolName}:`, request.args);
+      // In production, prompt a human via Slack, email, or a dashboard
+      const isApproved = true; // simulate human approval
+      return { approved: isApproved, reason: "Approved by admin" };
+    },
+  },
+});
+
+await agent.run("Delete user account user-123");
+```
+
+For event-driven approval via the REST API:
+
+```typescript
+import express from "express";
+import { Agent, openai, defineTool } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+
+const deploy = defineTool({
+  name: "deploy",
+  description: "Deploy to production",
+  parameters: z.object({ service: z.string(), version: z.string() }),
+  execute: async ({ service, version }) => `Deployed ${service}@${version}`,
+});
+
+const agent = new Agent({
+  name: "deployer",
+  model: openai("gpt-4o"),
+  instructions: "You handle deployments.",
+  tools: [deploy],
+  approval: { policy: "all", timeout: 300_000, timeoutAction: "deny" },
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ agents: { deployer: agent } }));
+app.listen(3000);
+
+// GET  /api/approvals/pending           → list pending approvals
+// POST /api/approvals/:requestId/approve → approve
+// POST /api/approvals/:requestId/deny    → deny
+// GET  /api/approvals/stream             → SSE stream of approval requests
+```
+
+## PII Guard
+
+Anonymize PII (emails, phone numbers, SSNs, credit cards, IP addresses) in messages before they reach the LLM. Supports redaction, hashing, and placeholder replacement with optional rehydration.
+
+```typescript
+import { Agent, PiiGuard, openai } from "@radaros/core";
+
+// Placeholder mode: replaces PII with typed placeholders and can rehydrate after
+const piiGuard = new PiiGuard({
+  builtIn: ["email", "phone", "ssn"],
+  action: "placeholder",
+  rehydrate: true,
+});
+
+const agent = new Agent({
+  name: "pii-safe",
+  model: openai("gpt-4o"),
+  instructions: "You are a support agent. Handle customer data carefully.",
+  loopHooks: {
+    beforeLLMCall: piiGuard.toBeforeLLMCallHook(),
+    afterToolExec: piiGuard.toAfterToolExecHook(),
+  },
+  guardrails: {
+    input: [piiGuard.toInputGuardrail()],
+  },
+});
+
+const result = await agent.run(
+  "My email is alice@example.com, SSN is 123-45-6789, and phone is 555-123-4567.",
+);
+
+// The LLM only sees: "My email is [EMAIL_1], SSN is [SSN_2], and phone is [PHONE_3]."
+console.log("LLM response:", result.text);
+console.log("Rehydrated:", piiGuard.rehydrate(result.text));
+console.log("PII mapping:", piiGuard.getMapping());
+```
+
+Redact mode removes PII entirely:
+
+```typescript
+import { PiiGuard } from "@radaros/core";
+
+const guard = new PiiGuard({
+  builtIn: ["email", "phone", "ssn", "creditCard", "ipAddress"],
+  action: "redact",
+});
+
+const scrubbed = guard.scrub(
+  "Contact john@example.com at 555-123-4567, SSN 123-45-6789",
+);
+console.log(scrubbed);
+// "Contact [REDACTED] at [REDACTED], SSN [REDACTED]"
+```
+
+## Checkpointing
+
+Save and restore agent state after each tool roundtrip for crash recovery and rollback.
+
+```typescript
+import { Agent, CheckpointManager, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const processStep = defineTool({
+  name: "process_step",
+  description: "Process a pipeline step",
+  parameters: z.object({ step: z.number() }),
+  execute: async ({ step }) => `Step ${step} complete`,
+});
+
+const checkpointMgr = new CheckpointManager(); // uses InMemoryStorage by default
+
+const agent = new Agent({
+  name: "pipeline",
+  model: openai("gpt-4o"),
+  instructions: "Execute the multi-step pipeline.",
+  tools: [processStep],
+  checkpointing: true,
+});
+
+const result = await agent.run("Run all 5 pipeline steps.");
+console.log("Pipeline result:", result.text);
+
+// With persistent storage:
+import { SqliteStorage } from "@radaros/core";
+
+const persistentCheckpoints = new CheckpointManager(
+  new SqliteStorage({ path: "./checkpoints.db" }),
+);
+
+// List checkpoints for a run
+const checkpoints = await persistentCheckpoints.list("run-id-123");
+console.log("Checkpoints:", checkpoints.map((cp) => ({
+  id: cp.id,
+  roundtrip: cp.roundtrip,
+  messageCount: cp.messages.length,
+  tokens: cp.tokenUsage.totalTokens,
+})));
+
+// Rollback to a specific checkpoint
+const restored = await persistentCheckpoints.rollback(checkpoints[2].id);
+console.log("Restored to roundtrip:", restored?.roundtrip);
+```
+
+## Discovery Cards
+
+Generate A2A-style JSON descriptor cards for your agents' capabilities. Useful for agent registries and multi-agent orchestration.
+
+```typescript
+import { Agent, openai, defineTool, registry } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { z } from "zod";
+import express from "express";
+
+const searchTool = defineTool({
+  name: "web_search",
+  description: "Search the web",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for: ${query}`,
+});
+
+new Agent({
+  name: "research-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a research assistant that searches the web.",
+  tools: [searchTool],
+});
+
+// Individual card
+const card = registry.getAgentCard("research-assistant");
+console.log("Agent Card:", JSON.stringify(card, null, 2));
+// {
+//   "name": "research-assistant",
+//   "description": "You are a research assistant that searches the web",
+//   "model": "gpt-4o",
+//   "provider": "openai",
+//   "url": "/agents/research-assistant",
+//   "capabilities": ["tools", "streaming"],
+//   "tools": [{ "name": "web_search", "description": "Search the web" }],
+//   ...
+// }
+
+// All cards
+const allCards = registry.getAllAgentCards();
+console.log("All agent cards:", allCards.length);
+
+// Via REST endpoints
+const app = express();
+app.use(express.json());
+app.use("/api", createAgentRouter({ cors: true }));
+app.listen(3000);
+// GET /api/agents/research-assistant/card   → single card
+// GET /api/.well-known/agent-cards.json     → all cards
+```
+
+## Metrics Export
+
+Use `MetricsExporter` for per-agent dashboards with runs, errors, duration percentiles, token usage, and cost.
+
+```typescript
+import { Agent, EventBus, openai } from "@radaros/core";
+import { MetricsExporter } from "@radaros/observability";
+
+const eventBus = new EventBus();
+const exporter = new MetricsExporter();
+exporter.attach(eventBus);
+
+const agent = new Agent({
+  name: "dashboard-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are monitored.",
+  eventBus,
+});
+
+await agent.run("Hello!");
+await agent.run("How are you?");
+
+// Per-agent metrics
+const agentMetrics = exporter.getMetrics("dashboard-agent");
+console.log("Agent Metrics:", {
+  runs: agentMetrics.runs,
+  errors: agentMetrics.errors,
+  errorRate: agentMetrics.errorRate,
+  avgDuration: agentMetrics.avgDurationMs,
+  p95Duration: agentMetrics.p95DurationMs,
+  totalCost: agentMetrics.totalCost,
+  totalTokens: agentMetrics.totalTokens,
+  tokensPerRun: agentMetrics.tokensPerRun,
+  toolUsage: agentMetrics.toolUsageFrequency,
+});
+
+// Full JSON snapshot (all agents)
+console.log("Full snapshot:", JSON.stringify(exporter.toJSON(), null, 2));
+
+// Real-time streaming
+for await (const event of exporter.stream()) {
+  console.log("Metric event:", event.type, event.agentName, event.data);
+}
+```
+
+## Dynamic Tool Resolution
+
+Resolve tools at runtime based on user context — useful for multi-tenant setups where different users have access to different tools.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import type { RunContext } from "@radaros/core";
+import { z } from "zod";
+
+const adminDelete = defineTool({
+  name: "delete_record",
+  description: "Delete a database record (admin only)",
+  parameters: z.object({ id: z.string() }),
+  execute: async ({ id }) => `Record ${id} deleted.`,
+});
+
+const readRecord = defineTool({
+  name: "read_record",
+  description: "Read a database record",
+  parameters: z.object({ id: z.string() }),
+  execute: async ({ id }) => `Record ${id}: { name: "Alice", role: "user" }`,
+});
+
+const writeRecord = defineTool({
+  name: "write_record",
+  description: "Update a database record",
+  parameters: z.object({ id: z.string(), data: z.string() }),
+  execute: async ({ id, data }) => `Record ${id} updated with: ${data}`,
+});
+
+const userRoles: Record<string, string> = {
+  "user-1": "admin",
+  "user-2": "editor",
+  "user-3": "viewer",
+};
+
+const agent = new Agent({
+  name: "dynamic-tools",
+  model: openai("gpt-4o"),
+  instructions: "You manage database records.",
+  toolResolver: async (ctx: RunContext) => {
+    const role = userRoles[ctx.userId ?? ""] ?? "viewer";
+
+    switch (role) {
+      case "admin":
+        return [readRecord, writeRecord, adminDelete];
+      case "editor":
+        return [readRecord, writeRecord];
+      default:
+        return [readRecord];
+    }
+  },
+});
+
+// Admin sees all tools
+await agent.run("Delete record rec-42", { userId: "user-1" });
+
+// Viewer only gets read access
+await agent.run("Show me record rec-42", { userId: "user-3" });
+```
+
+## Skills and Learned Skills
+
+Load pre-packaged skills from the filesystem or npm, and let agents save successful multi-step workflows as reusable learned skills.
+
+```typescript
+import { Agent, openai, loadSkill, LearnedSkillStore, InMemoryStorage } from "@radaros/core";
+
+// Load a pre-packaged skill from a local directory
+const gitSkill = await loadSkill("./skills/git-toolkit");
+console.log(`Loaded skill: ${gitSkill.name} v${gitSkill.version}`);
+console.log(`Tools: ${gitSkill.tools.map((t) => t.name).join(", ")}`);
+
+// Agent with pre-packaged skills
+const agent = new Agent({
+  name: "dev-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a developer assistant.",
+  skills: [
+    gitSkill,
+    "./skills/docker-toolkit",  // loaded from path automatically
+  ],
+});
+
+await agent.run("Create a new branch called feature/login");
+
+// Learned skills: agent saves successful workflows for replay
+const skillStore = new LearnedSkillStore(new InMemoryStorage());
+
+// Agent with learned-skill tools (save_skill, search_skills)
+const learningAgent = new Agent({
+  name: "learning-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are an agent that learns from successful workflows. Save useful multi-step patterns as skills.",
+  tools: [...skillStore.getTools()],
+});
+
+// The agent can save a learned skill:
+await skillStore.saveSkill({
+  name: "deploy-to-staging",
+  description: "Build, test, and deploy to staging environment",
+  steps: [
+    { toolName: "shell", args: { command: "npm run build" } },
+    { toolName: "shell", args: { command: "npm test" } },
+    { toolName: "shell", args: { command: "npm run deploy:staging" } },
+  ],
+});
+
+// Search for learned skills
+const skills = await skillStore.searchSkills("deploy");
+console.log("Found skills:", skills.map((s) => s.name));
+```
+
+## Semantic Cache
+
+Cache LLM responses by semantic similarity with configurable TTL and similarity threshold. Avoids redundant LLM calls for near-duplicate queries.
+
+```typescript
+import {
+  Agent,
+  openai,
+  InMemoryVectorStore,
+  OpenAIEmbedding,
+} from "@radaros/core";
+
+const agent = new Agent({
+  name: "cached-agent",
+  model: openai("gpt-4o"),
+  instructions: "You answer questions about TypeScript.",
+  semanticCache: {
+    vectorStore: new InMemoryVectorStore(),
+    embedding: new OpenAIEmbedding({ model: "text-embedding-3-small" }),
+    similarityThreshold: 0.92,
+    ttl: 3600_000, // 1 hour
+    scope: "agent",
+    maxEntries: 10_000,
+  },
+});
+
+// First call — hits the LLM
+const result1 = await agent.run("What are TypeScript generics?");
+console.log("First call:", result1.text.slice(0, 100));
+
+// Second call — served from cache (semantically similar)
+const result2 = await agent.run("Explain generics in TypeScript");
+console.log("Second call:", result2.text.slice(0, 100));
+// The event bus emits "cache.hit" for the second call
+```
+
+## Webhooks
+
+Push agent events to HTTP endpoints, Slack channels, or email addresses. Supports batching, retries, and event filtering.
+
+```typescript
+import {
+  Agent,
+  openai,
+  WebhookManager,
+  httpWebhook,
+  slackWebhook,
+  emailWebhook,
+} from "@radaros/core";
+
+const webhooks = new WebhookManager({
+  destinations: [
+    httpWebhook({
+      name: "analytics",
+      url: "https://analytics.example.com/events",
+      headers: { Authorization: "Bearer token123" },
+    }),
+    slackWebhook({
+      name: "alerts",
+      webhookUrl: "https://hooks.slack.com/services/T.../B.../xxx",
+      channel: "#agent-alerts",
+    }),
+    emailWebhook({
+      name: "admin-notify",
+      to: "admin@example.com",
+      from: "agents@example.com",
+      smtpUrl: "smtp://user:pass@smtp.example.com:587",
+    }),
+  ],
+  events: ["run.complete", "run.error", "cost.budget.exceeded"],
+  batchInterval: 5000,
+  retries: 3,
+  onError: "log",
+});
+
+const agent = new Agent({
+  name: "notified-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  webhooks: {
+    destinations: [
+      httpWebhook({
+        name: "my-hook",
+        url: "https://hooks.example.com/agent-events",
+      }),
+    ],
+    events: ["run.complete", "run.error"],
+  },
+});
+
+await agent.run("Hello!");
+// Events are pushed to all configured webhook destinations
+```
+
+## Scheduling
+
+Run agents on a cron schedule using `AgentQueue` from `@radaros/queue`. Requires Redis and BullMQ.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AgentQueue } from "@radaros/queue";
+
+const agent = new Agent({
+  name: "daily-reporter",
+  model: openai("gpt-4o"),
+  instructions: "Generate a daily summary report.",
+});
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+  queueName: "radaros:jobs",
+});
+
+// Schedule an agent to run every day at 9 AM UTC
+await queue.schedule({
+  id: "daily-report",
+  cron: "0 9 * * *",
+  timezone: "UTC",
+  agent: {
+    name: "daily-reporter",
+    input: "Generate today's summary report.",
+    userId: "system",
+  },
+});
+
+// List all schedules
+const schedules = await queue.listSchedules();
+console.log("Active schedules:", schedules);
+
+// Remove a schedule
+await queue.unschedule("daily-report");
+
+// One-off delayed job
+await queue.enqueueAgentRun({
+  agentName: "daily-reporter",
+  input: "Generate an ad-hoc report.",
+  delay: 60_000, // run in 1 minute
+  attempts: 3,
+  backoff: { type: "exponential", delay: 1000 },
+});
+
+await queue.close();
+```
+
+## Queue Workers
+
+Process background agent jobs with `AgentWorker`. Workers pull jobs from the BullMQ queue and execute agent runs with concurrency control.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { AgentQueue, AgentWorker } from "@radaros/queue";
+import { z } from "zod";
+
+const analyze = defineTool({
+  name: "analyze",
+  description: "Analyze data",
+  parameters: z.object({ dataset: z.string() }),
+  execute: async ({ dataset }) => `Analysis of ${dataset}: 42 anomalies found`,
+});
+
+const analyst = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o"),
+  instructions: "You analyze datasets.",
+  tools: [analyze],
+});
+
+// Producer: enqueue jobs
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+});
+
+const { jobId } = await queue.enqueueAgentRun({
+  agentName: "analyst",
+  input: "Analyze the Q4 sales dataset.",
+  priority: 1,
+  attempts: 3,
+  backoff: { type: "exponential", delay: 2000 },
+});
+console.log("Enqueued job:", jobId);
+
+// Monitor job status
+queue.onCompleted((id, result) => {
+  console.log(`Job ${id} completed:`, result.text);
+});
+queue.onFailed((id, error) => {
+  console.error(`Job ${id} failed:`, error.message);
+});
+
+// Worker: process jobs (run in a separate process)
+const worker = new AgentWorker({
+  connection: { host: "localhost", port: 6379 },
+  concurrency: 5,
+  attempts: 3,
+  backoffDelay: 1000,
+  agentRegistry: { analyst },
+});
+
+worker.start();
+console.log("Worker processing jobs...");
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  await worker.stop();
+  await queue.close();
+  process.exit(0);
+});
+```

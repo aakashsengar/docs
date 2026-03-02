@@ -1,0 +1,565 @@
+---
+title: "Edge & IoT Examples"
+description: "Deploy agents on Raspberry Pi with GPIO, sensors, camera, and BLE"
+---
+
+## 1. Edge Runtime Setup
+
+Configure the edge runtime with resource limits and a hardware watchdog so agents run reliably on constrained devices.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime } from "@radaros/edge";
+
+const runtime = new EdgeRuntime({
+  maxMemoryMB: 256,
+  maxCpuPercent: 80,
+  watchdog: {
+    enabled: true,
+    intervalMs: 5000,
+    maxRestarts: 3,
+    onRestart: (reason) => console.log(`Watchdog restart: ${reason}`),
+  },
+  fallbackModel: "local",
+  networkMode: "prefer-local",
+});
+
+const agent = new Agent({
+  name: "edge-assistant",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a helpful assistant running on an edge device.",
+  runtime,
+});
+
+runtime.on("resourceWarning", (metric) => {
+  console.log(`Warning: ${metric.name} at ${metric.value}% (limit: ${metric.limit}%)`);
+});
+
+const result = await agent.run("Summarize the current system status.");
+console.log(result.text);
+```
+
+---
+
+## 2. GPIO Control
+
+Read and write GPIO pins, and use PWM to control LED brightness from an agent tool.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { EdgeRuntime, GpioToolkit } from "@radaros/edge";
+import { z } from "zod";
+
+const gpio = new GpioToolkit({
+  pins: {
+    LED: { pin: 18, mode: "output", pwm: true },
+    BUTTON: { pin: 23, mode: "input", pullUp: true },
+    RELAY: { pin: 24, mode: "output" },
+  },
+});
+
+const agent = new Agent({
+  name: "gpio-controller",
+  model: openai("gpt-4o-mini"),
+  instructions: `
+    You control hardware GPIO pins on a Raspberry Pi.
+    Available pins: LED (PWM-capable), BUTTON (input), RELAY (output).
+    When setting LED brightness, use a value between 0 and 100.
+  `,
+  tools: gpio.tools(),
+  runtime: new EdgeRuntime({ maxMemoryMB: 128 }),
+});
+
+const result = await agent.run("Set the LED to 75% brightness and check if the button is pressed.");
+console.log(result.text);
+// -> "LED set to 75% brightness. Button is currently not pressed (HIGH)."
+
+gpio.on("pinChange", (pin, value) => {
+  console.log(`Pin ${pin} changed to ${value}`);
+});
+
+await agent.run("Turn on the relay.");
+// -> "Relay on pin 24 is now ON."
+```
+
+---
+
+## 3. Sensor Reading
+
+Read I2C sensor data (temperature, humidity, pressure) and let the agent interpret the values.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime, SensorToolkit } from "@radaros/edge";
+
+const sensors = new SensorToolkit({
+  i2c: {
+    bus: 1,
+    devices: [
+      { name: "bme280", address: 0x76, type: "temperature+humidity+pressure" },
+      { name: "tsl2561", address: 0x39, type: "light" },
+    ],
+  },
+  pollingIntervalMs: 2000,
+});
+
+const agent = new Agent({
+  name: "sensor-reader",
+  model: openai("gpt-4o-mini"),
+  instructions: `
+    You read environmental sensors on a Raspberry Pi.
+    Report values with units and flag anything outside normal ranges:
+    - Temperature: 18-26 C is normal
+    - Humidity: 30-60% is normal
+    - Pressure: 1000-1025 hPa is normal
+    - Light: 300-500 lux is comfortable indoor lighting
+  `,
+  tools: sensors.tools(),
+  runtime: new EdgeRuntime({ maxMemoryMB: 128 }),
+});
+
+const result = await agent.run("Read all sensors and give me an environment report.");
+console.log(result.text);
+// -> "Environment Report:
+//    Temperature: 23.4 C (normal)
+//    Humidity: 45% (normal)
+//    Pressure: 1013 hPa (normal)
+//    Light: 620 lux (above comfortable range)"
+
+sensors.on("reading", (device, data) => {
+  console.log(`[${device}] ${JSON.stringify(data)}`);
+});
+```
+
+---
+
+## 4. Camera Capture
+
+Take photos with a connected camera and analyze the image using a vision-capable model.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime, CameraToolkit } from "@radaros/edge";
+import { writeFile } from "node:fs/promises";
+
+const camera = new CameraToolkit({
+  device: "/dev/video0",
+  resolution: { width: 1280, height: 720 },
+  format: "jpeg",
+  quality: 85,
+});
+
+const agent = new Agent({
+  name: "vision-agent",
+  model: openai("gpt-4o"),
+  instructions: `
+    You have access to a camera on a Raspberry Pi.
+    When asked to look at something, capture a photo and describe what you see in detail.
+    Identify objects, people count, text, and any safety concerns.
+  `,
+  tools: camera.tools(),
+  runtime: new EdgeRuntime({ maxMemoryMB: 512 }),
+});
+
+const result = await agent.run("Take a photo and describe what you see.");
+console.log(result.text);
+// -> "I can see a well-lit office space with 3 people at desks. There is a whiteboard
+//    on the left wall with diagrams. No safety concerns observed."
+
+if (result.images?.length) {
+  await writeFile("capture.jpg", result.images[0].buffer);
+  console.log("Photo saved to capture.jpg");
+}
+```
+
+---
+
+## 5. BLE Scanner
+
+Scan for nearby Bluetooth Low Energy devices and read characteristics from known peripherals.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime, BleToolkit } from "@radaros/edge";
+
+const ble = new BleToolkit({
+  adapter: "hci0",
+  scanDurationMs: 10000,
+  knownDevices: {
+    "AA:BB:CC:DD:EE:01": { name: "Heart Rate Monitor", serviceUUID: "180d" },
+    "AA:BB:CC:DD:EE:02": { name: "Temperature Beacon", serviceUUID: "181a" },
+  },
+});
+
+const agent = new Agent({
+  name: "ble-scanner",
+  model: openai("gpt-4o-mini"),
+  instructions: `
+    You scan for Bluetooth Low Energy devices and read their data.
+    Report device names, signal strength (RSSI), and any readable characteristic values.
+    Flag devices with weak signals (RSSI below -80 dBm).
+  `,
+  tools: ble.tools(),
+  runtime: new EdgeRuntime({ maxMemoryMB: 128 }),
+});
+
+const result = await agent.run("Scan for nearby BLE devices and read any available data.");
+console.log(result.text);
+// -> "Found 4 BLE devices:
+//    1. Heart Rate Monitor (AA:BB:CC:DD:EE:01) RSSI: -45 dBm, Heart rate: 72 bpm
+//    2. Temperature Beacon (AA:BB:CC:DD:EE:02) RSSI: -62 dBm, Temp: 21.5 C
+//    3. Unknown (FF:11:22:33:44:55) RSSI: -78 dBm, No readable services
+//    4. Unknown (FF:66:77:88:99:AA) RSSI: -91 dBm, Weak signal"
+
+ble.on("deviceFound", (device) => {
+  console.log(`Discovered: ${device.name ?? device.address} (RSSI: ${device.rssi})`);
+});
+```
+
+---
+
+## 6. Edge Agent with Ollama
+
+Run a fully local LLM on the Raspberry Pi using Ollama. No cloud calls, no internet required.
+
+```typescript
+import { Agent } from "@radaros/core";
+import { EdgeRuntime, OllamaProvider } from "@radaros/edge";
+
+const ollama = new OllamaProvider({
+  baseUrl: "http://localhost:11434",
+  defaultModel: "phi3:mini",
+  keepAliveMs: 300000,
+});
+
+const runtime = new EdgeRuntime({
+  maxMemoryMB: 2048,
+  maxCpuPercent: 90,
+  networkMode: "offline",
+});
+
+const agent = new Agent({
+  name: "local-agent",
+  model: ollama("phi3:mini"),
+  instructions: `
+    You are an offline assistant running entirely on a Raspberry Pi.
+    You have no internet access. Be concise to save compute resources.
+    If asked about something requiring internet, explain that you are offline.
+  `,
+  runtime,
+  maxTokens: 512,
+});
+
+const result = await agent.run("Explain the difference between TCP and UDP in two sentences.");
+console.log(result.text);
+// -> "TCP provides reliable, ordered delivery with connection establishment and error checking.
+//    UDP is connectionless and faster but does not guarantee delivery or order."
+
+console.log("Model:", result.model);
+console.log("Tokens:", result.usage.totalTokens);
+console.log("Latency:", `${result.latencyMs}ms`);
+```
+
+---
+
+## 7. Edge-Cloud Sync
+
+Synchronize agent state between an edge device and the cloud. The agent works offline and pushes updates when connectivity is restored.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime, CloudSync } from "@radaros/edge";
+
+const sync = new CloudSync({
+  cloudUrl: "https://api.radaros.dev/sync",
+  apiKey: process.env.RADAROS_API_KEY!,
+  deviceId: "pi-warehouse-01",
+  syncIntervalMs: 30000,
+  conflictResolution: "cloud-wins",
+  retryOnFailure: true,
+  maxRetries: 5,
+});
+
+const runtime = new EdgeRuntime({
+  maxMemoryMB: 256,
+  networkMode: "prefer-local",
+});
+
+const agent = new Agent({
+  name: "synced-agent",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a warehouse monitoring agent. Log events and sync them to the cloud.",
+  runtime,
+  memory: {
+    storage: sync.localStorage,
+    memoryKeys: ["events", "alerts", "inventory_changes"],
+    autoSummarize: true,
+  },
+});
+
+sync.on("syncComplete", (stats) => {
+  console.log(`Synced: ${stats.pushed} pushed, ${stats.pulled} pulled, ${stats.conflicts} conflicts`);
+});
+
+sync.on("offline", () => {
+  console.log("Network offline - buffering locally");
+});
+
+sync.on("online", () => {
+  console.log("Network restored - flushing buffer");
+});
+
+await sync.start();
+
+const result = await agent.run("Log a new event: pallet #4521 moved to zone B3.");
+console.log(result.text);
+```
+
+---
+
+## 8. Resource Monitoring
+
+Monitor CPU, memory, and temperature on the edge device. Degrade gracefully when resources are constrained.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EdgeRuntime, ResourceMonitor, OllamaProvider } from "@radaros/edge";
+
+const ollama = new OllamaProvider({
+  baseUrl: "http://localhost:11434",
+  defaultModel: "phi3:mini",
+});
+
+const monitor = new ResourceMonitor({
+  intervalMs: 3000,
+  thresholds: {
+    cpuPercent: { warn: 70, critical: 90 },
+    memoryPercent: { warn: 75, critical: 90 },
+    temperatureC: { warn: 70, critical: 80 },
+    diskPercent: { warn: 85, critical: 95 },
+  },
+});
+
+const runtime = new EdgeRuntime({
+  maxMemoryMB: 512,
+  maxCpuPercent: 85,
+  resourceMonitor: monitor,
+});
+
+const cloudAgent = new Agent({
+  name: "full-agent",
+  model: openai("gpt-4o-mini"),
+  instructions: "You are a capable assistant with full cloud access.",
+  runtime,
+});
+
+const localAgent = new Agent({
+  name: "lite-agent",
+  model: ollama("phi3:mini"),
+  instructions: "You are a lightweight assistant. Keep answers very short.",
+  runtime,
+  maxTokens: 256,
+});
+
+monitor.on("warning", (metric) => {
+  console.log(`WARNING: ${metric.name} at ${metric.value}${metric.unit}`);
+});
+
+monitor.on("critical", (metric) => {
+  console.log(`CRITICAL: ${metric.name} at ${metric.value}${metric.unit} - switching to local model`);
+});
+
+async function smartRun(input: string) {
+  const status = monitor.getStatus();
+  const agent = status.level === "critical" ? localAgent : cloudAgent;
+  console.log(`Using ${agent.name} (system: ${status.level})`);
+  return agent.run(input);
+}
+
+await monitor.start();
+
+const result = await smartRun("What is the status of the system?");
+console.log(result.text);
+
+const snapshot = monitor.getSnapshot();
+console.log("CPU:", `${snapshot.cpu.percent}%`);
+console.log("Memory:", `${snapshot.memory.usedMB}/${snapshot.memory.totalMB} MB`);
+console.log("Temperature:", `${snapshot.temperature.celsius} C`);
+console.log("Disk:", `${snapshot.disk.percent}%`);
+```
+
+---
+
+## 9. Smart Home Agent
+
+A complete IoT agent that controls lights, reads sensors, and takes photos on a Raspberry Pi.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import {
+  EdgeRuntime,
+  GpioToolkit,
+  SensorToolkit,
+  CameraToolkit,
+} from "@radaros/edge";
+import { z } from "zod";
+
+const gpio = new GpioToolkit({
+  pins: {
+    LIVING_ROOM_LIGHT: { pin: 17, mode: "output" },
+    BEDROOM_LIGHT: { pin: 27, mode: "output", pwm: true },
+    KITCHEN_LIGHT: { pin: 22, mode: "output", pwm: true },
+    MOTION_SENSOR: { pin: 4, mode: "input" },
+    DOOR_SENSOR: { pin: 5, mode: "input", pullUp: true },
+  },
+});
+
+const sensors = new SensorToolkit({
+  i2c: {
+    bus: 1,
+    devices: [
+      { name: "living_room", address: 0x76, type: "temperature+humidity" },
+      { name: "bedroom", address: 0x77, type: "temperature+humidity" },
+      { name: "outdoor", address: 0x39, type: "temperature+light" },
+    ],
+  },
+  pollingIntervalMs: 5000,
+});
+
+const camera = new CameraToolkit({
+  device: "/dev/video0",
+  resolution: { width: 640, height: 480 },
+  format: "jpeg",
+  quality: 70,
+});
+
+const setScene = defineTool({
+  name: "set_scene",
+  description: "Apply a predefined lighting scene to the house",
+  parameters: z.object({
+    scene: z.enum(["morning", "evening", "movie", "sleep", "away"]),
+  }),
+  execute: async ({ scene }) => {
+    const scenes: Record<string, Record<string, number>> = {
+      morning: { LIVING_ROOM_LIGHT: 1, BEDROOM_LIGHT: 80, KITCHEN_LIGHT: 100 },
+      evening: { LIVING_ROOM_LIGHT: 1, BEDROOM_LIGHT: 50, KITCHEN_LIGHT: 60 },
+      movie: { LIVING_ROOM_LIGHT: 0, BEDROOM_LIGHT: 0, KITCHEN_LIGHT: 10 },
+      sleep: { LIVING_ROOM_LIGHT: 0, BEDROOM_LIGHT: 0, KITCHEN_LIGHT: 0 },
+      away: { LIVING_ROOM_LIGHT: 0, BEDROOM_LIGHT: 0, KITCHEN_LIGHT: 0 },
+    };
+    const settings = scenes[scene];
+    for (const [pin, value] of Object.entries(settings)) {
+      await gpio.write(pin, value);
+    }
+    return `Scene "${scene}" applied: ${JSON.stringify(settings)}`;
+  },
+});
+
+const runtime = new EdgeRuntime({
+  maxMemoryMB: 512,
+  maxCpuPercent: 80,
+  watchdog: { enabled: true, intervalMs: 10000, maxRestarts: 5 },
+});
+
+const agent = new Agent({
+  name: "smart-home",
+  model: openai("gpt-4o-mini"),
+  instructions: `
+    You are a smart home assistant running on a Raspberry Pi.
+    You control lights (on/off/dimming), read environmental sensors, and can take photos.
+    Available rooms: living room, bedroom, kitchen.
+    When reporting, use friendly natural language.
+    If motion or door changes are detected, proactively inform the user.
+  `,
+  tools: [...gpio.tools(), ...sensors.tools(), ...camera.tools(), setScene],
+  runtime,
+});
+
+gpio.on("pinChange", async (pin, value) => {
+  if (pin === "MOTION_SENSOR" && value === 1) {
+    console.log("Motion detected - taking a photo for security check");
+    await agent.run(
+      "Motion detected at the front door. Take a photo and describe who or what you see."
+    );
+  }
+  if (pin === "DOOR_SENSOR" && value === 0) {
+    console.log("Front door opened");
+  }
+});
+
+const result = await agent.run(
+  "Good evening! Set the evening scene, then tell me the temperature in each room and whether the front door is closed."
+);
+console.log(result.text);
+// -> "Good evening! Evening scene set: living room on, bedroom at 50%, kitchen at 60%.
+//    Living room: 22.1 C, 48% humidity
+//    Bedroom: 20.8 C, 52% humidity
+//    Outdoor: 15.3 C
+//    Front door is closed."
+```
+
+---
+
+## 10. Fleet Management
+
+Manage multiple edge agents from a central cloud dashboard. Deploy configs, monitor health, and issue remote commands.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { FleetManager } from "@radaros/edge";
+
+const fleet = new FleetManager({
+  cloudUrl: "https://api.radaros.dev/fleet",
+  apiKey: process.env.RADAROS_API_KEY!,
+  healthCheckIntervalMs: 15000,
+});
+
+await fleet.registerDevices([
+  { id: "pi-warehouse-01", name: "Warehouse North", tags: ["warehouse", "sensors"] },
+  { id: "pi-warehouse-02", name: "Warehouse South", tags: ["warehouse", "sensors", "camera"] },
+  { id: "pi-office-01", name: "Office Lobby", tags: ["office", "camera", "ble"] },
+  { id: "pi-office-02", name: "Server Room", tags: ["office", "sensors"] },
+]);
+
+const admin = new Agent({
+  name: "fleet-admin",
+  model: openai("gpt-4o"),
+  instructions: `
+    You manage a fleet of Raspberry Pi edge devices.
+    You can check health, deploy configurations, run remote commands, and handle alerts.
+    Always confirm destructive operations before executing.
+  `,
+  tools: fleet.tools(),
+});
+
+const result = await admin.run("Show me the health status of all warehouse devices.");
+console.log(result.text);
+// -> "Fleet Status (Warehouse):
+//    pi-warehouse-01 (Warehouse North) CPU: 34%, Mem: 45%, Temp: 52 C, Uptime: 14d 6h
+//    pi-warehouse-02 (Warehouse South) CPU: 78%, Mem: 82%, Temp: 71 C, Uptime: 3d 12h
+//       Warning: High memory and temperature. Consider restarting non-critical services."
+
+fleet.on("deviceOffline", (device) => {
+  console.log(`ALERT: ${device.name} (${device.id}) went offline`);
+});
+
+fleet.on("healthWarning", (device, metrics) => {
+  console.log(`WARNING: ${device.name} ${metrics.map((m) => `${m.name}: ${m.value}`).join(", ")}`);
+});
+
+await fleet.deployConfig({
+  targetTags: ["warehouse"],
+  config: {
+    sensorPollingMs: 3000,
+    alertThresholds: { temperatureC: 35, humidityPercent: 80 },
+    autoRestart: true,
+  },
+});
+console.log("Config deployed to all warehouse devices.");
+
+const remoteResult = await fleet.runOnDevice(
+  "pi-warehouse-01",
+  "Read all sensor values and report."
+);
+console.log("Remote result:", remoteResult.text);
+```

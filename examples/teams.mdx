@@ -1,0 +1,546 @@
+---
+title: "Team Examples"
+description: "Multi-agent team patterns: coordinate, route, broadcast, and collaborate"
+---
+
+## Coordinate Team
+
+An orchestrator delegates subtasks to specialist agents, then synthesizes their outputs into a unified response. This is ideal when a task naturally decomposes into distinct roles.
+
+```typescript
+import { Agent, Team, TeamMode, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const writer = new Agent({
+  name: "Writer",
+  model: openai("gpt-4o"),
+  instructions: `You are a professional long-form writer.
+    Given research notes and a topic, produce clear, engaging prose.
+    Target 300–500 words. Use subheadings and concrete data points.`,
+  register: false,
+});
+
+const editor = new Agent({
+  name: "Editor",
+  model: openai("gpt-4o"),
+  instructions: `You are a meticulous editor.
+    Fix grammar, tighten structure, and improve clarity.
+    Preserve the author's voice. Return the edited piece in full.`,
+  register: false,
+});
+
+const factChecker = new Agent({
+  name: "FactChecker",
+  model: openai("gpt-4o"),
+  instructions: `You verify factual claims against known data.
+    Flag anything unsubstantiated with [NEEDS CITATION].
+    Suggest corrections with sources where possible.`,
+  register: false,
+});
+
+const researchTeam = new Team({
+  name: "ResearchTeam",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [writer, editor, factChecker],
+  instructions: `Workflow: first ask the Writer for a draft,
+    then the FactChecker to verify all claims,
+    then the Editor for a final polish incorporating any corrections.`,
+});
+
+const result = await researchTeam.run(
+  "Write a 300-word article on the economic impact of quantum computing in 2026."
+);
+console.log(result.text);
+```
+
+## Route Team
+
+The orchestrator inspects the user's input and forwards the entire request to a single specialist agent. Use this pattern when requests fall into distinct, non-overlapping categories.
+
+```typescript
+import { Agent, Team, TeamMode, openai } from "@radaros/core";
+
+const billingAgent = new Agent({
+  name: "BillingAgent",
+  model: openai("gpt-4o"),
+  instructions: `You handle billing inquiries: invoices, payment methods,
+    refunds, subscription changes, and pricing questions.
+    Always confirm the customer's account ID before making changes.`,
+  register: false,
+});
+
+const technicalAgent = new Agent({
+  name: "TechnicalAgent",
+  model: openai("gpt-4o"),
+  instructions: `You troubleshoot technical issues: API errors, integration
+    problems, SDK bugs, and performance debugging.
+    Ask for error codes and stack traces when relevant.`,
+  register: false,
+});
+
+const generalAgent = new Agent({
+  name: "GeneralAgent",
+  model: openai("gpt-4o"),
+  instructions: `You answer general questions about the product, onboarding
+    flow, feature availability, and company policies.
+    Redirect to billing or technical if the query is clearly in their domain.`,
+  register: false,
+});
+
+const supportRouter = new Team({
+  name: "CustomerSupport",
+  mode: TeamMode.Route,
+  model: openai("gpt-4o-mini"),
+  members: [billingAgent, technicalAgent, generalAgent],
+  instructions: `Route each message to exactly one agent.
+    Billing: invoices, charges, refunds, subscriptions.
+    Technical: errors, integrations, API, performance.
+    General: everything else.`,
+});
+
+const billing = await supportRouter.run(
+  "I was double-charged $49.99 on my last invoice (account: ACCT-8821)."
+);
+console.log("Billing response:", billing.text);
+
+const technical = await supportRouter.run(
+  "My webhook endpoint returns 502 errors every time I push to /events."
+);
+console.log("Technical response:", technical.text);
+```
+
+## Broadcast Team
+
+Every member receives the same input in parallel. An orchestrator merges their perspectives into a single answer. Use this when you want multiple viewpoints analyzed simultaneously.
+
+```typescript
+import { Agent, Team, TeamMode, openai } from "@radaros/core";
+
+const optimist = new Agent({
+  name: "Optimist",
+  model: openai("gpt-4o"),
+  instructions: `Analyze topics from an optimistic perspective.
+    Highlight opportunities, growth potential, and competitive advantages.
+    Back claims with market data or precedent where possible.`,
+  register: false,
+});
+
+const skeptic = new Agent({
+  name: "Skeptic",
+  model: openai("gpt-4o"),
+  instructions: `Analyze topics from a critical perspective.
+    Surface risks, hidden costs, failure modes, and competitive threats.
+    Quantify downside scenarios when feasible.`,
+  register: false,
+});
+
+const pragmatist = new Agent({
+  name: "Pragmatist",
+  model: openai("gpt-4o"),
+  instructions: `Analyze topics from a practical perspective.
+    Focus on feasibility, timelines, resource needs, and concrete next steps.
+    Suggest a phased rollout plan where appropriate.`,
+  register: false,
+});
+
+const analysisTeam = new Team({
+  name: "MultiPerspectiveAnalysis",
+  mode: TeamMode.Broadcast,
+  model: openai("gpt-4o"),
+  members: [optimist, skeptic, pragmatist],
+  instructions: `Synthesize all three perspectives into a balanced executive
+    summary. Structure it as: Key Opportunities, Key Risks, Recommended
+    Action Plan. End with a clear go/no-go recommendation.`,
+});
+
+const result = await analysisTeam.run(
+  "Should our 50-person startup pivot from B2C to B2B SaaS given declining consumer retention?"
+);
+console.log(result.text);
+```
+
+## Collaborate Team
+
+Members iterate in rounds, building on each other's work. The orchestrator checks for consensus after each round and either stops early or poses a follow-up question. Control iteration depth with `maxRounds`.
+
+```typescript
+import { Agent, Team, TeamMode, openai } from "@radaros/core";
+
+const ideator = new Agent({
+  name: "Ideator",
+  model: openai("gpt-4o"),
+  instructions: `You generate creative product ideas.
+    Build on feedback from previous rounds to refine proposals.
+    Each round, present your top 2 ideas with one-sentence rationale.`,
+  register: false,
+});
+
+const critic = new Agent({
+  name: "Critic",
+  model: openai("gpt-4o"),
+  instructions: `You critically evaluate ideas.
+    Identify the single biggest weakness of each proposal.
+    Suggest one specific, actionable improvement per idea.`,
+  register: false,
+});
+
+const strategist = new Agent({
+  name: "Strategist",
+  model: openai("gpt-4o"),
+  instructions: `You assess market fit and business viability.
+    Score each idea on market size (1-5), feasibility (1-5), and
+    differentiation (1-5). Suggest positioning and GTM strategy.`,
+  register: false,
+});
+
+const brainstormTeam = new Team({
+  name: "BrainstormTeam",
+  mode: TeamMode.Collaborate,
+  model: openai("gpt-4o"),
+  members: [ideator, critic, strategist],
+  maxRounds: 4,
+  instructions: `Facilitate a brainstorm to converge on one winning idea.
+    Stop early if all members agree on a single top idea.`,
+});
+
+const result = await brainstormTeam.run(
+  "We need a new feature for our developer productivity tool that reduces context-switching. Our users are full-stack engineers at mid-size companies."
+);
+console.log(result.text);
+```
+
+## Team with Shared Tools
+
+All agents in a team share the same tool library, enabling consistent access to external services. Define tools once and pass them to every member.
+
+```typescript
+import { Agent, Team, TeamMode, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const searchKnowledgeBase = defineTool({
+  name: "search_kb",
+  description: "Search the internal knowledge base for relevant articles",
+  parameters: z.object({
+    query: z.string().describe("Search query"),
+    limit: z.number().optional().default(5),
+  }),
+  execute: async ({ query, limit }) => {
+    const res = await fetch(
+      `https://kb.internal/api/search?q=${encodeURIComponent(query)}&limit=${limit}`
+    );
+    return JSON.stringify(await res.json());
+  },
+});
+
+const createTicket = defineTool({
+  name: "create_ticket",
+  description: "Create a support ticket in the ticketing system",
+  parameters: z.object({
+    title: z.string(),
+    description: z.string(),
+    priority: z.enum(["low", "medium", "high", "critical"]),
+    assignee: z.string().optional(),
+  }),
+  execute: async (args) => {
+    const ticket = await fetch("https://tickets.internal/api/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    }).then((r) => r.json());
+    return `Ticket created: ${ticket.id} (${ticket.url})`;
+  },
+});
+
+const updateStatus = defineTool({
+  name: "update_ticket_status",
+  description: "Update the status of an existing support ticket",
+  parameters: z.object({
+    ticketId: z.string(),
+    status: z.enum(["open", "in_progress", "waiting", "resolved", "closed"]),
+    note: z.string().optional(),
+  }),
+  execute: async ({ ticketId, status, note }) => {
+    await fetch(`https://tickets.internal/api/tickets/${ticketId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, note }),
+    });
+    return `Ticket ${ticketId} updated to ${status}`;
+  },
+});
+
+const sharedTools = [searchKnowledgeBase, createTicket, updateStatus];
+
+const triageAgent = new Agent({
+  name: "TriageAgent",
+  model: openai("gpt-4o"),
+  instructions: `Classify incoming issues by severity and affected system.
+    Search the knowledge base to check for known issues before escalating.`,
+  tools: sharedTools,
+  register: false,
+});
+
+const resolutionAgent = new Agent({
+  name: "ResolutionAgent",
+  model: openai("gpt-4o"),
+  instructions: `Search the knowledge base for solutions to the triaged issue.
+    If a fix exists, provide step-by-step instructions.
+    If no fix is found, create a ticket for the engineering team with priority based on triage severity.`,
+  tools: sharedTools,
+  register: false,
+});
+
+const supportTeam = new Team({
+  name: "SupportOps",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o-mini"),
+  members: [triageAgent, resolutionAgent],
+  instructions: "Triage the issue first, then attempt resolution using the knowledge base.",
+});
+
+const result = await supportTeam.run(
+  "User reports SSO login fails with error AUTH-403 after password reset. Affecting 12 enterprise accounts since 9am PST."
+);
+console.log(result.text);
+```
+
+## Nested Teams
+
+Compose teams of teams for complex organizational hierarchies. An outer team can coordinate inner teams that each handle a different domain. Teams are valid members of other teams.
+
+```typescript
+import { Agent, Team, TeamMode, openai } from "@radaros/core";
+
+// --- Engineering sub-team ---
+const frontendDev = new Agent({
+  name: "FrontendDev",
+  model: openai("gpt-4o"),
+  instructions: `You plan frontend implementation: React components, state
+    management (Zustand/Redux), API integration, and responsive design.
+    Estimate complexity in story points.`,
+  register: false,
+});
+
+const backendDev = new Agent({
+  name: "BackendDev",
+  model: openai("gpt-4o"),
+  instructions: `You plan backend implementation: REST/GraphQL APIs, database
+    schema migrations, service architecture, and caching strategy.
+    Estimate complexity in story points.`,
+  register: false,
+});
+
+const qaEngineer = new Agent({
+  name: "QAEngineer",
+  model: openai("gpt-4o"),
+  instructions: `You define the test strategy: unit tests, integration tests,
+    E2E scenarios, and edge cases. Identify regression risks.`,
+  register: false,
+});
+
+const engineeringTeam = new Team({
+  name: "Engineering",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o-mini"),
+  members: [frontendDev, backendDev, qaEngineer],
+  instructions: "Produce a technical implementation plan with effort estimates.",
+  register: false,
+});
+
+// --- Design sub-team ---
+const uxDesigner = new Agent({
+  name: "UXDesigner",
+  model: openai("gpt-4o"),
+  instructions: `Create user flows, wireframe descriptions, and interaction
+    patterns. Prioritize accessibility (WCAG 2.1 AA).`,
+  register: false,
+});
+
+const visualDesigner = new Agent({
+  name: "VisualDesigner",
+  model: openai("gpt-4o"),
+  instructions: `Define visual style: color palette, typography scale,
+    spacing system, and component variants. Follow design tokens.`,
+  register: false,
+});
+
+const designTeam = new Team({
+  name: "Design",
+  mode: TeamMode.Collaborate,
+  model: openai("gpt-4o-mini"),
+  members: [uxDesigner, visualDesigner],
+  maxRounds: 2,
+  register: false,
+});
+
+// --- Product team coordinates everything ---
+const productManager = new Agent({
+  name: "ProductManager",
+  model: openai("gpt-4o"),
+  instructions: `Write PRDs, define user stories with acceptance criteria,
+    and prioritize the backlog. You coordinate engineering and design teams.`,
+  register: false,
+});
+
+const productOrg = new Team({
+  name: "ProductOrganization",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [productManager, engineeringTeam, designTeam],
+  instructions: `The PM writes the spec first. Then delegate to Engineering
+    for a technical plan and Design for the UX/visual plan in parallel.
+    Synthesize everything into a launch-ready project brief.`,
+});
+
+const result = await productOrg.run(
+  "Plan the v2 launch of our analytics dashboard: new chart types, real-time filters, CSV/PDF export, and a share-via-link feature."
+);
+console.log(result.text);
+```
+
+## Team with Memory
+
+Maintain shared session context across team interactions so members can recall earlier conversation turns. Each agent stores and retrieves messages from the same storage backend.
+
+```typescript
+import {
+  Agent,
+  Team,
+  TeamMode,
+  openai,
+  SqliteStorage,
+} from "@radaros/core";
+
+const storage = new SqliteStorage({ path: "./team-memory.db" });
+
+const analyst = new Agent({
+  name: "Analyst",
+  model: openai("gpt-4o"),
+  instructions: `You analyze business data and produce quantitative insights.
+    Reference earlier findings when available to maintain continuity.
+    Always cite the metric, time range, and percentage change.`,
+  memory: {
+    storage,
+    session: { maxMessages: 50 },
+    summaries: { enabled: true, model: openai("gpt-4o-mini") },
+  },
+  register: false,
+});
+
+const reporter = new Agent({
+  name: "Reporter",
+  model: openai("gpt-4o"),
+  instructions: `You write executive reports from analysis.
+    Reference previous reports in this session for trend continuity.
+    Structure: Executive Summary → Key Metrics → Recommendations.`,
+  memory: {
+    storage,
+    session: { maxMessages: 50 },
+    summaries: { enabled: true, model: openai("gpt-4o-mini") },
+  },
+  register: false,
+});
+
+const analyticsTeam = new Team({
+  name: "AnalyticsTeam",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o-mini"),
+  members: [analyst, reporter],
+  sessionState: { quarter: "Q1-2026", region: "North America" },
+  instructions: "The Analyst produces insights first, then the Reporter writes the executive summary.",
+});
+
+const sessionId = "analytics-session-q1-2026";
+
+const q1Report = await analyticsTeam.run(
+  "Summarize Q1 revenue trends. We saw $12.4M in ARR with 8% MoM growth.",
+  { sessionId }
+);
+console.log("Q1 Report:\n", q1Report.text);
+
+// Second call — agents recall the Q1 analysis from the shared session
+const comparison = await analyticsTeam.run(
+  "Compare these Q1 trends with Q4-2025 ($11.1M ARR, 5% MoM growth). What's accelerating?",
+  { sessionId }
+);
+console.log("\nComparison:\n", comparison.text);
+
+// Third call — the full conversation history is available
+const forecast = await analyticsTeam.run(
+  "Based on the Q4→Q1 acceleration, project Q2 ARR assuming the same growth trajectory.",
+  { sessionId }
+);
+console.log("\nForecast:\n", forecast.text);
+```
+
+## Team with Cost Tracking
+
+Attach a `CostTracker` to every agent in the team to monitor total spend, enforce budgets, and get per-agent breakdowns after the run completes.
+
+```typescript
+import { Agent, Team, TeamMode, openai, CostTracker } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  budget: {
+    maxCostPerRun: 0.50,
+    onBudgetExceeded: "warn",
+  },
+});
+
+const researcher = new Agent({
+  name: "Researcher",
+  model: openai("gpt-4o"),
+  instructions: `Research topics thoroughly using long-form reasoning.
+    Cite at least 3 data points per claim. Be comprehensive.`,
+  costTracker,
+  register: false,
+});
+
+const synthesizer = new Agent({
+  name: "Synthesizer",
+  model: openai("gpt-4o-mini"),
+  instructions: `Distill research into a concise, actionable summary.
+    Target 150 words. Use bullet points for key findings.`,
+  costTracker,
+  register: false,
+});
+
+const qualityReviewer = new Agent({
+  name: "QualityReviewer",
+  model: openai("gpt-4o-mini"),
+  instructions: `Review the summary for accuracy against the original research.
+    Flag any claims that were oversimplified or lost nuance.`,
+  costTracker,
+  register: false,
+});
+
+const costAwareTeam = new Team({
+  name: "CostAwareResearch",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o-mini"),
+  members: [researcher, synthesizer, qualityReviewer],
+  instructions: `Research first, then synthesize, then quality-review.
+    Use gpt-4o only for deep research; gpt-4o-mini for synthesis and review.`,
+});
+
+const result = await costAwareTeam.run(
+  "Research the current state of solid-state battery technology for EVs. Focus on energy density breakthroughs and projected commercial timelines."
+);
+console.log(result.text);
+
+const summary = costTracker.getSummary();
+console.log(`\n--- Cost Summary ---`);
+console.log(`Total cost:   $${summary.totalCost.toFixed(4)}`);
+console.log(`Total tokens: ${summary.totalTokens.totalTokens.toLocaleString()}`);
+console.log(`  ├─ Input:   ${summary.totalTokens.inputTokens.toLocaleString()}`);
+console.log(`  └─ Output:  ${summary.totalTokens.outputTokens.toLocaleString()}`);
+console.log(`Entries:      ${summary.entries}`);
+console.log(`\nPer-agent breakdown:`);
+
+for (const [agent, stats] of Object.entries(summary.byAgent)) {
+  console.log(
+    `  ${agent}: $${stats.cost.toFixed(4)} | ${stats.tokens.totalTokens.toLocaleString()} tokens | ${stats.runs} call(s)`
+  );
+}
+```

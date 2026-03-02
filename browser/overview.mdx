@@ -146,6 +146,10 @@ const agent = new BrowserAgent(config: BrowserAgentConfig);
   Secure credential store. The LLM only sees named placeholders — real values are injected at execution time and scrubbed from all output.
 </ParamField>
 
+<ParamField path="costTracker" type="CostTracker">
+  Track vision model token usage and enforce budgets across browser runs. Each vision loop step (screenshot → LLM → action) records its token usage. The same tracker can be shared with text and voice agents for unified cost monitoring.
+</ParamField>
+
 <ParamField path="logLevel" type="string" default="silent">
   Logging level: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
 </ParamField>
@@ -548,6 +552,37 @@ const agent = new BrowserAgent({
 ```
 
 When the agent repeats the same action more than `maxRepeats` times, it stops and returns `success: false` with a descriptive error. This prevents infinite loops caused by popups, consent banners, or ambiguous page states.
+
+---
+
+## Cost Tracking
+
+Browser agents make repeated vision model calls (one per step), which can accumulate significant cost. Use `CostTracker` to monitor and limit spending:
+
+```typescript
+import { BrowserAgent } from "@radaros/browser";
+import { openai, CostTracker } from "@radaros/core";
+
+const tracker = new CostTracker({
+  budget: { maxCostPerRun: 2.0 },  // $2 max per browser run
+});
+
+const agent = new BrowserAgent({
+  name: "web-scraper",
+  model: openai("gpt-4o"),
+  costTracker: tracker,
+  maxSteps: 30,
+});
+
+const result = await agent.run("Search for flights from NYC to London");
+
+const summary = tracker.getSummary();
+console.log(`Browser run cost: $${summary.totalCost.toFixed(4)}`);
+console.log(`Total tokens: ${summary.totalTokens.totalTokens}`);
+console.log(`Steps taken: ${result.steps.length}`);
+```
+
+Each step's vision model call is tracked individually, so you get per-step token granularity in the cost entries.
 
 ---
 

@@ -1,0 +1,444 @@
+---
+title: "Voice & Browser Agent Examples"
+description: "Real-time voice conversations and autonomous browser automation"
+---
+
+## 1. Basic Voice Agent
+
+Use `VoiceAgent` with OpenAI's Realtime API for live, bidirectional voice conversations. The agent listens, thinks, and speaks — all in real time.
+
+```typescript
+import { VoiceAgent, openai } from "@radaros/core";
+
+const agent = new VoiceAgent({
+  name: "voice-greeter",
+  model: openai("gpt-4o-realtime"),
+  instructions: "You are a friendly voice assistant. Speak naturally and keep answers concise.",
+  voice: "alloy",
+  inputFormat: "pcm16",
+  outputFormat: "pcm16",
+  sampleRate: 24000,
+});
+
+const session = await agent.connect();
+
+session.on("speech", (audio) => {
+  // Stream PCM16 audio to speaker
+  speaker.write(audio);
+});
+
+session.on("transcript", (text, role) => {
+  console.log(`[${role}] ${text}`);
+});
+
+// Pipe microphone input to the agent
+microphone.on("data", (chunk) => session.send(chunk));
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  await session.close();
+  process.exit(0);
+});
+```
+
+---
+
+## 2. Voice Agent with Tools
+
+Give the voice agent tools so it can look up information mid-conversation without breaking the speech flow.
+
+```typescript
+import { VoiceAgent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+
+const lookupOrder = defineTool({
+  name: "lookup_order",
+  description: "Look up an order by ID and return its status",
+  parameters: z.object({
+    orderId: z.string().describe("The order ID, e.g. ORD-1234"),
+  }),
+  execute: async ({ orderId }) => {
+    const orders: Record<string, string> = {
+      "ORD-1234": "Shipped — arrives Friday",
+      "ORD-5678": "Processing — estimated Monday",
+    };
+    return orders[orderId] ?? `No order found for ${orderId}`;
+  },
+});
+
+const agent = new VoiceAgent({
+  name: "voice-support",
+  model: openai("gpt-4o-realtime"),
+  instructions:
+    "You are a customer support agent. Look up orders when asked and read back the status clearly.",
+  voice: "shimmer",
+  tools: [lookupOrder],
+  toolCallBehavior: "speakBeforeAndAfter",
+});
+
+const session = await agent.connect();
+
+session.on("speech", (audio) => speaker.write(audio));
+session.on("toolCall", (name, args) => {
+  console.log(`[tool] ${name}(${JSON.stringify(args)})`);
+});
+
+microphone.on("data", (chunk) => session.send(chunk));
+```
+
+---
+
+## 3. Voice Agent with Memory
+
+Persist user context across voice sessions so the agent remembers previous conversations.
+
+```typescript
+import { VoiceAgent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new VoiceAgent({
+  name: "voice-personal",
+  model: openai("gpt-4o-realtime"),
+  instructions:
+    "You are a personal assistant. Remember the user's name, preferences, and past requests across sessions.",
+  voice: "echo",
+  memory: {
+    storage,
+    memoryKeys: ["user_name", "preferences", "past_requests"],
+    autoSummarize: true,
+  },
+});
+
+const userId = "user-42";
+
+// Session 1: user introduces themselves
+const s1 = await agent.connect({ sessionId: `${userId}-session-1` });
+s1.on("speech", (audio) => speaker.write(audio));
+microphone.on("data", (chunk) => s1.send(chunk));
+// User says: "Hi, I'm Sarah. I prefer metric units."
+// Agent remembers name and preference.
+
+// Later — Session 2: agent already knows the user
+const s2 = await agent.connect({ sessionId: `${userId}-session-2` });
+s2.on("speech", (audio) => speaker.write(audio));
+microphone.on("data", (chunk) => s2.send(chunk));
+// User says: "What's the weather?"
+// Agent: "Hi Sarah! It's 22°C and sunny in your area." (uses metric without asking)
+```
+
+---
+
+## 4. Voice Agent with Cost Tracking
+
+Track audio token usage and dollar costs for voice sessions, including input/output audio tokens.
+
+```typescript
+import { VoiceAgent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "gpt-4o-realtime": {
+      promptPer1k: 0.005,
+      completionPer1k: 0.02,
+      audioInputPer1k: 0.06,
+      audioOutputPer1k: 0.24,
+    },
+  },
+});
+
+const agent = new VoiceAgent({
+  name: "voice-tracked",
+  model: openai("gpt-4o-realtime"),
+  instructions: "You are a concise voice assistant.",
+  voice: "alloy",
+  costTracker,
+});
+
+const session = await agent.connect();
+session.on("speech", (audio) => speaker.write(audio));
+microphone.on("data", (chunk) => session.send(chunk));
+
+session.on("turnComplete", () => {
+  const summary = costTracker.getSummary();
+  console.log("--- Cost Report ---");
+  console.log("Audio input tokens:", summary.totalTokens.audioInputTokens);
+  console.log("Audio output tokens:", summary.totalTokens.audioOutputTokens);
+  console.log("Text tokens:", summary.totalTokens.promptTokens + summary.totalTokens.completionTokens);
+  console.log("Total cost:", `$${summary.totalCost.toFixed(4)}`);
+});
+
+// After a 2-minute conversation:
+// Audio input tokens:  14400
+// Audio output tokens: 9600
+// Text tokens:         320
+// Total cost:          $3.18
+```
+
+---
+
+## 5. Voice Gateway
+
+Serve voice agents over WebSockets with `VoiceGateway` so external clients (phone systems, web apps) can connect.
+
+```typescript
+import { VoiceAgent, openai, defineTool } from "@radaros/core";
+import { VoiceGateway } from "@radaros/core";
+import { z } from "zod";
+
+const checkBalance = defineTool({
+  name: "check_balance",
+  description: "Check the caller's account balance",
+  parameters: z.object({
+    accountId: z.string().describe("Caller's account ID"),
+  }),
+  execute: async ({ accountId }) => {
+    return `Account ${accountId}: balance $142.50`;
+  },
+});
+
+const agent = new VoiceAgent({
+  name: "phone-support",
+  model: openai("gpt-4o-realtime"),
+  instructions: "You are a phone banking assistant. Verify the account before giving balance info.",
+  voice: "shimmer",
+  tools: [checkBalance],
+});
+
+const gateway = new VoiceGateway({
+  agent,
+  port: 8080,
+  path: "/voice",
+  audioFormat: "pcm16",
+  sampleRate: 24000,
+  maxConcurrentSessions: 50,
+  onConnect: (ws, req) => {
+    console.log(`New voice connection from ${req.socket.remoteAddress}`);
+  },
+  onDisconnect: (sessionId, duration) => {
+    console.log(`Session ${sessionId} ended after ${duration}ms`);
+  },
+});
+
+await gateway.start();
+console.log("Voice gateway listening on ws://localhost:8080/voice");
+
+// Client connects via WebSocket and streams raw audio frames.
+// The gateway handles session management, VAD, and audio routing.
+```
+
+---
+
+## 6. Basic Browser Agent
+
+Use `BrowserAgent` to navigate web pages, extract data, and interact with elements autonomously.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+
+const agent = new BrowserAgent({
+  name: "web-scraper",
+  model: openai("gpt-4o"),
+  instructions: "Navigate to websites and extract the requested information accurately.",
+  headless: true,
+  viewport: { width: 1280, height: 720 },
+});
+
+const result = await agent.run(
+  "Go to https://news.ycombinator.com and extract the top 5 story titles with their point counts."
+);
+
+console.log(result.text);
+// → "1. Show HN: Open-source LLM framework (342 points)
+//    2. The future of quantum computing (289 points)
+//    3. ..."
+
+await agent.close();
+```
+
+---
+
+## 7. Browser Agent Form Filling
+
+Automate form submission — the agent locates fields, fills them in, and submits.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+
+const agent = new BrowserAgent({
+  name: "form-filler",
+  model: openai("gpt-4o"),
+  instructions: `
+    Fill out web forms with the provided data.
+    Always verify the form was submitted successfully before reporting back.
+  `,
+  headless: false,
+  viewport: { width: 1280, height: 800 },
+  defaultTimeout: 15000,
+});
+
+const formData = {
+  firstName: "Alice",
+  lastName: "Johnson",
+  email: "alice@example.com",
+  company: "Acme Corp",
+  role: "Engineering Manager",
+  message: "Interested in the enterprise plan. Please contact me.",
+};
+
+const result = await agent.run(
+  `Go to https://example.com/contact and fill out the contact form with this data: ${JSON.stringify(formData)}. Submit the form and confirm it went through.`
+);
+
+console.log(result.text);
+// → "Successfully submitted the contact form. Confirmation message displayed: 'Thank you, Alice! We'll be in touch within 24 hours.'"
+
+await agent.close();
+```
+
+---
+
+## 8. Browser Agent Screenshot
+
+Take screenshots of pages and analyze them with the agent's vision capabilities.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+import { writeFile } from "node:fs/promises";
+
+const agent = new BrowserAgent({
+  name: "visual-analyzer",
+  model: openai("gpt-4o"),
+  instructions: "Navigate to pages, take screenshots, and analyze visual content in detail.",
+  headless: true,
+  viewport: { width: 1440, height: 900 },
+  screenshotFormat: "png",
+});
+
+const result = await agent.run(
+  "Go to https://example.com/dashboard, take a screenshot, and describe the layout and key metrics visible."
+);
+
+console.log("Analysis:", result.text);
+
+if (result.screenshots?.length) {
+  for (const [i, screenshot] of result.screenshots.entries()) {
+    await writeFile(`screenshot-${i}.png`, screenshot.buffer);
+    console.log(`Saved screenshot-${i}.png (${screenshot.width}x${screenshot.height})`);
+  }
+}
+
+await agent.close();
+```
+
+---
+
+## 9. Browser Agent with Cost Tracking
+
+Track vision model costs when the browser agent processes screenshots internally.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "gpt-4o": {
+      promptPer1k: 0.0025,
+      completionPer1k: 0.01,
+      imagePer1k: 0.003825,
+    },
+  },
+});
+
+const agent = new BrowserAgent({
+  name: "tracked-browser",
+  model: openai("gpt-4o"),
+  instructions: "Browse and extract information from websites.",
+  headless: true,
+  costTracker,
+});
+
+const result = await agent.run(
+  "Go to https://example.com/pricing, take a screenshot, and list all pricing tiers with their features."
+);
+
+console.log(result.text);
+
+const summary = costTracker.getSummary();
+console.log("\n--- Browser Agent Cost Report ---");
+console.log("LLM calls:", summary.totalCalls);
+console.log("Prompt tokens:", summary.totalTokens.promptTokens);
+console.log("Completion tokens:", summary.totalTokens.completionTokens);
+console.log("Image tokens (screenshots):", summary.totalTokens.imageTokens ?? 0);
+console.log("Total cost:", `$${summary.totalCost.toFixed(4)}`);
+// → Total cost: $0.0847 (3 screenshots analyzed)
+
+await agent.close();
+```
+
+---
+
+## 10. Browser Agent Multi-Step Task
+
+Complex multi-page workflow: login, navigate, extract data, and download a file.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { BrowserAgent } from "@radaros/browser";
+import { writeFile } from "node:fs/promises";
+
+const agent = new BrowserAgent({
+  name: "workflow-agent",
+  model: openai("gpt-4o"),
+  instructions: `
+    You are an automation agent. Follow multi-step workflows precisely:
+    1. Complete each step before moving to the next
+    2. Verify success at each stage
+    3. If a step fails, retry once before reporting the error
+    4. Extract all requested data in structured format
+  `,
+  headless: true,
+  viewport: { width: 1280, height: 800 },
+  defaultTimeout: 30000,
+  downloadPath: "./downloads",
+});
+
+const result = await agent.run(`
+  Complete this workflow on https://app.example.com:
+
+  Step 1 — Login:
+    - Username: demo@example.com
+    - Password: ${process.env.DEMO_PASSWORD}
+
+  Step 2 — Navigate to Reports:
+    - Click "Reports" in the sidebar
+    - Select "Monthly Revenue" report
+
+  Step 3 — Extract Data:
+    - Read the revenue figures for the last 3 months
+    - Note any month-over-month changes
+
+  Step 4 — Download:
+    - Click the "Export CSV" button
+    - Wait for the download to complete
+
+  Return the extracted data as JSON.
+`);
+
+console.log("Extracted data:", result.text);
+// → { "months": [
+//      { "month": "Jan 2025", "revenue": "$142,500", "change": "+12%" },
+//      { "month": "Feb 2025", "revenue": "$158,200", "change": "+11%" },
+//      { "month": "Mar 2025", "revenue": "$167,900", "change": "+6%" }
+//    ] }
+
+if (result.downloads?.length) {
+  console.log("Downloaded files:", result.downloads.map((d) => d.filename));
+}
+
+await agent.close();
+```

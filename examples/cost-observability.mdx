@@ -1,0 +1,592 @@
+---
+title: "Cost & Observability Examples"
+description: "Cost tracking, budget enforcement, tracing, metrics, and structured logging"
+---
+
+## Basic Cost Tracking
+
+Attach a `CostTracker` to an agent to automatically record token usage and dollar costs for every LLM call.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  costTracker,
+});
+
+const result = await agent.run("Explain quantum computing in simple terms.");
+
+console.log("Entries:", costTracker.getEntries().length);
+
+const summary = costTracker.getSummary();
+console.log("Total cost:", `$${summary.totalCost.toFixed(4)}`);
+console.log("Total tokens:", summary.totalTokens.totalTokens);
+console.log("By agent:", summary.byAgent);
+console.log("By model:", summary.byModel);
+```
+
+## Per-Model Pricing
+
+Provide custom pricing tables for models not yet in the built-in registry, or override defaults.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  pricing: {
+    "gpt-4o": {
+      promptPer1k: 0.0025,
+      completionPer1k: 0.01,
+      cachedPromptPer1k: 0.00125,
+    },
+    "gpt-4o-mini": {
+      promptPer1k: 0.00015,
+      completionPer1k: 0.0006,
+      cachedPromptPer1k: 0.000075,
+    },
+    "custom-model": {
+      promptPer1k: 0.001,
+      completionPer1k: 0.002,
+      reasoningPer1k: 0.005,
+      audioInputPer1k: 0.01,
+      audioOutputPer1k: 0.02,
+    },
+  },
+});
+
+const agent = new Agent({
+  name: "priced-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  costTracker,
+});
+
+await agent.run("Hello!");
+const summary = costTracker.getSummary();
+console.log("Cost with custom pricing:", `$${summary.totalCost.toFixed(6)}`);
+```
+
+## Budget Enforcement
+
+Set hard budget limits per run, per session, or per user. The tracker throws (or warns) when a budget is exceeded.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker({
+  budget: {
+    maxCostPerRun: 0.05,         // $0.05 per run
+    maxCostPerSession: 1.0,      // $1.00 per session
+    maxCostPerUser: 10.0,        // $10.00 per user
+    maxTokensPerRun: 50_000,     // 50K tokens per run
+    onBudgetExceeded: "throw",   // "throw" | "warn"
+  },
+});
+
+const agent = new Agent({
+  name: "budgeted",
+  model: openai("gpt-4o"),
+  instructions: "You are a budget-conscious assistant.",
+  costTracker,
+});
+
+try {
+  await agent.run("Write a 5000-word essay on the history of computing.", {
+    sessionId: "session-1",
+    userId: "user-42",
+  });
+} catch (err) {
+  console.error("Budget exceeded:", (err as Error).message);
+  const remaining = costTracker.estimateRemaining("run-id");
+  console.log("Cost remaining:", remaining.costRemaining);
+  console.log("Tokens remaining:", remaining.tokensRemaining);
+}
+```
+
+## Cost Auto-Stop per Roundtrip
+
+Use `loopHooks.onRoundtripComplete` to check the budget after every tool-calling roundtrip and stop early if the limit is close.
+
+```typescript
+import { Agent, CostTracker, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const searchTool = defineTool({
+  name: "search",
+  description: "Search the web",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for: ${query}`,
+});
+
+const costTracker = new CostTracker({
+  budget: { maxCostPerRun: 0.10 },
+});
+
+const agent = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  instructions: "Research topics thoroughly using multiple searches.",
+  tools: [searchTool],
+  costTracker,
+  maxToolRoundtrips: 20,
+  loopHooks: {
+    onRoundtripComplete: async (roundtrip, tokensSoFar) => {
+      const exceeded = costTracker.checkInProgressBudget(
+        "gpt-4o",
+        tokensSoFar,
+      );
+      if (exceeded) {
+        console.log(`Budget hit after roundtrip ${roundtrip}, stopping.`);
+        return { stop: true };
+      }
+    },
+  },
+});
+
+await agent.run("Compare the top 5 JavaScript frameworks in 2025.");
+console.log("Final cost:", `$${costTracker.getSummary().totalCost.toFixed(4)}`);
+```
+
+## Shared Cost Tracker
+
+Use a single `CostTracker` across multiple agent types to get a unified cost view.
+
+```typescript
+import { Agent, CostTracker, VoiceAgent, openai, openaiRealtime } from "@radaros/core";
+
+const sharedTracker = new CostTracker({
+  pricing: {
+    "gpt-4o": { promptPer1k: 0.0025, completionPer1k: 0.01 },
+    "gpt-4o-realtime": {
+      promptPer1k: 0.005,
+      completionPer1k: 0.02,
+      audioInputPer1k: 0.06,
+      audioOutputPer1k: 0.12,
+    },
+  },
+  budget: { maxCostPerUser: 5.0 },
+});
+
+const textAgent = new Agent({
+  name: "text-agent",
+  model: openai("gpt-4o"),
+  instructions: "You handle text queries.",
+  costTracker: sharedTracker,
+});
+
+const voiceAgent = new VoiceAgent({
+  name: "voice-agent",
+  model: openaiRealtime("gpt-4o-realtime"),
+  instructions: "You handle voice queries.",
+  costTracker: sharedTracker,
+});
+
+await textAgent.run("Hello from text!", { userId: "user-1" });
+
+const summary = sharedTracker.getSummary();
+console.log("Combined cost:", `$${summary.totalCost.toFixed(4)}`);
+console.log("By agent:", Object.keys(summary.byAgent));
+```
+
+## Cost Breakdown
+
+View granular cost categories: input, output, reasoning, cached, audio input, and audio output.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker();
+
+const agent = new Agent({
+  name: "analyst",
+  model: openai("gpt-4o"),
+  instructions: "Analyze data carefully.",
+  costTracker,
+  reasoning: { effort: "high" },
+});
+
+await agent.run("What are the implications of Moore's Law ending?");
+
+const summary = costTracker.getSummary();
+const b = summary.totalBreakdown;
+
+console.log("Cost Breakdown:");
+console.log(`  Input:        $${b.input.toFixed(6)}`);
+console.log(`  Output:       $${b.output.toFixed(6)}`);
+console.log(`  Reasoning:    $${b.reasoning.toFixed(6)}`);
+console.log(`  Cached:       $${b.cached.toFixed(6)}`);
+console.log(`  Audio Input:  $${b.audioInput.toFixed(6)}`);
+console.log(`  Audio Output: $${b.audioOutput.toFixed(6)}`);
+console.log(`  Total:        $${b.total.toFixed(6)}`);
+```
+
+## Token Usage Details
+
+Access the full token usage breakdown including reasoning and audio tokens.
+
+```typescript
+import { Agent, CostTracker, openai } from "@radaros/core";
+
+const costTracker = new CostTracker();
+
+const agent = new Agent({
+  name: "detailed",
+  model: openai("gpt-4o"),
+  instructions: "You are thorough.",
+  costTracker,
+});
+
+const result = await agent.run("Summarize the history of the internet.");
+
+// From the RunOutput
+console.log("Run usage:", {
+  promptTokens: result.usage.promptTokens,
+  completionTokens: result.usage.completionTokens,
+  totalTokens: result.usage.totalTokens,
+  reasoningTokens: result.usage.reasoningTokens,
+  cachedTokens: result.usage.cachedTokens,
+  audioInputTokens: result.usage.audioInputTokens,
+  audioOutputTokens: result.usage.audioOutputTokens,
+});
+
+// From the CostTracker summary
+const summary = costTracker.getSummary();
+console.log("Aggregated tokens:", {
+  prompt: summary.totalTokens.promptTokens,
+  completion: summary.totalTokens.completionTokens,
+  reasoning: summary.totalTokens.reasoningTokens,
+  cached: summary.totalTokens.cachedTokens,
+  audioIn: summary.totalTokens.audioInputTokens,
+  audioOut: summary.totalTokens.audioOutputTokens,
+});
+```
+
+## Tracer Setup
+
+Attach a `Tracer` to the agent's event bus to collect distributed traces with spans for runs, tool calls, handoffs, and more.
+
+```typescript
+import { Agent, EventBus, openai, defineTool } from "@radaros/core";
+import { Tracer, ConsoleExporter } from "@radaros/observability";
+import { z } from "zod";
+
+const eventBus = new EventBus();
+const tracer = new Tracer([new ConsoleExporter()]);
+tracer.attach(eventBus);
+
+const calculator = defineTool({
+  name: "calculate",
+  description: "Evaluate a math expression",
+  parameters: z.object({ expression: z.string() }),
+  execute: async ({ expression }) => String(eval(expression)),
+});
+
+const agent = new Agent({
+  name: "math-agent",
+  model: openai("gpt-4o"),
+  instructions: "You solve math problems step by step.",
+  tools: [calculator],
+  eventBus,
+});
+
+const result = await agent.run("What is 42 * 17 + 3?");
+console.log("Answer:", result.text);
+
+const traces = tracer.getAllTraces();
+for (const trace of traces) {
+  console.log(`Trace ${trace.traceId}:`);
+  console.log(`  Duration: ${trace.durationMs}ms`);
+  console.log(`  Spans: ${trace.spans.length}`);
+  for (const span of trace.spans) {
+    console.log(`    [${span.kind}] ${span.name} — ${span.durationMs}ms (${span.status})`);
+  }
+}
+
+await tracer.flush();
+```
+
+## Custom Trace Exporter
+
+Export traces to any backend by implementing the `TraceExporter` interface.
+
+```typescript
+import { Agent, EventBus, openai } from "@radaros/core";
+import { Tracer } from "@radaros/observability";
+import type { Trace, TraceExporter } from "@radaros/observability";
+
+const customExporter: TraceExporter = {
+  name: "my-backend",
+  async export(trace: Trace) {
+    await fetch("https://traces.example.com/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        traceId: trace.traceId,
+        duration: trace.durationMs,
+        spans: trace.spans.map((s) => ({
+          name: s.name,
+          kind: s.kind,
+          duration: s.durationMs,
+          status: s.status,
+          attributes: s.attributes,
+        })),
+        metadata: trace.metadata,
+      }),
+    });
+  },
+  async flush() {},
+  async shutdown() {},
+};
+
+const eventBus = new EventBus();
+const tracer = new Tracer([customExporter]);
+tracer.attach(eventBus);
+
+const agent = new Agent({
+  name: "traced-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a traced assistant.",
+  eventBus,
+});
+
+await agent.run("Hello!");
+await tracer.shutdown();
+```
+
+## MetricsCollector
+
+Collect real-time counters, histograms, and gauges from agent events.
+
+```typescript
+import { Agent, EventBus, openai, defineTool } from "@radaros/core";
+import { MetricsCollector } from "@radaros/observability";
+import { z } from "zod";
+
+const eventBus = new EventBus();
+const metrics = new MetricsCollector();
+metrics.attach(eventBus);
+
+const search = defineTool({
+  name: "search",
+  description: "Search the web",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for "${query}"`,
+});
+
+const agent = new Agent({
+  name: "search-agent",
+  model: openai("gpt-4o"),
+  instructions: "You search and summarize.",
+  tools: [search],
+  eventBus,
+});
+
+await agent.run("Latest news on AI");
+await agent.run("Weather in San Francisco");
+
+const snapshot = metrics.getMetrics();
+console.log("Counters:", {
+  runsTotal: snapshot.counters.runs_total,
+  runsSuccess: snapshot.counters.runs_success,
+  runsError: snapshot.counters.runs_error,
+  toolCalls: snapshot.counters.tool_calls_total,
+});
+console.log("Gauges:", {
+  totalTokens: snapshot.gauges.total_tokens,
+  totalCostUsd: snapshot.gauges.total_cost_usd,
+});
+console.log("Rates:", {
+  errorRate: snapshot.rates.error_rate,
+  cacheHitRatio: snapshot.rates.cache_hit_ratio,
+});
+console.log("Histograms:", {
+  runDurations: snapshot.histograms.run_duration_ms,
+  toolLatencies: snapshot.histograms.tool_latency_ms,
+});
+```
+
+## Prometheus Export
+
+Expose agent metrics in Prometheus text format via the `MetricsExporter`.
+
+```typescript
+import express from "express";
+import { Agent, EventBus, openai } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import { MetricsExporter } from "@radaros/observability";
+
+const eventBus = new EventBus();
+const metricsExporter = new MetricsExporter();
+metricsExporter.attach(eventBus);
+
+const agent = new Agent({
+  name: "monitored",
+  model: openai("gpt-4o"),
+  instructions: "You are a monitored assistant.",
+  eventBus,
+});
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { monitored: agent },
+    metricsExporter,
+  }),
+);
+
+app.listen(3000, () => {
+  console.log("API:              http://localhost:3000/api");
+  console.log("Prometheus:       http://localhost:3000/api/metrics");
+  console.log("Metrics JSON:     http://localhost:3000/api/metrics/json");
+  console.log("Metrics SSE:      http://localhost:3000/api/metrics/stream");
+});
+
+// GET /api/metrics → Prometheus text format:
+//   radaros_agent_runs_total{agent="monitored"} 42
+//   radaros_agent_errors_total{agent="monitored"} 1
+//   radaros_agent_tokens_total{agent="monitored"} 128000
+//   radaros_agent_cost_usd_total{agent="monitored"} 0.32
+//   radaros_agent_duration_ms_avg{agent="monitored"} 1250
+//   radaros_agent_duration_ms_p95{agent="monitored"} 3200
+```
+
+## Structured Logging
+
+Attach a `StructuredLogger` for JSON or console-formatted log output correlated with trace IDs.
+
+```typescript
+import { Agent, EventBus, openai } from "@radaros/core";
+import { Tracer, StructuredLogger, ConsoleExporter } from "@radaros/observability";
+
+const eventBus = new EventBus();
+
+// JSON drain: each log line is a JSON object
+const jsonLogger = new StructuredLogger("json");
+jsonLogger.attach(eventBus);
+
+// Console drain: human-readable log lines
+const consoleLogger = new StructuredLogger("console");
+// consoleLogger.attach(eventBus);
+
+// Correlated with traces: pass the tracer for automatic traceId injection
+const tracer = new Tracer([new ConsoleExporter()]);
+tracer.attach(eventBus);
+
+const correlatedLogger = new StructuredLogger("json", tracer);
+correlatedLogger.attach(eventBus);
+
+const agent = new Agent({
+  name: "logged-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a logged assistant.",
+  eventBus,
+});
+
+await agent.run("Hello!");
+// JSON output:
+// {"timestamp":"2025-...","level":"info","message":"Run started","agentName":"logged-agent","attributes":{"runId":"..."}}
+// {"timestamp":"2025-...","level":"info","message":"Run completed","traceId":"abc123","attributes":{"tokens":150}}
+
+// Custom drain function
+const customLogger = new StructuredLogger((entry) => {
+  // Send to your logging service
+  console.log(`[${entry.level}] ${entry.message}`, entry.attributes);
+});
+```
+
+## Full Observability Stack
+
+Combine `Tracer`, `MetricsCollector`, `MetricsExporter`, and `StructuredLogger` for a production-grade observability setup.
+
+```typescript
+import express from "express";
+import { Agent, EventBus, openai, defineTool } from "@radaros/core";
+import { createAgentRouter } from "@radaros/transport";
+import {
+  Tracer,
+  MetricsCollector,
+  MetricsExporter,
+  StructuredLogger,
+  JsonFileExporter,
+} from "@radaros/observability";
+import { z } from "zod";
+
+const eventBus = new EventBus();
+
+// Tracing → export to JSON file for local dev, swap for OTel in production
+const tracer = new Tracer([
+  new JsonFileExporter({ directory: "./traces" }),
+]);
+tracer.attach(eventBus);
+
+// In-process metrics (counters, histograms, gauges)
+const metricsCollector = new MetricsCollector();
+metricsCollector.attach(eventBus);
+
+// Per-agent metrics with Prometheus export
+const metricsExporter = new MetricsExporter();
+metricsExporter.attach(eventBus);
+
+// Structured JSON logs correlated with trace IDs
+const logger = new StructuredLogger("json", tracer);
+logger.attach(eventBus);
+
+// Tools
+const fetchData = defineTool({
+  name: "fetch_data",
+  description: "Fetch data from the database",
+  parameters: z.object({ table: z.string() }),
+  execute: async ({ table }) => `[10 rows from ${table}]`,
+});
+
+// Agent
+const agent = new Agent({
+  name: "production-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a production-ready data analyst.",
+  tools: [fetchData],
+  eventBus,
+});
+
+// Express server with metrics endpoints
+const app = express();
+app.use(express.json());
+
+app.use(
+  "/api",
+  createAgentRouter({
+    agents: { "production-agent": agent },
+    metricsExporter,
+    swagger: { enabled: true, title: "Production API" },
+  }),
+);
+
+app.get("/health", (_req, res) => {
+  const snapshot = metricsCollector.getMetrics();
+  res.json({
+    status: "ok",
+    metrics: {
+      totalRuns: snapshot.counters.runs_total,
+      errorRate: snapshot.rates.error_rate,
+      totalCost: snapshot.gauges.total_cost_usd,
+    },
+  });
+});
+
+app.listen(3000, () => {
+  console.log("Production server on :3000");
+  console.log("  POST /api/agents/production-agent/run");
+  console.log("  GET  /api/metrics        (Prometheus)");
+  console.log("  GET  /api/metrics/json   (JSON)");
+  console.log("  GET  /api/metrics/stream  (SSE)");
+  console.log("  GET  /health");
+});
+```

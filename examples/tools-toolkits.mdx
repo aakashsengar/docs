@@ -1,0 +1,818 @@
+---
+title: "Tools & Toolkits Examples"
+description: "Custom tools, built-in toolkits, and advanced tool patterns"
+---
+
+Complete, runnable examples for defining custom tools, using built-in toolkits, and combining them in agents. Each snippet is self-contained — copy, paste, and run.
+
+---
+
+## 1. defineTool Basics
+
+Create a custom tool with a Zod schema. The LLM sees the name, description, and parameter descriptions to decide when and how to call it.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const lookupUser = defineTool({
+  name: "lookupUser",
+  description: "Look up a user by email and return their profile",
+  parameters: z.object({
+    email: z.string().email().describe("The user's email address"),
+  }),
+  execute: async ({ email }) => {
+    const db: Record<string, { name: string; plan: string }> = {
+      "alice@example.com": { name: "Alice", plan: "Pro" },
+      "bob@example.com": { name: "Bob", plan: "Free" },
+    };
+    const user = db[email];
+    if (!user) throw new Error(`No user found for ${email}`);
+    return JSON.stringify(user);
+  },
+});
+
+const agent = new Agent({
+  name: "user-lookup",
+  model: openai("gpt-4o"),
+  instructions: "Look up users when asked.",
+  tools: [lookupUser],
+});
+
+const result = await agent.run("What plan is alice@example.com on?");
+console.log(result.text);
+```
+
+---
+
+## 2. Tool with External API
+
+A tool that calls a REST API and returns the result to the LLM.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const getStockPrice = defineTool({
+  name: "getStockPrice",
+  description: "Get the latest stock price for a ticker symbol",
+  parameters: z.object({
+    symbol: z.string().toUpperCase().describe("Stock ticker symbol (e.g. AAPL)"),
+  }),
+  execute: async ({ symbol }) => {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1d`
+    );
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    const price = data.chart.result[0].meta.regularMarketPrice;
+    return `${symbol}: $${price.toFixed(2)}`;
+  },
+});
+
+const agent = new Agent({
+  name: "stock-agent",
+  model: openai("gpt-4o"),
+  instructions: "Fetch live stock prices when asked.",
+  tools: [getStockPrice],
+});
+
+const result = await agent.run("What is Apple's stock price right now?");
+console.log(result.text);
+```
+
+---
+
+## 3. Tool with File I/O
+
+A tool that reads and writes local files. Pair with `FileSystemToolkit` for sandboxed access.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+import { readFile, writeFile } from "node:fs/promises";
+
+const readJson = defineTool({
+  name: "readJson",
+  description: "Read a JSON file and return its contents",
+  parameters: z.object({
+    path: z.string().describe("Relative file path"),
+  }),
+  execute: async ({ path }) => {
+    const content = await readFile(path, "utf-8");
+    return content;
+  },
+});
+
+const writeJson = defineTool({
+  name: "writeJson",
+  description: "Write JSON data to a file",
+  parameters: z.object({
+    path: z.string().describe("Relative file path"),
+    data: z.string().describe("JSON string to write"),
+  }),
+  execute: async ({ path, data }) => {
+    JSON.parse(data); // validate
+    await writeFile(path, data, "utf-8");
+    return `Wrote ${data.length} bytes to ${path}`;
+  },
+});
+
+const agent = new Agent({
+  name: "file-agent",
+  model: openai("gpt-4o"),
+  instructions: "Help users read and write JSON files.",
+  tools: [readJson, writeJson],
+});
+
+const result = await agent.run("Read config.json and tell me the version field.");
+console.log(result.text);
+```
+
+---
+
+## 4. Calculator Toolkit
+
+Evaluate math expressions with no dependencies or API keys.
+
+```typescript
+import { Agent, openai, CalculatorToolkit } from "@radaros/core";
+
+const calc = new CalculatorToolkit();
+
+const agent = new Agent({
+  name: "math-helper",
+  model: openai("gpt-4o"),
+  instructions: "Solve math problems step by step. Use the calculator for computations.",
+  tools: [...calc.getTools()],
+});
+
+const result = await agent.run(
+  "What is (sqrt(144) + pow(2, 10)) * 3.14?"
+);
+console.log(result.text);
+```
+
+---
+
+## 5. Web Search Toolkit
+
+### DuckDuckGo (no API key)
+
+```typescript
+import { Agent, openai, DuckDuckGoToolkit } from "@radaros/core";
+
+const ddg = new DuckDuckGoToolkit({ maxResults: 5 });
+
+const agent = new Agent({
+  name: "web-researcher",
+  model: openai("gpt-4o"),
+  instructions: "Search the web and provide sourced answers.",
+  tools: [...ddg.getTools()],
+});
+
+const result = await agent.run("What are the latest TypeScript 6.0 features?");
+console.log(result.text);
+```
+
+### Tavily (AI-optimized results)
+
+```typescript
+import { Agent, openai, WebSearchToolkit } from "@radaros/core";
+
+const search = new WebSearchToolkit({
+  provider: "tavily",
+  // Uses TAVILY_API_KEY env var
+});
+
+const agent = new Agent({
+  name: "deep-researcher",
+  model: openai("gpt-4o"),
+  instructions: "Use web search for up-to-date information. Cite sources.",
+  tools: [...search.getTools()],
+});
+
+const result = await agent.run("Latest developments in AI agents, March 2026");
+console.log(result.text);
+```
+
+---
+
+## 6. Wikipedia Toolkit
+
+Search articles and get summaries — no API key required.
+
+```typescript
+import { Agent, openai, WikipediaToolkit } from "@radaros/core";
+
+const wiki = new WikipediaToolkit({ language: "en", maxResults: 3 });
+
+const agent = new Agent({
+  name: "encyclopedia",
+  model: openai("gpt-4o"),
+  instructions: "Look up facts on Wikipedia. Provide accurate, cited answers.",
+  tools: [...wiki.getTools()],
+});
+
+const result = await agent.run(
+  "What is Retrieval Augmented Generation? Explain the concept and its history."
+);
+console.log(result.text);
+```
+
+---
+
+## 7. HTTP Toolkit
+
+Make arbitrary HTTP requests to any REST API.
+
+```typescript
+import { Agent, openai, HttpToolkit } from "@radaros/core";
+
+const http = new HttpToolkit({
+  baseUrl: "https://jsonplaceholder.typicode.com",
+  timeout: 10_000,
+  maxResponseSize: 5_000,
+});
+
+const agent = new Agent({
+  name: "api-explorer",
+  model: openai("gpt-4o"),
+  instructions: "Call the REST API to fetch and create data.",
+  tools: [...http.getTools()],
+});
+
+const result = await agent.run(
+  "Get the first 3 posts, then create a new post with title 'Hello from RadarOS'."
+);
+console.log(result.text);
+```
+
+---
+
+## 8. SQL Toolkit
+
+Query databases directly. Supports SQLite, PostgreSQL, and MySQL.
+
+```typescript
+import { Agent, openai, SqlToolkit } from "@radaros/core";
+
+const sql = new SqlToolkit({
+  dialect: "postgres",
+  connectionString: process.env.DATABASE_URL!,
+  readOnly: true,
+  maxRows: 50,
+});
+
+const agent = new Agent({
+  name: "data-analyst",
+  model: openai("gpt-4o"),
+  instructions:
+    "Query the database to answer questions. Always inspect table schemas first.",
+  tools: [...sql.getTools()],
+});
+
+const result = await agent.run(
+  "What are the top 5 customers by total order value this month?"
+);
+console.log(result.text);
+```
+
+### SQLite variant
+
+```typescript
+const sqliteTk = new SqlToolkit({
+  dialect: "sqlite",
+  connectionString: "./analytics.db",
+});
+```
+
+---
+
+## 9. GitHub Toolkit
+
+List repos, create issues, read files — uses the GitHub REST API.
+
+```typescript
+import { Agent, openai, GitHubToolkit } from "@radaros/core";
+
+const gh = new GitHubToolkit({
+  token: process.env.GITHUB_TOKEN,
+});
+
+const agent = new Agent({
+  name: "github-assistant",
+  model: openai("gpt-4o"),
+  instructions: "Help manage GitHub repositories and issues.",
+  tools: [...gh.getTools()],
+});
+
+// List issues
+const issues = await agent.run("List open bugs in xhipment/radar-os");
+console.log(issues.text);
+
+// Create an issue
+const created = await agent.run(
+  "Create an issue titled 'Add retry logic to MCP client' with label 'enhancement' in xhipment/radar-os"
+);
+console.log(created.text);
+
+// Read a file
+const readme = await agent.run("Show me the README from xhipment/radar-os");
+console.log(readme.text);
+```
+
+---
+
+## 10. Slack Toolkit
+
+Send messages, read channels, and reply in threads.
+
+```typescript
+import { Agent, openai, SlackToolkit } from "@radaros/core";
+
+const slack = new SlackToolkit({
+  token: process.env.SLACK_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "slack-bot",
+  model: openai("gpt-4o"),
+  instructions: "Help manage Slack communications. Always confirm before sending.",
+  tools: [...slack.getTools()],
+});
+
+// Send a message
+const sent = await agent.run("Send 'Deploy v2.4.0 complete!' to #deployments");
+console.log(sent.text);
+
+// Read messages
+const summary = await agent.run("Summarize today's discussion in #engineering");
+console.log(summary.text);
+
+// List channels
+const channels = await agent.run("What Slack channels do we have?");
+console.log(channels.text);
+```
+
+---
+
+## 11. Shell Toolkit
+
+Run shell commands with timeout and command allowlisting for safety.
+
+```typescript
+import { Agent, openai, ShellToolkit } from "@radaros/core";
+
+const shell = new ShellToolkit({
+  timeout: 10_000,
+  maxOutput: 5_000,
+  allowedCommands: ["ls", "cat", "grep", "find", "wc", "du", "df"],
+});
+
+const agent = new Agent({
+  name: "devops-assistant",
+  model: openai("gpt-4o"),
+  instructions: "Help users inspect files and system info. Only use allowed commands.",
+  tools: [...shell.getTools()],
+});
+
+const result = await agent.run(
+  "How many TypeScript files are in the src directory, and what's the total disk usage?"
+);
+console.log(result.text);
+```
+
+---
+
+## 12. PDF Toolkit
+
+Extract text, metadata, and pages from PDF documents.
+
+```typescript
+import { Agent, openai, PdfToolkit } from "@radaros/core";
+
+const pdf = new PdfToolkit({ maxLength: 30_000 });
+
+const agent = new Agent({
+  name: "document-reader",
+  model: openai("gpt-4o"),
+  instructions: "Extract and summarize content from PDF documents.",
+  tools: [...pdf.getTools()],
+});
+
+// Extract from a local file
+const local = await agent.run("Summarize the key findings in ./report.pdf");
+console.log(local.text);
+
+// Extract from a URL
+const remote = await agent.run(
+  "Extract text from https://example.com/whitepaper.pdf and list the main conclusions."
+);
+console.log(remote.text);
+
+// Get metadata
+const meta = await agent.run("How many pages is ./contract.pdf?");
+console.log(meta.text);
+```
+
+---
+
+## 13. Code Interpreter
+
+Execute JavaScript, Python, or TypeScript in a sandboxed subprocess.
+
+```typescript
+import { Agent, openai, CodeInterpreterToolkit } from "@radaros/core";
+
+const code = new CodeInterpreterToolkit({
+  languages: ["javascript", "python"],
+  timeout: 30_000,
+  maxOutput: 10_000,
+});
+
+const agent = new Agent({
+  name: "code-analyst",
+  model: openai("gpt-4o"),
+  instructions:
+    "Write and execute code to solve problems. Use Python for data tasks and JavaScript for general computation.",
+  tools: [...code.getTools()],
+});
+
+const result = await agent.run(
+  "Generate the first 30 prime numbers and calculate their sum."
+);
+console.log(result.text);
+```
+
+---
+
+## 14. Google Sheets Toolkit
+
+Read, write, and append data in Google Sheets.
+
+```typescript
+import { Agent, openai, GoogleSheetsToolkit } from "@radaros/core";
+
+const sheets = new GoogleSheetsToolkit({
+  credentialsPath: "./credentials.json",
+  tokenPath: "./token.json",
+  spreadsheetId: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+});
+
+const agent = new Agent({
+  name: "spreadsheet-agent",
+  model: openai("gpt-4o"),
+  instructions: "Read and update Google Sheets data. Always confirm before writing.",
+  tools: [...sheets.getTools()],
+});
+
+// Read data
+const data = await agent.run("Read the sales data from Sheet1!A1:E20");
+console.log(data.text);
+
+// Append a row
+const appended = await agent.run(
+  "Append a new row to Sheet1 with values: 'Acme Corp', 'Enterprise', 150, '$74,500', '2026-03-01'"
+);
+console.log(appended.text);
+
+// List sheets
+const tabs = await agent.run("What sheets are in this spreadsheet?");
+console.log(tabs.text);
+```
+
+---
+
+## 15. Filesystem Toolkit
+
+Read, write, list, and inspect files with path sandboxing.
+
+```typescript
+import { Agent, openai, FileSystemToolkit } from "@radaros/core";
+
+const fsTk = new FileSystemToolkit({
+  basePath: "./workspace",
+  allowWrite: true,
+});
+
+const agent = new Agent({
+  name: "file-manager",
+  model: openai("gpt-4o"),
+  instructions: "Help manage files in the workspace directory.",
+  tools: [...fsTk.getTools()],
+});
+
+// List files
+const files = await agent.run("List all files recursively in the workspace");
+console.log(files.text);
+
+// Read a file
+const content = await agent.run("Read the contents of notes.md");
+console.log(content.text);
+
+// Write a file
+const written = await agent.run(
+  "Create a file called summary.txt with the text 'Project completed successfully.'"
+);
+console.log(written.text);
+```
+
+---
+
+## 16. MCP Client
+
+Connect to any MCP (Model Context Protocol) server and use its tools natively.
+
+### stdio transport
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+const github = new MCPToolProvider({
+  name: "github",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-github"],
+  env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN! },
+});
+
+await github.connect();
+
+const agent = new Agent({
+  name: "mcp-dev-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You have access to GitHub via MCP.",
+  tools: [...await github.getTools()],
+});
+
+const result = await agent.run("List open issues in my repository");
+console.log(result.text);
+
+await github.close();
+```
+
+### HTTP transport
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+const dbTools = new MCPToolProvider({
+  name: "database",
+  transport: "http",
+  url: "http://localhost:8080/mcp",
+  headers: { Authorization: "Bearer my-token" },
+});
+
+await dbTools.connect();
+
+const agent = new Agent({
+  name: "db-assistant",
+  model: openai("gpt-4o"),
+  tools: [...await dbTools.getTools()],
+});
+
+const result = await agent.run("Show me the top customers by revenue");
+console.log(result.text);
+
+await dbTools.close();
+```
+
+### Multiple MCP servers
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+const github = new MCPToolProvider({
+  name: "github",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-github"],
+});
+
+const filesystem = new MCPToolProvider({
+  name: "fs",
+  transport: "stdio",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "./project"],
+});
+
+await Promise.all([github.connect(), filesystem.connect()]);
+
+const agent = new Agent({
+  name: "full-stack-assistant",
+  model: openai("gpt-4o"),
+  tools: [
+    ...await github.getTools(),
+    ...await filesystem.getTools(),
+  ],
+});
+
+const result = await agent.run("Read the README from my local project and compare it to the one on GitHub");
+console.log(result.text);
+
+await Promise.all([github.close(), filesystem.close()]);
+```
+
+---
+
+## 17. Dynamic Tools
+
+Add, remove, and resolve tools at runtime based on context.
+
+### Runtime mutation
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const searchTool = defineTool({
+  name: "search",
+  description: "Search the knowledge base",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for: ${query}`,
+});
+
+const adminTool = defineTool({
+  name: "adminPanel",
+  description: "Access admin functions",
+  parameters: z.object({ action: z.string() }),
+  execute: async ({ action }) => `Executed admin action: ${action}`,
+});
+
+const agent = new Agent({
+  name: "adaptive-bot",
+  model: openai("gpt-4o"),
+  tools: [searchTool],
+});
+
+// Add a tool at runtime
+agent.addTool(adminTool);
+console.log(agent.listTools()); // ["search", "adminPanel"]
+
+// Remove a tool at runtime
+agent.removeTool("adminPanel");
+console.log(agent.listTools()); // ["search"]
+```
+
+### Tool resolver (context-dependent tools)
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const searchTool = defineTool({
+  name: "search",
+  description: "Search the knowledge base",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => `Results for: ${query}`,
+});
+
+const deleteTool = defineTool({
+  name: "deleteRecord",
+  description: "Delete a database record",
+  parameters: z.object({ id: z.string() }),
+  execute: async ({ id }) => `Deleted record ${id}`,
+});
+
+const agent = new Agent({
+  name: "role-aware-bot",
+  model: openai("gpt-4o"),
+  tools: [searchTool],
+  toolResolver: async (ctx) => {
+    if (ctx.metadata.userRole === "admin") {
+      return [deleteTool];
+    }
+    return [];
+  },
+});
+
+// Regular user — only search tool
+await agent.run("Find recent orders", { metadata: { userRole: "viewer" } });
+
+// Admin — search + delete tools
+await agent.run("Delete order ord_123", { metadata: { userRole: "admin" } });
+```
+
+### Hot-swapping with setTools
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools: [],
+});
+
+// Later, after MCP server connects...
+const mcp = new MCPToolProvider({
+  name: "crm",
+  transport: "http",
+  url: "http://localhost:8080/mcp",
+});
+await mcp.connect();
+
+agent.setTools(await mcp.getTools());
+// Agent now uses the CRM tools on next run
+```
+
+---
+
+## 18. Combining Multiple Toolkits
+
+Build a fully-equipped agent with several toolkits loaded together.
+
+```typescript
+import {
+  Agent,
+  openai,
+  DuckDuckGoToolkit,
+  CalculatorToolkit,
+  WikipediaToolkit,
+  ShellToolkit,
+  FileSystemToolkit,
+  defineTool,
+} from "@radaros/core";
+import { z } from "zod";
+
+const ddg = new DuckDuckGoToolkit({ maxResults: 5 });
+const calc = new CalculatorToolkit();
+const wiki = new WikipediaToolkit();
+const shell = new ShellToolkit({
+  timeout: 10_000,
+  allowedCommands: ["ls", "cat", "wc"],
+});
+const fs = new FileSystemToolkit({ basePath: "./data", allowWrite: true });
+
+const currentTime = defineTool({
+  name: "currentTime",
+  description: "Get the current date and time",
+  parameters: z.object({}),
+  execute: async () => new Date().toISOString(),
+});
+
+const agent = new Agent({
+  name: "swiss-army-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a versatile assistant with access to:
+- Web search (DuckDuckGo)
+- Calculator for math
+- Wikipedia for factual lookups
+- Shell commands for system info
+- File system for reading/writing data files
+- Current time
+
+Choose the right tool for each task.`,
+  tools: [
+    ...ddg.getTools(),
+    ...calc.getTools(),
+    ...wiki.getTools(),
+    ...shell.getTools(),
+    ...fs.getTools(),
+    currentTime,
+  ],
+});
+
+const result = await agent.run(
+  "Search the web for the current population of Tokyo, calculate what 15% of that is, " +
+  "look up Tokyo on Wikipedia for the founding year, and save all findings to tokyo-report.txt"
+);
+console.log(result.text);
+```
+
+### Using collectToolkitTools for a named registry
+
+```typescript
+import {
+  collectToolkitTools,
+  describeToolLibrary,
+  CalculatorToolkit,
+  DuckDuckGoToolkit,
+  GitHubToolkit,
+  SlackToolkit,
+} from "@radaros/core";
+
+const toolLibrary = collectToolkitTools([
+  new CalculatorToolkit(),
+  new DuckDuckGoToolkit(),
+  new GitHubToolkit({ token: process.env.GITHUB_TOKEN }),
+  new SlackToolkit({ token: process.env.SLACK_BOT_TOKEN }),
+]);
+
+// Get a serializable summary for API responses
+const descriptions = describeToolLibrary(toolLibrary);
+console.log(descriptions);
+// [
+//   { name: "calculate", description: "...", parameters: ["expression"] },
+//   { name: "duckduckgo_search", description: "...", parameters: ["query"] },
+//   ...
+// ]
+
+// Use the tool library with an agent
+const agent = new Agent({
+  name: "multi-tool-agent",
+  model: openai("gpt-4o"),
+  tools: Object.values(toolLibrary),
+});
+```

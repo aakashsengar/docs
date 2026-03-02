@@ -1,0 +1,666 @@
+---
+title: "End-to-End Workflow Examples"
+description: "Complete application examples combining agents, teams, workflows, memory, tools, and deployment"
+---
+
+## Customer Support Bot
+
+Full customer support system with route-based team, memory, CRM tools, cost tracking, and an Express REST API.
+
+```typescript
+import {
+  Agent, Team, TeamMode, CostTracker, defineTool,
+  InMemoryStorage, openai, SessionManager,
+} from "@radaros/core";
+import { createAgentRouter, generateOpenAPISpec } from "@radaros/transport";
+import { instrument } from "@radaros/observability";
+import express from "express";
+import { z } from "zod";
+
+const storage = new InMemoryStorage();
+const costTracker = new CostTracker({
+  budget: {
+    maxCostPerRun: 0.50,
+    maxCostPerSession: 5.0,
+    onBudgetExceeded: "throw",
+  },
+});
+
+const crmLookup = defineTool({
+  name: "crm_lookup",
+  description: "Look up a customer by email in the CRM",
+  parameters: z.object({ email: z.string().email() }),
+  execute: async ({ email }) =>
+    JSON.stringify({ id: "cust_42", name: "Jane Doe", plan: "enterprise", email }),
+});
+
+const createTicket = defineTool({
+  name: "create_ticket",
+  description: "Create a support ticket in the ticketing system",
+  parameters: z.object({
+    subject: z.string(),
+    priority: z.enum(["low", "medium", "high"]),
+  }),
+  execute: async ({ subject, priority }) =>
+    JSON.stringify({ ticketId: "TKT-1001", subject, priority, status: "open" }),
+});
+
+const billingAgent = new Agent({
+  name: "billing-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "You handle billing inquiries — refunds, invoices, plan changes. Always verify the customer first.",
+  tools: [crmLookup, createTicket],
+  memory: { storage, summaries: true, userFacts: true },
+  costTracker,
+});
+
+const technicalAgent = new Agent({
+  name: "technical-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "You are a technical support specialist. Troubleshoot issues step-by-step.",
+  tools: [crmLookup, createTicket],
+  memory: { storage, summaries: true },
+  costTracker,
+});
+
+const generalAgent = new Agent({
+  name: "general-agent",
+  model: openai("gpt-4o-mini"),
+  instructions:
+    "You handle general inquiries — FAQs, account info, routing to specialists.",
+  tools: [crmLookup],
+  memory: { storage, summaries: true },
+  costTracker,
+});
+
+const supportTeam = new Team({
+  name: "customer-support",
+  mode: TeamMode.Route,
+  model: openai("gpt-4o-mini"),
+  members: [billingAgent, technicalAgent, generalAgent],
+  instructions:
+    "Route billing questions to billing-agent, technical issues to technical-agent, everything else to general-agent.",
+});
+
+const app = express();
+app.use(express.json());
+app.use("/api/support", createAgentRouter(supportTeam));
+app.get("/api/docs/openapi.json", (_req, res) =>
+  res.json(generateOpenAPISpec([supportTeam])),
+);
+
+const { tracer, metrics, detach } = instrument(supportTeam.eventBus, {
+  exporters: ["console"],
+  metrics: true,
+  structuredLogs: true,
+});
+
+app.get("/api/metrics", (_req, res) => res.json(metrics?.snapshot()));
+app.get("/api/costs", (_req, res) => res.json(costTracker.summary()));
+
+app.listen(3000, () => console.log("Support API running on :3000"));
+```
+
+---
+
+## Research Assistant
+
+Agent-driven research pipeline with web search, knowledge base, structured citations, and a four-step workflow.
+
+```typescript
+import {
+  Agent, Workflow, KnowledgeBase, InMemoryVectorStore,
+  OpenAIEmbedding, openai, defineTool, CostTracker,
+} from "@radaros/core";
+import { WebSearchToolkit, WikipediaToolkit, ScraperToolkit } from "@radaros/core";
+import { z } from "zod";
+
+const vectorStore = new InMemoryVectorStore(new OpenAIEmbedding());
+const kb = new KnowledgeBase({
+  name: "research-docs",
+  vectorStore,
+  searchMode: "hybrid",
+});
+
+const researcher = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  instructions:
+    "Search the web, Wikipedia, and the knowledge base to gather comprehensive information on the given topic.",
+  tools: [
+    ...new WebSearchToolkit().tools(),
+    ...new WikipediaToolkit().tools(),
+    ...new ScraperToolkit().tools(),
+    kb.asTool({ topK: 10, description: "Search previously saved research documents" }),
+  ],
+});
+
+const CitationSchema = z.object({
+  title: z.string(),
+  findings: z.array(z.string()),
+  citations: z.array(
+    z.object({ source: z.string(), url: z.string(), snippet: z.string() }),
+  ),
+  confidence: z.number().min(0).max(1),
+});
+
+const writer = new Agent({
+  name: "writer",
+  model: openai("gpt-4o"),
+  instructions:
+    "Synthesize raw research into a structured report with proper citations.",
+  structuredOutput: CitationSchema,
+});
+
+const reviewer = new Agent({
+  name: "reviewer",
+  model: openai("gpt-4o"),
+  instructions:
+    "Review the report for accuracy, completeness, and citation quality. Suggest specific improvements.",
+});
+
+interface ResearchState {
+  topic: string;
+  rawResearch: string;
+  report: string;
+  review: string;
+}
+
+const costTracker = new CostTracker({
+  budget: { maxCostPerRun: 2.0, onBudgetExceeded: "warn" },
+});
+
+const pipeline = new Workflow<ResearchState>({
+  name: "research-pipeline",
+  initialState: {
+    topic: "AI agents in production systems",
+    rawResearch: "",
+    report: "",
+    review: "",
+  },
+  steps: [
+    {
+      name: "research",
+      agent: researcher,
+      inputFrom: (s) => `Research this topic thoroughly: ${s.topic}`,
+    },
+    {
+      name: "save-to-kb",
+      run: async (state) => {
+        await kb.ingest([
+          {
+            id: `research-${Date.now()}`,
+            content: state.rawResearch,
+            metadata: { topic: state.topic },
+          },
+        ]);
+        return {};
+      },
+    },
+    {
+      name: "write-report",
+      agent: writer,
+      inputFrom: (s) =>
+        `Write a structured report based on:\n\n${s.rawResearch}`,
+    },
+    {
+      name: "peer-review",
+      agent: reviewer,
+      inputFrom: (s) => `Review this report:\n\n${s.report}`,
+    },
+  ],
+});
+
+const result = await pipeline.run();
+console.log("Final report:", result.state.report);
+console.log("Review:", result.state.review);
+console.log("Cost:", costTracker.summary().totalCost);
+```
+
+---
+
+## Content Pipeline
+
+Coordinated content generation with conditional branching, human approval gates, webhook notifications, and background queue processing.
+
+```typescript
+import {
+  Agent, Team, TeamMode, Workflow, openai,
+  InMemoryStorage, WebhookManager, httpWebhook,
+} from "@radaros/core";
+import { AgentQueue, AgentWorker } from "@radaros/queue";
+
+const storage = new InMemoryStorage();
+
+const researcherAgent = new Agent({
+  name: "content-researcher",
+  model: openai("gpt-4o-mini"),
+  instructions:
+    "Research the given topic and produce a detailed brief with key points, stats, and angles.",
+});
+
+const writerAgent = new Agent({
+  name: "content-writer",
+  model: openai("gpt-4o"),
+  instructions:
+    "Write engaging, well-structured content from the research brief. Match the requested format and tone.",
+});
+
+const editorAgent = new Agent({
+  name: "content-editor",
+  model: openai("gpt-4o"),
+  instructions:
+    "Edit for clarity, grammar, flow, and factual accuracy. Return the polished version.",
+});
+
+const seoAgent = new Agent({
+  name: "seo-optimizer",
+  model: openai("gpt-4o-mini"),
+  instructions:
+    "Optimize content for SEO: meta description, title tag, headings, keyword density, internal link suggestions.",
+});
+
+const contentTeam = new Team({
+  name: "content-team",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o-mini"),
+  members: [researcherAgent, writerAgent, editorAgent, seoAgent],
+  instructions:
+    "Coordinate content creation: research first, then write, edit, and finally SEO optimize.",
+});
+
+interface ContentState {
+  topic: string;
+  format: "short" | "long";
+  brief: string;
+  draft: string;
+  edited: string;
+  seoOptimized: string;
+  approved: boolean;
+}
+
+const webhooks = new WebhookManager({
+  destinations: [
+    httpWebhook({
+      url: "https://hooks.example.com/content-ready",
+      headers: { Authorization: "Bearer tok_xxx" },
+    }),
+  ],
+});
+
+const contentPipeline = new Workflow<ContentState>({
+  name: "content-pipeline",
+  initialState: {
+    topic: "",
+    format: "long",
+    brief: "",
+    draft: "",
+    edited: "",
+    seoOptimized: "",
+    approved: false,
+  },
+  steps: [
+    {
+      name: "research",
+      agent: researcherAgent,
+      inputFrom: (s) => `Research: ${s.topic}`,
+    },
+    {
+      name: "branch-by-format",
+      condition: (s) => s.format === "long",
+      steps: [
+        {
+          name: "write-long",
+          agent: writerAgent,
+          inputFrom: (s) => `Write a long-form article from:\n${s.brief}`,
+        },
+        {
+          name: "edit",
+          agent: editorAgent,
+          inputFrom: (s) => `Edit this article:\n${s.draft}`,
+        },
+      ],
+    },
+    {
+      name: "seo",
+      agent: seoAgent,
+      inputFrom: (s) => `Optimize for SEO:\n${s.edited || s.draft}`,
+    },
+    {
+      name: "approval-gate",
+      run: async (state) => {
+        console.log("Content ready for review. Approve in your dashboard.");
+        return { approved: true };
+      },
+    },
+    {
+      name: "notify",
+      run: async (state) => {
+        if (state.approved)
+          await webhooks.send("content.published", { topic: state.topic });
+        return {};
+      },
+    },
+  ],
+  storage,
+});
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+  queueName: "content-jobs",
+});
+
+await queue.enqueueAgentRun({
+  agentName: "content-team",
+  input: "Write an article about building AI agents with TypeScript",
+  priority: 1,
+});
+
+const worker = new AgentWorker({
+  connection: { host: "localhost", port: 6379 },
+  queueName: "content-jobs",
+  concurrency: 3,
+  agentRegistry: { "content-team": contentTeam as any },
+});
+```
+
+---
+
+## Smart Home IoT Dashboard
+
+Hybrid edge-cloud architecture with GPIO/sensor control, voice commands, and real-time WebSocket streaming.
+
+```typescript
+import {
+  Agent, VoiceAgent, openai, openaiRealtime, ollama,
+  InMemoryStorage, defineTool,
+} from "@radaros/core";
+import { createAgentGateway } from "@radaros/transport";
+import { GpioToolkit, SensorToolkit, CameraToolkit } from "@radaros/edge";
+import { EdgeCloudSync } from "@radaros/edge";
+import { createServer } from "node:http";
+import { z } from "zod";
+
+const storage = new InMemoryStorage();
+
+const gpio = new GpioToolkit({
+  chipNumber: 4,
+  allowedPins: [17, 18, 22, 23, 27],
+});
+const sensors = new SensorToolkit({ pollIntervalMs: 5000 });
+const camera = new CameraToolkit({
+  devicePath: "/dev/video0",
+  width: 640,
+  height: 480,
+});
+
+const setThermostat = defineTool({
+  name: "set_thermostat",
+  description: "Set the target temperature for the home thermostat",
+  parameters: z.object({ tempCelsius: z.number().min(15).max(30) }),
+  execute: async ({ tempCelsius }) =>
+    JSON.stringify({ set: tempCelsius, status: "adjusting" }),
+});
+
+const edgeAgent = new Agent({
+  name: "home-edge-agent",
+  model: ollama("llama3.2:3b"),
+  instructions:
+    "You control smart home devices. Read sensors, toggle GPIOs, capture images. Respond concisely.",
+  tools: [
+    ...gpio.tools(),
+    ...sensors.tools(),
+    ...camera.tools(),
+    setThermostat,
+  ],
+  memory: { storage, maxMessages: 20 },
+  maxToolRoundtrips: 5,
+});
+
+const cloudAgent = new Agent({
+  name: "home-cloud-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "You are the cloud brain for a smart home. Analyze sensor trends, suggest automations, handle complex queries.",
+  memory: { storage, summaries: true, userFacts: true },
+});
+
+const voiceAgent = new VoiceAgent({
+  name: "home-voice",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+  tools: [...gpio.tools(), setThermostat],
+  instructions:
+    "You are a smart home voice assistant. Control lights, temperature, and read sensor data.",
+});
+
+const sync = new EdgeCloudSync({
+  cloudUrl: "https://home-cloud.example.com",
+  deviceId: "pi-living-room-01",
+  authToken: process.env.CLOUD_AUTH_TOKEN,
+  heartbeatIntervalMs: 30_000,
+});
+
+await sync.start();
+
+const httpServer = createServer();
+createAgentGateway(httpServer, edgeAgent, {
+  path: "/ws/home",
+  cors: { origin: "*" },
+});
+
+httpServer.listen(8080, () =>
+  console.log("Smart Home hub running on :8080"),
+);
+```
+
+---
+
+## Multi-Tenant SaaS Platform
+
+Production agent platform with admin API, per-tenant isolation via API keys, cost budgets, queue workers, and Prometheus metrics.
+
+```typescript
+import {
+  Agent, CostTracker, openai, InMemoryStorage, modelRegistry,
+} from "@radaros/core";
+import {
+  createAdminRouter, createAgentRouter, generateOpenAPISpec,
+} from "@radaros/transport";
+import { MetricsExporter } from "@radaros/observability";
+import { AgentQueue, AgentWorker } from "@radaros/queue";
+import express from "express";
+
+const storage = new InMemoryStorage();
+const metricsExporter = new MetricsExporter();
+const perUserCosts = new Map<string, CostTracker>();
+
+function getCostTracker(userId: string): CostTracker {
+  if (!perUserCosts.has(userId)) {
+    perUserCosts.set(
+      userId,
+      new CostTracker({
+        budget: { maxCostPerUser: 10.0, onBudgetExceeded: "throw" },
+      }),
+    );
+  }
+  return perUserCosts.get(userId)!;
+}
+
+const app = express();
+app.use(express.json());
+
+app.use("/api/admin", createAdminRouter({ storage, toolLibrary: {} }));
+
+app.post("/api/run/:agentName", async (req, res) => {
+  const apiKey = req.headers["x-api-key"] as string;
+  if (!apiKey)
+    return res.status(401).json({ error: "Missing x-api-key header" });
+
+  const userId = apiKey.slice(0, 8);
+  const costTracker = getCostTracker(userId);
+
+  const agent = new Agent({
+    name: req.params.agentName,
+    model: openai("gpt-4o"),
+    instructions: "You are a helpful assistant.",
+    costTracker,
+    memory: { storage, summaries: true },
+  });
+
+  metricsExporter.attach(agent.eventBus);
+
+  try {
+    const result = await agent.run(req.body.input, {
+      userId,
+      apiKey,
+      sessionId: req.body.sessionId,
+    });
+    res.json({
+      output: result.text,
+      usage: result.usage,
+      cost: costTracker.summary().totalCost,
+    });
+  } catch (err: any) {
+    res
+      .status(err.message.includes("budget") ? 402 : 500)
+      .json({ error: err.message });
+  }
+});
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+});
+
+app.post("/api/enqueue/:agentName", async (req, res) => {
+  const { jobId } = await queue.enqueueAgentRun({
+    agentName: req.params.agentName,
+    input: req.body.input,
+    sessionId: req.body.sessionId,
+  });
+  res.json({ jobId, status: "queued" });
+});
+
+app.get("/api/metrics/prometheus", (_req, res) => {
+  const agents = metricsExporter.allAgentMetrics();
+  const lines: string[] = [];
+  for (const [name, m] of Object.entries(agents)) {
+    lines.push(`radaros_agent_runs_total{agent="${name}"} ${m.runs}`);
+    lines.push(`radaros_agent_errors_total{agent="${name}"} ${m.errors}`);
+    lines.push(`radaros_agent_cost_dollars{agent="${name}"} ${m.totalCost}`);
+    lines.push(`radaros_agent_tokens_total{agent="${name}"} ${m.totalTokens}`);
+    lines.push(
+      `radaros_agent_duration_p95_ms{agent="${name}"} ${m.p95DurationMs}`,
+    );
+  }
+  res.set("Content-Type", "text/plain").send(lines.join("\n"));
+});
+
+app.get("/api/docs/openapi.json", (_req, res) =>
+  res.json(generateOpenAPISpec([])),
+);
+
+app.listen(3000, () => console.log("SaaS platform running on :3000"));
+```
+
+---
+
+## Document Q&A System
+
+RAG-powered document assistant with PDF ingestion, hybrid search, session memory, and structured citations.
+
+```typescript
+import {
+  Agent, KnowledgeBase, InMemoryVectorStore, BM25Index,
+  OpenAIEmbedding, openai, InMemoryStorage, defineTool,
+} from "@radaros/core";
+import { PdfToolkit } from "@radaros/core";
+import { z } from "zod";
+
+const embedding = new OpenAIEmbedding();
+const vectorStore = new InMemoryVectorStore(embedding);
+const kb = new KnowledgeBase({
+  name: "company-docs",
+  vectorStore,
+  searchMode: "hybrid",
+  hybridConfig: { vectorWeight: 1.0, keywordWeight: 0.8, rrfK: 60 },
+});
+
+const pdf = new PdfToolkit();
+
+const ingestDocument = defineTool({
+  name: "ingest_document",
+  description: "Ingest a PDF document into the knowledge base for later retrieval",
+  parameters: z.object({
+    filePath: z.string(),
+    category: z.string(),
+  }),
+  execute: async ({ filePath, category }) => {
+    const pages = await pdf.extractText(filePath);
+    const chunks = pages.flatMap((page, i) => {
+      const paragraphs = page
+        .split("\n\n")
+        .filter((p) => p.trim().length > 50);
+      return paragraphs.map((text, j) => ({
+        id: `${filePath}-p${i}-c${j}`,
+        content: text,
+        metadata: { source: filePath, page: i + 1, category },
+      }));
+    });
+    await kb.ingest(chunks);
+    return JSON.stringify({ ingested: chunks.length, source: filePath });
+  },
+});
+
+const CitationOutput = z.object({
+  answer: z.string(),
+  citations: z.array(
+    z.object({
+      text: z.string(),
+      source: z.string(),
+      page: z.number(),
+      relevanceScore: z.number(),
+    }),
+  ),
+  confidence: z.number().min(0).max(1),
+});
+
+const storage = new InMemoryStorage();
+
+const docAgent = new Agent({
+  name: "doc-qa-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a document Q&A assistant. Use the knowledge base to answer questions.
+Always cite your sources with page numbers. If the knowledge base doesn't contain
+relevant information, say so clearly rather than guessing.`,
+  tools: [
+    kb.asTool({
+      topK: 8,
+      minScore: 0.3,
+      description: "Search company documents for relevant information",
+      searchMode: "hybrid",
+    }),
+    ingestDocument,
+  ],
+  memory: {
+    storage,
+    maxMessages: 30,
+    summaries: true,
+    userFacts: true,
+  },
+  structuredOutput: CitationOutput,
+});
+
+const result = await docAgent.run(
+  "What does our refund policy say about enterprise customers?",
+  { sessionId: "doc-session-1", userId: "user-42" },
+);
+console.log("Answer:", result.structured);
+
+const followUp = await docAgent.run(
+  "Can you also check the SLA terms for that plan?",
+  { sessionId: "doc-session-1", userId: "user-42" },
+);
+console.log("Follow-up:", followUp.structured);
+```

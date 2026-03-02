@@ -1,0 +1,843 @@
+---
+title: "Integration Examples"
+description: "MCP, A2A, webhooks, queues, scheduling, and admin management"
+---
+
+## 1. MCP Client
+
+Connect to an MCP server over stdio or HTTP and use its tools from a RadarOS agent.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { McpClient } from "@radaros/mcp";
+
+const mcp = new McpClient({
+  transport: {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/workspace"],
+  },
+});
+
+await mcp.connect();
+
+const agent = new Agent({
+  name: "mcp-agent",
+  model: openai("gpt-4o"),
+  instructions: "You have access to a filesystem via MCP. Read, write, and list files as requested.",
+  tools: await mcp.tools(),
+});
+
+const result = await agent.run("List all files in /tmp/workspace and read the contents of README.md.");
+console.log(result.text);
+
+await mcp.disconnect();
+```
+
+You can also connect over HTTP (SSE) for remote MCP servers:
+
+```typescript
+import { McpClient } from "@radaros/mcp";
+
+const mcp = new McpClient({
+  transport: {
+    type: "http",
+    url: "https://mcp.example.com/sse",
+    headers: { Authorization: `Bearer ${process.env.MCP_TOKEN}` },
+  },
+});
+
+await mcp.connect();
+const tools = await mcp.tools();
+console.log("Available tools:", tools.map((t) => t.name));
+```
+
+---
+
+## 2. MCP with Multiple Servers
+
+Combine tools from several MCP servers into a single agent. Each server provides its own namespace of tools.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { McpClient, McpToolRouter } from "@radaros/mcp";
+
+const filesystem = new McpClient({
+  name: "filesystem",
+  transport: {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/workspace"],
+  },
+});
+
+const github = new McpClient({
+  name: "github",
+  transport: {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-github"],
+    env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN! },
+  },
+});
+
+const postgres = new McpClient({
+  name: "postgres",
+  transport: {
+    type: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-postgres"],
+    env: { DATABASE_URL: process.env.DATABASE_URL! },
+  },
+});
+
+const router = new McpToolRouter();
+await router.addAll([filesystem, github, postgres]);
+
+const agent = new Agent({
+  name: "multi-mcp-agent",
+  model: openai("gpt-4o"),
+  instructions: `
+    You have access to three systems via MCP:
+    - filesystem: read/write local files
+    - github: manage repos, issues, PRs
+    - postgres: query the database
+    Use the appropriate tool for each task.
+  `,
+  tools: router.tools(),
+});
+
+const result = await agent.run(
+  "Check the latest 5 open issues on our repo, query the users table for active users, and save a summary to /tmp/workspace/report.md."
+);
+console.log(result.text);
+
+await router.disconnectAll();
+```
+
+---
+
+## 3. MCP Admin API
+
+Manage MCP connections at runtime via REST. Add, remove, and list MCP servers dynamically.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { McpRegistry } from "@radaros/mcp";
+import { createAgentRouter } from "@radaros/transport";
+
+const registry = new McpRegistry();
+
+const agent = new Agent({
+  name: "dynamic-mcp-agent",
+  model: openai("gpt-4o"),
+  instructions: "You use dynamically configured MCP tools. Check available tools before each task.",
+  tools: () => registry.allTools(),
+});
+
+const app = express();
+app.use(express.json());
+
+app.post("/mcp/servers", async (req, res) => {
+  const { name, transport } = req.body;
+  await registry.add(name, transport);
+  res.json({ status: "connected", tools: (await registry.tools(name)).map((t) => t.name) });
+});
+
+app.delete("/mcp/servers/:name", async (req, res) => {
+  await registry.remove(req.params.name);
+  res.json({ status: "disconnected" });
+});
+
+app.get("/mcp/servers", (_req, res) => {
+  res.json(registry.list());
+});
+
+app.use("/api", createAgentRouter({ agents: { "dynamic-mcp-agent": agent } }));
+
+app.listen(3000, () => console.log("MCP Admin API on :3000"));
+
+// POST /mcp/servers { "name": "fs", "transport": { "type": "stdio", "command": "npx", "args": [...] } }
+// DELETE /mcp/servers/fs
+// GET /mcp/servers
+```
+
+---
+
+## 4. A2A Server
+
+Expose a RadarOS agent as an A2A (Agent-to-Agent) endpoint so other agents or systems can call it.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { A2AServer } from "@radaros/a2a";
+import { z } from "zod";
+
+const analyzeData = defineTool({
+  name: "analyze_data",
+  description: "Run statistical analysis on a dataset",
+  parameters: z.object({
+    data: z.array(z.number()).describe("Array of numeric values"),
+    operation: z.enum(["mean", "median", "stddev", "summary"]),
+  }),
+  execute: async ({ data, operation }) => {
+    const sorted = [...data].sort((a, b) => a - b);
+    const mean = data.reduce((a, b) => a + b, 0) / data.length;
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const variance = data.reduce((sum, x) => sum + (x - mean) ** 2, 0) / data.length;
+    const stddev = Math.sqrt(variance);
+
+    if (operation === "mean") return `Mean: ${mean.toFixed(2)}`;
+    if (operation === "median") return `Median: ${median}`;
+    if (operation === "stddev") return `Std Dev: ${stddev.toFixed(2)}`;
+    return `Mean: ${mean.toFixed(2)}, Median: ${median}, Std Dev: ${stddev.toFixed(2)}, Count: ${data.length}`;
+  },
+});
+
+const agent = new Agent({
+  name: "data-analyst",
+  model: openai("gpt-4o"),
+  instructions: "You are a data analysis agent. Analyze datasets and provide statistical insights.",
+  tools: [analyzeData],
+});
+
+const server = new A2AServer({
+  agent,
+  port: 4000,
+  card: {
+    name: "data-analyst",
+    description: "Statistical analysis agent",
+    capabilities: ["analyze_data", "summarize"],
+    version: "1.0.0",
+  },
+});
+
+await server.start();
+console.log("A2A server running on http://localhost:4000");
+console.log("Agent card at http://localhost:4000/.well-known/agent.json");
+```
+
+---
+
+## 5. A2A Client
+
+Connect to a remote A2A agent and use it as a tool or team member in your local agent.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { A2AClient, a2aTool } from "@radaros/a2a";
+
+const remoteAnalyst = new A2AClient({
+  url: "http://localhost:4000",
+});
+
+const card = await remoteAnalyst.getCard();
+console.log(`Connected to: ${card.name} v${card.version}`);
+console.log(`Capabilities: ${card.capabilities.join(", ")}`);
+
+const agent = new Agent({
+  name: "orchestrator",
+  model: openai("gpt-4o"),
+  instructions: `
+    You coordinate tasks. When you need data analysis, delegate to the remote analyst agent.
+    Always summarize results for the end user.
+  `,
+  tools: [
+    a2aTool({
+      client: remoteAnalyst,
+      name: "data_analyst",
+      description: "Remote data analysis agent that can perform statistical analysis",
+    }),
+  ],
+});
+
+const result = await agent.run(
+  "Analyze this sales data and tell me the trend: [120, 135, 142, 158, 165, 171, 189, 203, 218, 225]"
+);
+console.log(result.text);
+// -> "The sales data shows a strong upward trend. Mean: 172.60, Median: 168,
+//    Std Dev: 34.12. Sales have grown 87.5% from start to end."
+
+await remoteAnalyst.disconnect();
+```
+
+---
+
+## 6. A2A Multi-Agent
+
+Register multiple agents in a single A2A card so callers can discover and invoke any of them.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { A2AServer } from "@radaros/a2a";
+
+const writer = new Agent({
+  name: "writer",
+  model: openai("gpt-4o"),
+  instructions: "You write clear, engaging content. Follow the requested tone and format.",
+});
+
+const translator = new Agent({
+  name: "translator",
+  model: openai("gpt-4o"),
+  instructions: "You translate text between languages accurately, preserving tone and idiom.",
+});
+
+const summarizer = new Agent({
+  name: "summarizer",
+  model: openai("gpt-4o-mini"),
+  instructions: "You create concise summaries. Default to 3 bullet points unless told otherwise.",
+});
+
+const server = new A2AServer({
+  agents: { writer, translator, summarizer },
+  port: 4000,
+  card: {
+    name: "content-team",
+    description: "A team of content agents: writer, translator, summarizer",
+    agents: [
+      { name: "writer", description: "Content writing", capabilities: ["write", "edit"] },
+      { name: "translator", description: "Language translation", capabilities: ["translate"] },
+      { name: "summarizer", description: "Text summarization", capabilities: ["summarize"] },
+    ],
+    version: "1.0.0",
+  },
+});
+
+await server.start();
+console.log("Multi-agent A2A server running on http://localhost:4000");
+
+// Callers can target a specific agent:
+// POST http://localhost:4000/agents/writer/run  { "input": "Write a blog intro about AI agents." }
+// POST http://localhost:4000/agents/translator/run  { "input": "Translate to French: Hello world" }
+```
+
+---
+
+## 7. Webhook Events
+
+Push agent events (run started, tool called, run completed) to an HTTP endpoint.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { WebhookEmitter } from "@radaros/core";
+import { z } from "zod";
+
+const webhook = new WebhookEmitter({
+  url: "https://hooks.example.com/agent-events",
+  headers: { Authorization: `Bearer ${process.env.WEBHOOK_SECRET}` },
+  events: ["run:started", "run:completed", "run:error", "tool:called", "tool:result"],
+  retries: 3,
+  timeoutMs: 5000,
+});
+
+const agent = new Agent({
+  name: "tracked-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  tools: [
+    defineTool({
+      name: "lookup",
+      description: "Look up information",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Result for: ${query}`,
+    }),
+  ],
+  hooks: [webhook],
+});
+
+const result = await agent.run("Look up the latest news about AI.");
+console.log(result.text);
+
+// Webhook receives POST requests:
+// { "event": "run:started",   "agentName": "tracked-agent", "input": "...", "timestamp": "..." }
+// { "event": "tool:called",   "agentName": "tracked-agent", "tool": "lookup", "args": {...} }
+// { "event": "tool:result",   "agentName": "tracked-agent", "tool": "lookup", "result": "..." }
+// { "event": "run:completed", "agentName": "tracked-agent", "output": "...", "cost": 0.003 }
+```
+
+---
+
+## 8. Slack Webhook
+
+Send agent run summaries to a Slack channel via incoming webhook.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { SlackWebhook } from "@radaros/core";
+
+const slack = new SlackWebhook({
+  webhookUrl: process.env.SLACK_WEBHOOK_URL!,
+  channel: "#agent-alerts",
+  events: ["run:completed", "run:error"],
+  format: (event) => {
+    if (event.type === "run:error") {
+      return {
+        text: `Agent "${event.agentName}" failed`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Agent Error*\n*Agent:* ${event.agentName}\n*Error:* ${event.error.message}\n*Input:* ${event.input.slice(0, 200)}`,
+            },
+          },
+        ],
+      };
+    }
+    return {
+      text: `Agent "${event.agentName}" completed`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: [
+              `*Agent Run Complete*`,
+              `*Agent:* ${event.agentName}`,
+              `*Duration:* ${event.durationMs}ms`,
+              `*Cost:* $${event.cost?.toFixed(4) ?? "N/A"}`,
+              `*Tools used:* ${event.toolCalls?.length ?? 0}`,
+            ].join("\n"),
+          },
+        },
+      ],
+    };
+  },
+});
+
+const agent = new Agent({
+  name: "reporting-agent",
+  model: openai("gpt-4o"),
+  instructions: "Generate daily reports from provided data.",
+  hooks: [slack],
+});
+
+const result = await agent.run("Generate a summary of today's key metrics.");
+console.log(result.text);
+// Slack receives a formatted message with run details
+```
+
+---
+
+## 9. Email Notifications
+
+Send error alerts via email when an agent run fails.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { EmailNotifier } from "@radaros/core";
+
+const email = new EmailNotifier({
+  smtp: {
+    host: "smtp.example.com",
+    port: 587,
+    secure: false,
+    auth: { user: process.env.SMTP_USER!, pass: process.env.SMTP_PASS! },
+  },
+  from: "alerts@radaros.dev",
+  to: ["oncall@example.com"],
+  events: ["run:error"],
+  subject: (event) => `[RadarOS] Agent "${event.agentName}" failed`,
+  body: (event) => [
+    `Agent: ${event.agentName}`,
+    `Error: ${event.error.message}`,
+    `Stack: ${event.error.stack}`,
+    `Input: ${event.input}`,
+    `Timestamp: ${event.timestamp}`,
+    `Run ID: ${event.runId}`,
+  ].join("\n\n"),
+});
+
+const agent = new Agent({
+  name: "critical-agent",
+  model: openai("gpt-4o"),
+  instructions: "Process critical business data.",
+  hooks: [email],
+});
+
+try {
+  const result = await agent.run("Process the quarterly financials.");
+  console.log(result.text);
+} catch (err) {
+  console.error("Agent failed, email notification sent.");
+}
+```
+
+---
+
+## 10. Queue Producer
+
+Enqueue background agent jobs using BullMQ. Jobs are processed asynchronously by workers.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AgentQueue } from "@radaros/queue";
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+  queueName: "agent-jobs",
+});
+
+const agent = new Agent({
+  name: "background-processor",
+  model: openai("gpt-4o"),
+  instructions: "Process documents and extract key information.",
+});
+
+queue.register("background-processor", agent);
+
+const job1 = await queue.enqueue({
+  agent: "background-processor",
+  input: "Analyze this contract and extract the key terms: ...",
+  priority: 1,
+  metadata: { userId: "user-42", documentId: "doc-789" },
+});
+
+const job2 = await queue.enqueue({
+  agent: "background-processor",
+  input: "Summarize this quarterly report: ...",
+  priority: 2,
+  metadata: { userId: "user-42", documentId: "doc-790" },
+});
+
+console.log(`Enqueued job ${job1.id} (priority 1)`);
+console.log(`Enqueued job ${job2.id} (priority 2)`);
+
+const status = await queue.getJobStatus(job1.id);
+console.log(`Job ${job1.id} status: ${status.state}`);
+// -> "Job abc-123 status: waiting"
+```
+
+---
+
+## 11. Queue Worker
+
+Process background agent jobs with `AgentWorker`. Workers pull from the queue, run the agent, and store results.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AgentWorker } from "@radaros/queue";
+
+const agent = new Agent({
+  name: "background-processor",
+  model: openai("gpt-4o"),
+  instructions: "Process documents and extract key information.",
+});
+
+const worker = new AgentWorker({
+  connection: { host: "localhost", port: 6379 },
+  queueName: "agent-jobs",
+  agents: { "background-processor": agent },
+  concurrency: 3,
+  maxRetries: 2,
+});
+
+worker.on("completed", (job, result) => {
+  console.log(`Job ${job.id} completed in ${result.durationMs}ms`);
+  console.log(`Cost: $${result.cost?.toFixed(4)}`);
+  console.log(`Output: ${result.text.slice(0, 100)}...`);
+});
+
+worker.on("failed", (job, error) => {
+  console.error(`Job ${job.id} failed: ${error.message}`);
+});
+
+worker.on("progress", (job, progress) => {
+  console.log(`Job ${job.id}: ${progress.step} (${progress.percent}%)`);
+});
+
+await worker.start();
+console.log("Worker started, processing jobs from 'agent-jobs' queue...");
+
+process.on("SIGINT", async () => {
+  console.log("Shutting down worker gracefully...");
+  await worker.stop();
+  process.exit(0);
+});
+```
+
+---
+
+## 12. Cron Scheduling
+
+Schedule recurring agent runs using cron expressions. The agent runs automatically on the defined schedule.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AgentScheduler } from "@radaros/queue";
+
+const dailyReporter = new Agent({
+  name: "daily-reporter",
+  model: openai("gpt-4o"),
+  instructions: `
+    Generate a daily system health report. Include:
+    - Service uptime summary
+    - Error rate trends
+    - Key metrics changes
+    Format as a concise executive summary.
+  `,
+});
+
+const weeklyDigest = new Agent({
+  name: "weekly-digest",
+  model: openai("gpt-4o"),
+  instructions: "Compile weekly highlights and create a digest email.",
+});
+
+const scheduler = new AgentScheduler({
+  connection: { host: "localhost", port: 6379 },
+  timezone: "America/New_York",
+});
+
+await scheduler.schedule({
+  name: "daily-health-report",
+  agent: dailyReporter,
+  cron: "0 9 * * *",
+  input: "Generate the daily health report for today.",
+  onComplete: async (result) => {
+    console.log(`[${new Date().toISOString()}] Daily report generated`);
+    await sendToSlack(result.text);
+  },
+  onError: async (error) => {
+    console.error("Daily report failed:", error.message);
+    await sendAlert("Daily report agent failed", error);
+  },
+});
+
+await scheduler.schedule({
+  name: "weekly-digest",
+  agent: weeklyDigest,
+  cron: "0 10 * * 1",
+  input: "Compile the weekly digest for last week.",
+});
+
+await scheduler.start();
+console.log("Scheduler running. Registered jobs:");
+for (const job of scheduler.listJobs()) {
+  console.log(`  ${job.name}: ${job.cron} (next: ${job.nextRun.toISOString()})`);
+}
+
+async function sendToSlack(text: string) {
+  console.log("[Slack]", text.slice(0, 100));
+}
+
+async function sendAlert(title: string, error: Error) {
+  console.error(`[Alert] ${title}: ${error.message}`);
+}
+```
+
+---
+
+## 13. Admin CRUD API
+
+Dynamically create, update, and delete agents and teams at runtime via a REST admin API.
+
+```typescript
+import express from "express";
+import { Agent, Team, openai } from "@radaros/core";
+import { AdminRegistry } from "@radaros/admin";
+import { createAgentRouter } from "@radaros/transport";
+
+const registry = new AdminRegistry();
+
+const app = express();
+app.use(express.json());
+
+app.post("/admin/agents", async (req, res) => {
+  const { name, model, instructions, tools } = req.body;
+  const agent = new Agent({
+    name,
+    model: openai(model ?? "gpt-4o"),
+    instructions,
+  });
+  registry.registerAgent(agent);
+  res.status(201).json({ name: agent.name, status: "created" });
+});
+
+app.get("/admin/agents", (_req, res) => {
+  const agents = registry.listAgents();
+  res.json(agents.map((a) => ({ name: a.name, model: a.model, toolCount: a.tools.length })));
+});
+
+app.get("/admin/agents/:name", (req, res) => {
+  const agent = registry.getAgent(req.params.name);
+  if (!agent) return res.status(404).json({ error: "Agent not found" });
+  res.json({ name: agent.name, model: agent.model, instructions: agent.instructions });
+});
+
+app.put("/admin/agents/:name", async (req, res) => {
+  const { instructions, model } = req.body;
+  const updated = registry.updateAgent(req.params.name, { instructions, model: model ? openai(model) : undefined });
+  if (!updated) return res.status(404).json({ error: "Agent not found" });
+  res.json({ name: updated.name, status: "updated" });
+});
+
+app.delete("/admin/agents/:name", (req, res) => {
+  const removed = registry.removeAgent(req.params.name);
+  if (!removed) return res.status(404).json({ error: "Agent not found" });
+  res.json({ name: req.params.name, status: "deleted" });
+});
+
+app.post("/admin/teams", async (req, res) => {
+  const { name, agentNames, strategy } = req.body;
+  const agents = agentNames.map((n: string) => registry.getAgent(n)).filter(Boolean);
+  const team = new Team({ name, agents, strategy: strategy ?? "round-robin" });
+  registry.registerTeam(team);
+  res.status(201).json({ name: team.name, agents: agentNames, status: "created" });
+});
+
+app.use("/api", createAgentRouter({ agents: () => registry.allAgentsMap() }));
+
+app.listen(3000, () => console.log("Admin API on :3000"));
+```
+
+---
+
+## 14. Admin Socket.IO
+
+Real-time admin management via WebSocket. Create agents, run them, and stream results over Socket.IO.
+
+```typescript
+import { createServer } from "node:http";
+import { Server as SocketIO } from "socket.io";
+import { Agent, openai } from "@radaros/core";
+import { AdminRegistry } from "@radaros/admin";
+
+const registry = new AdminRegistry();
+
+const httpServer = createServer();
+const io = new SocketIO(httpServer, { cors: { origin: "*" } });
+
+io.on("connection", (socket) => {
+  console.log(`Admin connected: ${socket.id}`);
+
+  socket.on("agent:create", (config, ack) => {
+    const agent = new Agent({
+      name: config.name,
+      model: openai(config.model ?? "gpt-4o"),
+      instructions: config.instructions,
+    });
+    registry.registerAgent(agent);
+    ack({ status: "created", name: agent.name });
+    io.emit("agent:list", registry.listAgents().map((a) => a.name));
+  });
+
+  socket.on("agent:run", async (data) => {
+    const agent = registry.getAgent(data.agentName);
+    if (!agent) {
+      socket.emit("agent:error", { error: `Agent "${data.agentName}" not found` });
+      return;
+    }
+
+    socket.emit("agent:run:started", { agentName: data.agentName, runId: data.runId });
+
+    try {
+      const result = await agent.run(data.input, {
+        onToken: (token) => {
+          socket.emit("agent:run:token", { runId: data.runId, token });
+        },
+        onToolCall: (name, args) => {
+          socket.emit("agent:run:tool", { runId: data.runId, tool: name, args });
+        },
+      });
+
+      socket.emit("agent:run:completed", {
+        runId: data.runId,
+        text: result.text,
+        cost: result.cost,
+        durationMs: result.durationMs,
+      });
+    } catch (error: any) {
+      socket.emit("agent:run:error", { runId: data.runId, error: error.message });
+    }
+  });
+
+  socket.on("agent:list", (ack) => {
+    ack(registry.listAgents().map((a) => ({ name: a.name, model: a.model })));
+  });
+
+  socket.on("agent:delete", (name, ack) => {
+    const removed = registry.removeAgent(name);
+    ack({ status: removed ? "deleted" : "not_found" });
+    io.emit("agent:list", registry.listAgents().map((a) => a.name));
+  });
+
+  socket.on("disconnect", () => {
+    console.log(`Admin disconnected: ${socket.id}`);
+  });
+});
+
+httpServer.listen(3001, () => console.log("Admin WebSocket on :3001"));
+```
+
+---
+
+## 15. Admin Storage
+
+Persist admin-created agent blueprints to a database so they survive restarts.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { AdminRegistry, AdminStorage } from "@radaros/admin";
+
+const storage = new AdminStorage({
+  driver: "postgres",
+  connectionString: process.env.DATABASE_URL!,
+  tableName: "agent_blueprints",
+  autoMigrate: true,
+});
+
+const registry = new AdminRegistry({ storage });
+
+await registry.init();
+
+const savedAgents = await storage.listBlueprints();
+console.log(`Loaded ${savedAgents.length} agent blueprints from database`);
+
+for (const blueprint of savedAgents) {
+  const agent = new Agent({
+    name: blueprint.name,
+    model: openai(blueprint.model),
+    instructions: blueprint.instructions,
+    tools: blueprint.toolConfigs?.map((tc) => registry.resolveTool(tc)) ?? [],
+  });
+  registry.registerAgent(agent);
+  console.log(`  Restored agent: ${agent.name}`);
+}
+
+await registry.createAndSave({
+  name: "customer-support",
+  model: "gpt-4o",
+  instructions: "You are a customer support agent. Be helpful and empathetic.",
+  toolConfigs: [
+    { type: "builtin", name: "knowledge_search", config: { index: "help-center" } },
+    { type: "builtin", name: "ticket_create", config: { project: "SUPPORT" } },
+  ],
+});
+
+await registry.createAndSave({
+  name: "data-analyst",
+  model: "gpt-4o",
+  instructions: "You analyze data and create reports. Use SQL when needed.",
+  toolConfigs: [
+    { type: "builtin", name: "sql_query", config: { database: "analytics" } },
+  ],
+});
+
+const allBlueprints = await storage.listBlueprints();
+console.log("\nStored blueprints:");
+for (const bp of allBlueprints) {
+  console.log(`  ${bp.name} (${bp.model}) - ${bp.toolConfigs?.length ?? 0} tools`);
+}
+
+await storage.updateBlueprint("customer-support", {
+  instructions: "You are a customer support agent. Be helpful, empathetic, and always ask for feedback.",
+});
+
+console.log("\nUpdated customer-support instructions.");
+
+// Blueprints persist across restarts. On next startup, registry.init()
+// will reload all agents automatically.
+```

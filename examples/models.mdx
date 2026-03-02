@@ -1,0 +1,620 @@
+---
+title: "Model Provider Examples"
+description: "Configuration examples for every supported LLM provider"
+---
+
+## OpenAI
+
+GPT-4o with function calling, streaming, and per-request options.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "openai-agent",
+  model: openai("gpt-4o", {
+    apiKey: process.env.OPENAI_API_KEY,
+  }),
+  instructions: "You are a helpful assistant with tool access.",
+  tools: [
+    defineTool({
+      name: "get_weather",
+      description: "Get current weather for a city",
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => `${city}: 22°C, Sunny`,
+    }),
+  ],
+});
+
+const result = await agent.run("What's the weather in Tokyo?");
+console.log(result.text);
+
+for await (const chunk of agent.stream("Tell me a joke")) {
+  if (chunk.type === "text") process.stdout.write(chunk.text);
+}
+```
+
+---
+
+## Anthropic
+
+Claude Sonnet with extended thinking for step-by-step reasoning.
+
+```typescript
+import { Agent, anthropic } from "@radaros/core";
+
+const agent = new Agent({
+  name: "claude-agent",
+  model: anthropic("claude-sonnet-4-20250514", {
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  }),
+  instructions: "Think step by step before answering complex questions.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 8_000,
+  },
+});
+
+const result = await agent.run(
+  "A bat and a ball cost $1.10 in total. The bat costs $1 more than the ball. How much does the ball cost?",
+);
+
+console.log("Thinking:", result.thinking);
+console.log("Answer:", result.text);
+```
+
+---
+
+## Google Gemini
+
+Gemini with multimodal input — images, audio, PDFs, and spreadsheets.
+
+```typescript
+import { Agent, google, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "gemini-agent",
+  model: google("gemini-2.5-flash", {
+    apiKey: process.env.GOOGLE_API_KEY,
+  }),
+  instructions: "You analyze documents and images with precision.",
+});
+
+const imageResult = await agent.run([
+  { type: "text", text: "What's in this image?" },
+  {
+    type: "image",
+    data: readFileSync("photo.jpg").toString("base64"),
+    mimeType: "image/jpeg",
+  },
+] as ContentPart[]);
+
+console.log(imageResult.text);
+
+const pdfResult = await agent.run([
+  { type: "text", text: "Summarize the key findings." },
+  {
+    type: "file",
+    data: readFileSync("report.pdf").toString("base64"),
+    mimeType: "application/pdf",
+    filename: "report.pdf",
+  },
+] as ContentPart[]);
+
+console.log(pdfResult.text);
+```
+
+---
+
+## Vertex AI
+
+Gemini via Google Cloud with project-scoped authentication for enterprise deployments.
+
+```typescript
+import { Agent, vertex } from "@radaros/core";
+
+const agent = new Agent({
+  name: "vertex-agent",
+  model: vertex("gemini-2.5-flash", {
+    project: process.env.GCP_PROJECT_ID,
+    location: "us-central1",
+  }),
+  instructions: "You are an enterprise assistant running on Google Cloud.",
+});
+
+const result = await agent.run("Summarize the benefits of serverless architecture.");
+console.log(result.text);
+```
+
+---
+
+## Ollama
+
+Local model with no API key — fully offline, privacy-first inference.
+
+```typescript
+import { Agent, ollama, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "local-agent",
+  model: ollama("llama3.1", {
+    host: "http://localhost:11434",
+  }),
+  instructions: "You are a helpful assistant running locally. No data leaves this machine.",
+  tools: [
+    defineTool({
+      name: "calculator",
+      description: "Evaluate a math expression",
+      parameters: z.object({ expression: z.string() }),
+      execute: async ({ expression }) => {
+        const sanitized = expression.replace(/[^0-9+\-*/().%\s]/g, "");
+        return String(new Function(`return (${sanitized})`)());
+      },
+    }),
+  ],
+});
+
+const result = await agent.run("What is 2^16 + 3^10?");
+console.log(result.text);
+```
+
+---
+
+## DeepSeek
+
+Reasoning model with chain-of-thought for complex math and logic problems.
+
+```typescript
+import { Agent, deepseek } from "@radaros/core";
+
+const agent = new Agent({
+  name: "deepseek-reasoner",
+  model: deepseek("deepseek-reasoner", {
+    apiKey: process.env.DEEPSEEK_API_KEY,
+  }),
+  instructions: "Solve problems step by step with rigorous reasoning.",
+});
+
+const result = await agent.run(
+  "A train leaves Station A at 60 mph. Another leaves Station B (300 miles away) at 80 mph toward A. When do they meet?",
+);
+console.log(result.text);
+```
+
+---
+
+## Mistral
+
+Code generation with Codestral for programming tasks.
+
+```typescript
+import { Agent, mistral } from "@radaros/core";
+
+const agent = new Agent({
+  name: "code-agent",
+  model: mistral("codestral-latest", {
+    apiKey: process.env.MISTRAL_API_KEY,
+  }),
+  instructions: "You are an expert programmer. Write clean, well-documented TypeScript.",
+});
+
+const result = await agent.run(
+  "Write a TypeScript function that implements binary search on a sorted array.",
+);
+console.log(result.text);
+```
+
+---
+
+## xAI Grok
+
+Grok with web search tool for grounded, real-time answers.
+
+```typescript
+import { Agent, xai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "grok-agent",
+  model: xai("grok-3", {
+    apiKey: process.env.XAI_API_KEY,
+  }),
+  instructions: "You are a witty and knowledgeable assistant with live web search.",
+  tools: [
+    defineTool({
+      name: "web_search",
+      description: "Search the web for current information",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Top results for "${query}": ...`,
+    }),
+  ],
+});
+
+const result = await agent.run("What are the latest breakthroughs in battery technology?");
+console.log(result.text);
+```
+
+---
+
+## Perplexity
+
+Search-grounded answers with citations and domain filtering.
+
+```typescript
+import { Agent, perplexity } from "@radaros/core";
+
+const agent = new Agent({
+  name: "perplexity-researcher",
+  model: perplexity("sonar-pro", {
+    apiKey: process.env.PERPLEXITY_API_KEY,
+    search: {
+      searchMode: "academic",
+      searchRecencyFilter: "month",
+      searchDomainFilter: ["nature.com", "arxiv.org", "sciencedirect.com"],
+      returnRelatedQuestions: true,
+      searchContextSize: "high",
+    },
+  }),
+  instructions: "You are a research assistant. Cite your sources.",
+});
+
+const result = await agent.run(
+  "What are the latest FDA-approved treatments for Alzheimer's disease?",
+);
+console.log(result.text);
+
+const raw = result.raw as any;
+if (raw?.citations) console.log("Sources:", raw.citations);
+if (raw?.related_questions) console.log("Related:", raw.related_questions);
+```
+
+---
+
+## Cohere
+
+Command R+ optimized for RAG with document search.
+
+```typescript
+import { Agent, cohere, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "cohere-rag-agent",
+  model: cohere("command-r-plus", {
+    apiKey: process.env.CO_API_KEY,
+  }),
+  instructions:
+    "You are a knowledge-grounded assistant. Always use the search tool before answering. Cite your sources.",
+  tools: [
+    defineTool({
+      name: "search_docs",
+      description: "Search internal documentation",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) =>
+        JSON.stringify([
+          { title: "Deployment Guide", content: `Guide for: ${query}...`, source: "docs/deploy.md" },
+          { title: "API Reference", content: `API info for: ${query}...`, source: "docs/api.md" },
+        ]),
+    }),
+  ],
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("How do I deploy our service to production?");
+console.log(result.text);
+```
+
+---
+
+## Meta Llama
+
+Llama 4 Scout via the official Meta API with vision support.
+
+```typescript
+import { Agent, meta, type ContentPart } from "@radaros/core";
+import { readFileSync } from "node:fs";
+
+const agent = new Agent({
+  name: "llama-agent",
+  model: meta("Llama-4-Scout-17B-16E-Instruct", {
+    apiKey: process.env.LLAMA_API_KEY,
+  }),
+  instructions: "You are a helpful, harmless, and honest assistant.",
+});
+
+const textResult = await agent.run("Explain the difference between TCP and UDP.");
+console.log(textResult.text);
+
+const imageData = readFileSync("diagram.png").toString("base64");
+const visionResult = await agent.run([
+  { type: "text", text: "Describe this architecture diagram." },
+  { type: "image", data: imageData, mimeType: "image/png" },
+] as ContentPart[]);
+console.log(visionResult.text);
+```
+
+---
+
+## AWS Bedrock
+
+Foundation models (Mistral, Nova, Llama) via AWS with IAM authentication.
+
+```typescript
+import { Agent, awsBedrock, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "bedrock-agent",
+  model: awsBedrock("mistral.mistral-large-2402-v1:0", {
+    region: "us-east-1",
+  }),
+  instructions: "You are a helpful assistant running on AWS Bedrock.",
+  tools: [
+    defineTool({
+      name: "lookup_order",
+      description: "Look up an order by ID",
+      parameters: z.object({ orderId: z.string() }),
+      execute: async ({ orderId }) =>
+        JSON.stringify({ id: orderId, status: "shipped", eta: "2026-03-05" }),
+    }),
+  ],
+  maxToolRoundtrips: 3,
+});
+
+const result = await agent.run("Where is my order ORD-12345?");
+console.log(result.text);
+```
+
+---
+
+## AWS Claude
+
+Claude via Bedrock with extended thinking and AWS billing.
+
+```typescript
+import { Agent, awsClaude } from "@radaros/core";
+
+const agent = new Agent({
+  name: "aws-claude-agent",
+  model: awsClaude("us.anthropic.claude-sonnet-4-20250514-v1:0", {
+    awsRegion: "us-east-1",
+  }),
+  instructions: "You are an enterprise assistant. Think step by step.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 4_000,
+  },
+});
+
+const result = await agent.run(
+  "Analyze the trade-offs between microservices and monolithic architectures for a 10-person startup.",
+);
+console.log("Thinking:", result.thinking);
+console.log("Answer:", result.text);
+```
+
+---
+
+## Azure OpenAI
+
+GPT-4o on Azure with enterprise compliance and private endpoints.
+
+```typescript
+import { Agent, azureOpenai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const agent = new Agent({
+  name: "azure-agent",
+  model: azureOpenai("gpt-4o", {
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+    deployment: "my-gpt4o-deployment",
+    apiVersion: "2024-10-21",
+  }),
+  instructions: "You are an enterprise assistant for internal use.",
+  tools: [
+    defineTool({
+      name: "search_docs",
+      description: "Search internal documentation",
+      parameters: z.object({ query: z.string() }),
+      execute: async ({ query }) => `Found 3 results for "${query}"...`,
+    }),
+  ],
+});
+
+const result = await agent.run("Find the onboarding docs for new engineers.");
+console.log(result.text);
+```
+
+---
+
+## Azure Foundry
+
+Open-source models (Phi, Llama, Mistral) hosted on Azure AI Foundry.
+
+```typescript
+import { Agent, azureFoundry } from "@radaros/core";
+
+const agent = new Agent({
+  name: "foundry-agent",
+  model: azureFoundry("Phi-4", {
+    apiKey: process.env.AZURE_API_KEY,
+    endpoint: process.env.AZURE_ENDPOINT,
+  }),
+  instructions: "You are a fast, efficient assistant powered by Phi-4 on Azure.",
+});
+
+const result = await agent.run("Explain recursion with a simple example.");
+console.log(result.text);
+```
+
+---
+
+## OpenAI-Compatible
+
+Connect to Together, Groq, Fireworks, or OpenRouter with a custom `baseURL`.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+// Together AI — 100+ open-source models
+const togetherAgent = new Agent({
+  name: "together-agent",
+  model: openai("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", {
+    apiKey: process.env.TOGETHER_API_KEY,
+    baseURL: "https://api.together.xyz/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+// Groq — ultra-fast inference
+const groqAgent = new Agent({
+  name: "groq-agent",
+  model: openai("llama-3.3-70b-versatile", {
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1",
+  }),
+  instructions: "You are a fast, helpful assistant.",
+});
+
+// Fireworks — optimized open-source inference
+const fireworksAgent = new Agent({
+  name: "fireworks-agent",
+  model: openai("accounts/fireworks/models/llama-v3p1-70b-instruct", {
+    apiKey: process.env.FIREWORKS_API_KEY,
+    baseURL: "https://api.fireworks.ai/inference/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+// OpenRouter — access models from multiple providers
+const openrouterAgent = new Agent({
+  name: "openrouter-agent",
+  model: openai("anthropic/claude-sonnet-4-20250514", {
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: "https://openrouter.ai/api/v1",
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await togetherAgent.run("Explain how transformers work in 3 sentences.");
+console.log(result.text);
+```
+
+---
+
+## Custom Provider
+
+Implement the `ModelProvider` interface for any LLM API.
+
+```typescript
+import {
+  Agent, registry,
+  type ModelProvider, type ChatMessage,
+  type ModelResponse, type StreamChunk,
+} from "@radaros/core";
+
+class MyProvider implements ModelProvider {
+  readonly providerId = "my-provider";
+  readonly modelId: string;
+  private apiKey: string;
+
+  constructor(modelId: string, config: { apiKey: string }) {
+    this.modelId = modelId;
+    this.apiKey = config.apiKey;
+  }
+
+  async generate(messages: ChatMessage[]): Promise<ModelResponse> {
+    const lastMessage = messages[messages.length - 1]?.content;
+    const res = await fetch("https://api.my-llm.com/v1/chat", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: this.modelId, prompt: lastMessage }),
+    });
+    const data = await res.json();
+    return {
+      message: { role: "assistant", content: data.text },
+      usage: { promptTokens: data.usage.input, completionTokens: data.usage.output, totalTokens: data.usage.total },
+      finishReason: "stop",
+      raw: data,
+    };
+  }
+
+  async *stream(): AsyncGenerator<StreamChunk> {
+    yield { type: "text", text: "Streaming not implemented" };
+    yield { type: "finish", finishReason: "stop", usage: undefined };
+  }
+}
+
+registry.register("my-provider", (modelId, config) =>
+  new MyProvider(modelId, config as { apiKey: string }),
+);
+
+const agent = new Agent({
+  name: "custom-agent",
+  model: registry.resolve("my-provider", "my-model-v1", {
+    apiKey: process.env.MY_API_KEY!,
+  }),
+  instructions: "You are a helpful assistant.",
+});
+
+const result = await agent.run("Hello!");
+console.log(result.text);
+```
+
+---
+
+## Model Switching
+
+Change models at runtime without rebuilding agents — useful for fallback strategies or A/B testing.
+
+```typescript
+import { Agent, openai, anthropic, ollama } from "@radaros/core";
+
+const models = {
+  fast: openai("gpt-4o-mini"),
+  smart: openai("gpt-4o"),
+  reasoning: anthropic("claude-sonnet-4-20250514"),
+  local: ollama("llama3.1"),
+};
+
+function createAgent(tier: keyof typeof models) {
+  return new Agent({
+    name: `assistant-${tier}`,
+    model: models[tier],
+    instructions: "You are a helpful assistant.",
+  });
+}
+
+const fastAgent = createAgent("fast");
+const smartAgent = createAgent("smart");
+
+let result = await fastAgent.run("What is 2 + 2?");
+console.log("Fast:", result.text);
+
+result = await smartAgent.run("Analyze the geopolitical implications of AI regulation.");
+console.log("Smart:", result.text);
+
+// Runtime fallback: retry with a different model on failure
+async function runWithFallback(input: string) {
+  const tiers: (keyof typeof models)[] = ["fast", "smart", "reasoning"];
+  for (const tier of tiers) {
+    try {
+      const agent = createAgent(tier);
+      return await agent.run(input);
+    } catch {
+      console.log(`${tier} failed, trying next...`);
+    }
+  }
+  throw new Error("All models failed");
+}
+
+const fallbackResult = await runWithFallback("Explain quantum entanglement.");
+console.log(fallbackResult.text);
+```

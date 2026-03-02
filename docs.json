@@ -271,6 +271,61 @@
         ]
       },
       {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Core Examples",
+            "pages": [
+              "examples/agents",
+              "examples/memory-sessions",
+              "examples/tools-toolkits",
+              "examples/models",
+              "examples/storage"
+            ]
+          },
+          {
+            "group": "Multi-Agent & Orchestration",
+            "pages": [
+              "examples/teams",
+              "examples/workflows"
+            ]
+          },
+          {
+            "group": "Knowledge & RAG",
+            "pages": [
+              "examples/knowledge-rag"
+            ]
+          },
+          {
+            "group": "Deployment & Transport",
+            "pages": [
+              "examples/transport-deploy",
+              "examples/voice-browser",
+              "examples/edge-iot"
+            ]
+          },
+          {
+            "group": "Monitoring & Cost",
+            "pages": [
+              "examples/cost-observability"
+            ]
+          },
+          {
+            "group": "Advanced & Integrations",
+            "pages": [
+              "examples/advanced-features",
+              "examples/integrations"
+            ]
+          },
+          {
+            "group": "End-to-End Applications",
+            "pages": [
+              "examples/end-to-end"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "API Reference",
         "groups": [
           {

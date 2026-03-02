@@ -1,0 +1,754 @@
+---
+title: "Agent Examples"
+description: "Complete code examples for creating, configuring, and running agents"
+---
+
+## Basic Agent
+
+The simplest possible agent — just a name, model, and instructions.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "greeter",
+  model: openai("gpt-4o"),
+  instructions: "You are a friendly assistant. Keep responses concise and helpful.",
+});
+
+const result = await agent.run("What's the capital of Japan?");
+console.log(result.text);
+// → "The capital of Japan is Tokyo."
+```
+
+---
+
+## Agent with Tools
+
+Use `defineTool()` with a Zod schema to give your agent capabilities beyond text generation.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "get_weather",
+  description: "Get the current weather for a city",
+  parameters: z.object({
+    city: z.string().describe("City name, e.g. 'San Francisco'"),
+    units: z.enum(["celsius", "fahrenheit"]).default("celsius"),
+  }),
+  execute: async ({ city, units }) => {
+    const response = await fetch(
+      `https://api.weatherapi.com/v1/current.json?key=${process.env.WEATHER_API_KEY}&q=${city}`
+    );
+    const data = await response.json();
+    const temp = units === "fahrenheit" ? data.current.temp_f : data.current.temp_c;
+    return `${city}: ${temp}°${units === "fahrenheit" ? "F" : "C"}, ${data.current.condition.text}`;
+  },
+});
+
+const agent = new Agent({
+  name: "weather-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You help users check the weather. Always include the temperature and conditions.",
+  tools: [weatherTool],
+});
+
+const result = await agent.run("What's the weather like in Tokyo and London?");
+console.log(result.text);
+```
+
+---
+
+## Multi-tool Agent
+
+Agents can use multiple tools. The LLM decides which tool(s) to call based on the user's request.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+import { readFile } from "node:fs/promises";
+
+const calculator = defineTool({
+  name: "calculator",
+  description: "Evaluate a mathematical expression",
+  parameters: z.object({
+    expression: z.string().describe("Math expression, e.g. '(12 * 4) + 7'"),
+  }),
+  execute: async ({ expression }) => {
+    const sanitized = expression.replace(/[^0-9+\-*/().%\s]/g, "");
+    const result = new Function(`return (${sanitized})`)();
+    return `${expression} = ${result}`;
+  },
+});
+
+const webSearch = defineTool({
+  name: "web_search",
+  description: "Search the web for current information",
+  parameters: z.object({
+    query: z.string().describe("Search query"),
+    maxResults: z.number().default(3),
+  }),
+  execute: async ({ query, maxResults }) => {
+    const response = await fetch(
+      `https://api.search.example.com/search?q=${encodeURIComponent(query)}&limit=${maxResults}`,
+      { headers: { Authorization: `Bearer ${process.env.SEARCH_API_KEY}` } }
+    );
+    const data = await response.json();
+    return data.results
+      .map((r: any) => `[${r.title}](${r.url})\n${r.snippet}`)
+      .join("\n\n");
+  },
+});
+
+const fileReader = defineTool({
+  name: "read_file",
+  description: "Read the contents of a local file",
+  parameters: z.object({
+    path: z.string().describe("Absolute or relative file path"),
+    encoding: z.enum(["utf-8", "base64"]).default("utf-8"),
+  }),
+  execute: async ({ path, encoding }) => {
+    const content = await readFile(path, encoding as BufferEncoding);
+    return content.slice(0, 10_000);
+  },
+});
+
+const agent = new Agent({
+  name: "research-assistant",
+  model: openai("gpt-4o"),
+  instructions:
+    "You are a research assistant. Use the calculator for math, web search for current info, and file reader for local documents.",
+  tools: [calculator, webSearch, fileReader],
+});
+
+const result = await agent.run(
+  "Read the file ./data/quarterly-revenue.csv and calculate the total revenue across all quarters."
+);
+console.log(result.text);
+console.log(`Tool calls made: ${result.toolCalls.length}`);
+```
+
+---
+
+## Structured Output
+
+Force the agent to return typed JSON matching a Zod schema. The `structured` field on the result is parsed and type-safe.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { z } from "zod";
+
+const SentimentSchema = z.object({
+  sentiment: z.enum(["positive", "negative", "neutral", "mixed"]),
+  confidence: z.number().min(0).max(1),
+  keywords: z.array(z.string()).describe("Key phrases that drove the sentiment"),
+  summary: z.string().describe("One-sentence summary of the text's tone"),
+});
+
+type SentimentResult = z.infer<typeof SentimentSchema>;
+
+const analyst = new Agent({
+  name: "sentiment-analyst",
+  model: openai("gpt-4o"),
+  instructions:
+    "Analyze the sentiment of the provided text. Be precise with confidence scores.",
+  structuredOutput: SentimentSchema,
+});
+
+const result = await analyst.run(
+  "The product is incredible — fast shipping and great quality. Only downside is the packaging was slightly damaged."
+);
+
+const analysis = result.structured as SentimentResult;
+console.log(`Sentiment: ${analysis.sentiment}`);
+console.log(`Confidence: ${(analysis.confidence * 100).toFixed(0)}%`);
+console.log(`Keywords: ${analysis.keywords.join(", ")}`);
+console.log(`Summary: ${analysis.summary}`);
+// → Sentiment: positive
+// → Confidence: 82%
+// → Keywords: incredible, fast shipping, great quality, packaging damaged
+// → Summary: Overwhelmingly positive review with a minor complaint about packaging.
+```
+
+---
+
+## Multimodal Input
+
+Send images alongside text. The agent can analyze, describe, or compare visual content.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { readFile } from "node:fs/promises";
+
+const agent = new Agent({
+  name: "image-analyst",
+  model: openai("gpt-4o"),
+  instructions:
+    "You analyze images. Describe what you see in detail, identify objects, and answer questions about the visual content.",
+});
+
+const imageBuffer = await readFile("./photos/storefront.jpg");
+
+const result = await agent.run([
+  { type: "text", text: "What type of business is this? List all visible signage." },
+  {
+    type: "image",
+    image: imageBuffer.toString("base64"),
+    mimeType: "image/jpeg",
+  },
+]);
+
+console.log(result.text);
+
+// You can also pass image URLs directly
+const urlResult = await agent.run([
+  { type: "text", text: "Compare these two product designs and list the differences." },
+  { type: "image", image: "https://example.com/design-v1.png", mimeType: "image/png" },
+  { type: "image", image: "https://example.com/design-v2.png", mimeType: "image/png" },
+]);
+
+console.log(urlResult.text);
+```
+
+---
+
+## Audio Input
+
+Process audio files for transcription, analysis, or conversational responses.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { readFile } from "node:fs/promises";
+
+const agent = new Agent({
+  name: "audio-analyst",
+  model: openai("gpt-4o-audio-preview"),
+  instructions:
+    "You process audio input. Transcribe, summarize, and answer questions about audio content.",
+});
+
+const audioBuffer = await readFile("./recordings/meeting-2025-01-15.mp3");
+
+const result = await agent.run([
+  { type: "text", text: "Transcribe this meeting recording and list all action items discussed." },
+  {
+    type: "audio",
+    audio: audioBuffer.toString("base64"),
+    mimeType: "audio/mp3",
+  },
+]);
+
+console.log(result.text);
+```
+
+---
+
+## Reasoning / Extended Thinking
+
+Enable reasoning for complex tasks. The model "thinks" step by step before responding, and the thinking trace is available in the output.
+
+```typescript
+import { Agent, openai, anthropic } from "@radaros/core";
+
+// OpenAI o1 reasoning model
+const reasoner = new Agent({
+  name: "math-solver",
+  model: openai("o1"),
+  instructions:
+    "You solve complex math and logic problems. Show your full reasoning.",
+  reasoning: { enabled: true },
+});
+
+const mathResult = await reasoner.run(
+  "A snail climbs 3 feet up a wall during the day but slides back 2 feet at night. The wall is 30 feet tall. On which day does the snail reach the top?"
+);
+
+console.log("Answer:", mathResult.text);
+console.log("Reasoning trace:", mathResult.thinking);
+
+// Claude with extended thinking and configurable budget
+const strategist = new Agent({
+  name: "code-reviewer",
+  model: anthropic("claude-sonnet-4-20250514"),
+  instructions:
+    "You are an expert code reviewer. Analyze code for bugs, security issues, performance problems, and suggest improvements.",
+  reasoning: {
+    enabled: true,
+    budgetTokens: 10_000,
+  },
+});
+
+const review = await strategist.run(`
+  Review this function for issues:
+  
+  function processPayment(amount: string, userId: number) {
+    const total = eval(amount) * 1.08;
+    fetch('/api/charge', {
+      method: 'POST',
+      body: JSON.stringify({ userId, total }),
+    });
+    return { success: true, charged: total };
+  }
+`);
+
+console.log("Review:", review.text);
+console.log("Thinking:", review.thinking);
+```
+
+---
+
+## Hooks and Guardrails
+
+Use lifecycle hooks for observability and guardrails for safety. Guardrails run before/after the LLM call and can reject requests.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import type { InputGuardrail, OutputGuardrail, RunOutput } from "@radaros/core";
+
+const contentModeration: InputGuardrail = {
+  name: "content-moderation",
+  validate: async (input) => {
+    const text = typeof input === "string" ? input : JSON.stringify(input);
+    const blocked = ["hack", "exploit", "bypass security"];
+    const found = blocked.find((term) => text.toLowerCase().includes(term));
+    if (found) {
+      return { pass: false, reason: `Blocked term detected: "${found}"` };
+    }
+    return { pass: true };
+  },
+};
+
+const piiOutputGuard: OutputGuardrail = {
+  name: "pii-filter",
+  validate: async (output: RunOutput) => {
+    const ssnPattern = /\b\d{3}-\d{2}-\d{4}\b/;
+    if (ssnPattern.test(output.text)) {
+      return { pass: false, reason: "Response contains SSN-like pattern" };
+    }
+    return { pass: true };
+  },
+};
+
+const agent = new Agent({
+  name: "safe-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant. Never reveal personal information.",
+  guardrails: {
+    input: [contentModeration],
+    output: [piiOutputGuard],
+  },
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(`[${new Date().toISOString()}] Run started — session: ${ctx.sessionId}`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(
+        `[${new Date().toISOString()}] Run complete — ${output.usage.totalTokens} tokens, ${output.durationMs}ms`
+      );
+    },
+    onToolCall: async (ctx, toolName, args) => {
+      console.log(`[Tool] ${toolName} called with:`, args);
+    },
+    onError: async (ctx, error) => {
+      console.error(`[Error] ${error.message}`);
+    },
+  },
+});
+
+try {
+  const result = await agent.run("How do I hack into a database?");
+} catch (err) {
+  console.log("Blocked:", (err as Error).message);
+  // → Blocked: Input guardrail "content-moderation" failed: Blocked term detected: "hack"
+}
+
+const safeResult = await agent.run("What are best practices for database security?");
+console.log(safeResult.text);
+```
+
+---
+
+## Tool Caching
+
+Avoid redundant API calls by caching tool results with a TTL.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+
+const stockPrice = defineTool({
+  name: "get_stock_price",
+  description: "Get the current stock price for a ticker symbol",
+  parameters: z.object({
+    ticker: z.string().describe("Stock ticker symbol, e.g. AAPL"),
+  }),
+  execute: async ({ ticker }) => {
+    console.log(`📡 Fetching live price for ${ticker}...`);
+    const response = await fetch(
+      `https://api.stockdata.example.com/v1/quote?symbol=${ticker}`,
+      { headers: { Authorization: `Bearer ${process.env.STOCK_API_KEY}` } }
+    );
+    const data = await response.json();
+    return `${ticker}: $${data.price} (${data.change > 0 ? "+" : ""}${data.change}%)`;
+  },
+  cache: {
+    ttl: 60_000, // Cache results for 60 seconds
+  },
+});
+
+const agent = new Agent({
+  name: "stock-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You provide stock market information. Quote prices when asked.",
+  tools: [stockPrice],
+});
+
+// First call — hits the API
+await agent.run("What's Apple's stock price?");
+// Console: 📡 Fetching live price for AAPL...
+
+// Second call within 60s — served from cache, no API call
+await agent.run("Tell me AAPL's price again and compare it to yesterday.");
+// No "Fetching" log — result came from cache
+```
+
+---
+
+## Agent with Approval
+
+Require human approval before executing dangerous tools. The approval callback lets you integrate with Slack, email, or a custom UI.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+import * as readline from "node:readline/promises";
+
+const sendEmail = defineTool({
+  name: "send_email",
+  description: "Send an email to a recipient",
+  parameters: z.object({
+    to: z.string().email(),
+    subject: z.string(),
+    body: z.string(),
+  }),
+  requiresApproval: true,
+  execute: async ({ to, subject, body }) => {
+    // In production, integrate with SendGrid, SES, etc.
+    console.log(`Sending email to ${to}: "${subject}"`);
+    return `Email sent to ${to}`;
+  },
+});
+
+const deleteRecord = defineTool({
+  name: "delete_record",
+  description: "Permanently delete a database record",
+  parameters: z.object({
+    table: z.string(),
+    id: z.string(),
+  }),
+  requiresApproval: (args) => args.table === "users",
+  execute: async ({ table, id }) => {
+    console.log(`Deleting ${table}/${id}`);
+    return `Deleted record ${id} from ${table}`;
+  },
+});
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+const agent = new Agent({
+  name: "admin-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You help with admin tasks like sending emails and managing records.",
+  tools: [sendEmail, deleteRecord],
+  approval: {
+    policy: ["send_email", "delete_record"],
+    onApproval: async (request) => {
+      console.log(`\n⚠️  Approval needed for "${request.toolName}"`);
+      console.log("Arguments:", JSON.stringify(request.args, null, 2));
+      const answer = await rl.question("Approve? (yes/no): ");
+      return {
+        approved: answer.toLowerCase() === "yes",
+        reason: answer.toLowerCase() === "yes" ? "User approved" : "User denied",
+      };
+    },
+    timeout: 120_000,
+    timeoutAction: "deny",
+  },
+});
+
+const result = await agent.run(
+  "Send an email to alice@company.com telling her the Q4 report is ready."
+);
+console.log(result.text);
+rl.close();
+```
+
+---
+
+## Sandboxed Tool Execution
+
+Run untrusted code in an isolated sandbox with configurable timeouts, memory limits, and filesystem restrictions.
+
+```typescript
+import { Agent, defineTool, openai } from "@radaros/core";
+import { z } from "zod";
+
+const codeRunner = defineTool({
+  name: "run_code",
+  description: "Execute a JavaScript code snippet in a sandboxed environment",
+  parameters: z.object({
+    code: z.string().describe("JavaScript code to execute"),
+  }),
+  sandbox: {
+    enabled: true,
+    timeout: 5_000,
+    maxMemoryMB: 128,
+    allowNetwork: false,
+    allowFS: false,
+  },
+  execute: async ({ code }) => {
+    const fn = new Function(code);
+    const result = fn();
+    return String(result);
+  },
+});
+
+const dataTransformer = defineTool({
+  name: "transform_csv",
+  description: "Read and transform a CSV file",
+  parameters: z.object({
+    inputPath: z.string(),
+    transformation: z.string().describe("JavaScript expression applied to each row"),
+  }),
+  sandbox: {
+    enabled: true,
+    timeout: 10_000,
+    maxMemoryMB: 256,
+    allowFS: { readOnly: ["./data/"] },
+    allowNetwork: false,
+  },
+  execute: async ({ inputPath, transformation }) => {
+    const { readFileSync } = await import("node:fs");
+    const csv = readFileSync(inputPath, "utf-8");
+    const rows = csv.split("\n").map((line) => line.split(","));
+    const fn = new Function("row", `return ${transformation}`);
+    const results = rows.slice(1).map(fn);
+    return JSON.stringify(results.slice(0, 20));
+  },
+});
+
+const agent = new Agent({
+  name: "code-sandbox",
+  model: openai("gpt-4o"),
+  instructions:
+    "You can run JavaScript code and transform data files. Code runs in a sandbox with no network or filesystem access by default.",
+  tools: [codeRunner, dataTransformer],
+});
+
+const result = await agent.run(
+  "Calculate the first 20 Fibonacci numbers using code execution."
+);
+console.log(result.text);
+```
+
+---
+
+## Custom Logging
+
+Control log verbosity and hook into the agent's internal logging.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+// Debug logging — shows every tool call, LLM request, and token count
+const verboseAgent = new Agent({
+  name: "verbose-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+  logLevel: "debug",
+});
+
+// Info logging — shows run summaries and high-level events
+const prodAgent = new Agent({
+  name: "prod-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+  logLevel: "info",
+});
+
+// Silent logging with custom hooks for structured telemetry
+const telemetryAgent = new Agent({
+  name: "telemetry-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+  logLevel: "silent",
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(JSON.stringify({
+        event: "run_started",
+        agent: "telemetry-bot",
+        sessionId: ctx.sessionId,
+        timestamp: Date.now(),
+      }));
+    },
+    afterRun: async (ctx, output) => {
+      console.log(JSON.stringify({
+        event: "run_completed",
+        agent: "telemetry-bot",
+        sessionId: ctx.sessionId,
+        tokens: output.usage.totalTokens,
+        durationMs: output.durationMs,
+        toolCalls: output.toolCalls.length,
+        timestamp: Date.now(),
+      }));
+    },
+    onError: async (ctx, error) => {
+      console.error(JSON.stringify({
+        event: "run_error",
+        agent: "telemetry-bot",
+        sessionId: ctx.sessionId,
+        error: error.message,
+        stack: error.stack,
+        timestamp: Date.now(),
+      }));
+    },
+  },
+});
+
+await telemetryAgent.run("Hello!");
+```
+
+---
+
+## Per-Request API Keys
+
+Pass API keys at runtime for multi-tenant apps where each customer has their own key.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "multi-tenant-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a customer support assistant.",
+});
+
+// Each request uses the tenant's own API key
+async function handleRequest(tenantId: string, query: string) {
+  const tenantApiKey = await getTenantApiKey(tenantId);
+
+  const result = await agent.run(query, {
+    apiKey: tenantApiKey,
+    userId: tenantId,
+    metadata: { tenantId, plan: "enterprise" },
+  });
+
+  return result.text;
+}
+
+async function getTenantApiKey(tenantId: string): Promise<string> {
+  // In production, fetch from your secrets manager (Vault, AWS SSM, etc.)
+  const keys: Record<string, string> = {
+    tenant_acme: process.env.ACME_OPENAI_KEY!,
+    tenant_globex: process.env.GLOBEX_OPENAI_KEY!,
+  };
+  return keys[tenantId] ?? process.env.OPENAI_API_KEY!;
+}
+
+// Express route example
+import express from "express";
+const app = express();
+app.use(express.json());
+
+app.post("/api/chat", async (req, res) => {
+  const { tenantId, message } = req.body;
+  const response = await handleRequest(tenantId, message);
+  res.json({ response });
+});
+```
+
+---
+
+## Agent with Handoff
+
+Two agents that can hand off to each other. When the sales agent detects a support question, it transfers the conversation to the support agent, and vice versa.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { InMemoryStorage } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const salesAgent = new Agent({
+  name: "sales-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a sales specialist. Help customers with:
+- Product information and pricing
+- Feature comparisons
+- Purchase decisions and quotes
+
+If the customer has a technical issue, billing dispute, or needs troubleshooting, hand off to the support agent.`,
+  memory: { storage },
+  register: false,
+});
+
+const supportAgent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a technical support specialist. Help customers with:
+- Troubleshooting and bug reports
+- Account issues and billing disputes
+- Feature requests and feedback
+
+If the customer wants to buy something new or asks about pricing, hand off to the sales agent.`,
+  memory: { storage },
+  register: false,
+  handoff: {
+    targets: [
+      {
+        agent: salesAgent,
+        description: "Transfer to sales for purchasing, pricing, or product questions",
+        onHandoff: async (ctx) => {
+          console.log(`[Handoff] Support → Sales (session: ${ctx.sessionId})`);
+        },
+      },
+    ],
+    carryMessages: true,
+    maxHandoffs: 3,
+  },
+});
+
+// Wire up the sales agent's handoff targets (must be done after both are created)
+salesAgent.setTools([]); // clear and rebuild with handoff
+const salesWithHandoff = new Agent({
+  name: "sales-agent",
+  model: openai("gpt-4o"),
+  instructions: salesAgent.instructions as string,
+  memory: { storage },
+  handoff: {
+    targets: [
+      {
+        agent: supportAgent,
+        description: "Transfer to support for technical issues, bugs, or billing disputes",
+        onHandoff: async (ctx) => {
+          console.log(`[Handoff] Sales → Support (session: ${ctx.sessionId})`);
+        },
+      },
+    ],
+    carryMessages: true,
+    maxHandoffs: 3,
+  },
+});
+
+// Start with the sales agent
+let result = await salesWithHandoff.run(
+  "Hi, I bought the Pro plan last week but I'm being charged for Enterprise. Can you help?",
+  { sessionId: "session-123" }
+);
+
+console.log(`Final agent: ${result.text}`);
+// The sales agent detects a billing dispute and hands off to support.
+// The support agent resolves the issue using the carried conversation history.
+```

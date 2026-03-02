@@ -5,15 +5,17 @@ description: "Per-roundtrip budget enforcement to prevent runaway costs"
 
 # Cost Budget Auto-Stop
 
-The `CostTracker` now checks budgets after **every tool roundtrip**, not just before the loop starts. This prevents a multi-roundtrip agent from blowing through its budget.
+The `CostTracker` checks budgets after **every tool roundtrip**, not just before the loop starts. This prevents a multi-roundtrip agent from blowing through its budget during tool-calling loops.
 
 ## How It Works
 
 When a `costTracker` is configured on an agent, the `onRoundtripComplete` loop hook automatically:
 
-1. Tracks incremental token usage after each roundtrip
+1. Calls `checkInProgressBudget()` with cumulative token usage (without persisting an entry — no double-counting)
 2. Checks if any budget limit is exceeded
 3. If exceeded, gracefully stops the LLM loop and returns the last assistant message
+
+The actual cost entry is persisted only **once** at the end of `agent.run()`, ensuring accurate totals.
 
 ## Configuration
 
@@ -35,16 +37,19 @@ const agent = new Agent({
 });
 ```
 
-## New CostTracker Methods
+## CostTracker Methods
 
 ```typescript
-// Track mid-loop usage
-tracker.trackIncremental({ runId, agentName, modelId, usage });
+// Persist a cost entry (called once at end of run)
+tracker.track({ runId, agentName, modelId, usage, sessionId, userId });
 
-// Check without throwing
-const exceeded = tracker.isBudgetExceeded(runId, sessionId, userId);
+// Mid-run budget check without persisting (avoids double-counting)
+const exceeded = tracker.checkInProgressBudget(modelId, cumulativeUsage, runId);
 
-// See remaining budget
+// Check if budget is exceeded for a completed run
+const over = tracker.isBudgetExceeded(runId, sessionId, userId);
+
+// See remaining budget headroom
 const { costRemaining, tokensRemaining } = tracker.estimateRemaining(runId);
 ```
 
@@ -53,4 +58,13 @@ const { costRemaining, tokensRemaining } = tracker.estimateRemaining(runId);
 | Scenario | Before | After |
 |----------|--------|-------|
 | 10-roundtrip loop, budget hit at roundtrip 3 | Budget only checked before loop | Loop stops at roundtrip 3 |
-| Cost tracking | Only after full loop completes | Tracked incrementally each roundtrip |
+| Cost tracking | Only after full loop completes | Budget checked each roundtrip, entry persisted once at end |
+| Multi-roundtrip tool calls | Could double-count intermediate roundtrips | `checkInProgressBudget` checks without persisting |
+
+## Works Across All Agent Types
+
+Cost auto-stop works with:
+
+- **Agent** — Text agents with tool calling
+- **VoiceAgent** — Tracks realtime API token usage
+- **BrowserAgent** — Tracks vision model tokens across browser steps

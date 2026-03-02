@@ -127,6 +127,10 @@ const agent = new VoiceAgent(config: VoiceAgentConfig);
   Server-side voice activity detection config. Set to `null` to disable.
 </ParamField>
 
+<ParamField path="costTracker" type="CostTracker">
+  Shared cost tracker for monitoring token usage and enforcing budgets across voice sessions. Tracks audio input/output tokens automatically from the Realtime API.
+</ParamField>
+
 <ParamField path="logLevel" type="string" default="silent">
   Logging level: `"debug"`, `"info"`, `"warn"`, `"error"`, `"silent"`.
 </ParamField>
@@ -347,6 +351,36 @@ The gateway is a **thin relay** — it forwards Socket.IO events to the `VoiceAg
 | `voice.interrupted` | — | Response interrupted |
 | `voice.error` | `{ error: string }` | Error |
 | `voice.stopped` | — | Session ended |
+
+---
+
+## Cost Tracking
+
+Voice agents support `CostTracker` for monitoring realtime API token usage:
+
+```typescript
+import { VoiceAgent, openaiRealtime, CostTracker } from "@radaros/core";
+
+const tracker = new CostTracker({
+  budget: { maxCostPerSession: 5.0 },
+});
+
+const agent = new VoiceAgent({
+  name: "assistant",
+  provider: openaiRealtime("gpt-4o-realtime-preview"),
+  costTracker: tracker,
+});
+
+const session = await agent.connect({ userId: "akash" });
+
+// After the session ends:
+const summary = tracker.getSummary();
+console.log(summary.byAgent["assistant"].cost);
+console.log(summary.byAgent["assistant"].breakdown.audioInput);
+console.log(summary.byAgent["assistant"].breakdown.audioOutput);
+```
+
+Each realtime API `usage` event is automatically tracked — including audio input/output tokens when available. The same tracker can be shared with text and browser agents for unified cost monitoring.
 
 ---
 

@@ -1,0 +1,733 @@
+---
+title: "Memory & Sessions Examples"
+description: "Examples for sessions, memory, and user personalization"
+---
+
+## Basic Sessions
+
+Multi-turn conversations use `sessionId` to persist message history across `.run()` calls. The agent remembers prior turns automatically.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  instructions:
+    "You are a customer support agent for an e-commerce platform. Be helpful and remember previous context.",
+  memory: { storage },
+});
+
+const sessionId = "session-customer-42";
+
+const r1 = await agent.run("Hi, I ordered a laptop last week. Order #ORD-7891.", {
+  sessionId,
+});
+console.log("Agent:", r1.text);
+// → "I'd be happy to help with order #ORD-7891. What seems to be the issue?"
+
+const r2 = await agent.run("The screen has a dead pixel. I'd like a replacement.", {
+  sessionId,
+});
+console.log("Agent:", r2.text);
+// → The agent remembers the order number and product without being told again.
+
+const r3 = await agent.run("Actually, can I just get a refund instead?", {
+  sessionId,
+});
+console.log("Agent:", r3.text);
+// → The agent understands "instead" refers to the replacement it just discussed.
+
+console.log("Session messages:", r3.sessionMessages?.length);
+```
+
+---
+
+## Session Manager
+
+Use `SessionManager` to create, list, retrieve, and delete sessions programmatically — useful for building chat UIs or multi-user backends.
+
+```typescript
+import { Agent, SessionManager, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+const sessions = new SessionManager(storage);
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: { storage },
+});
+
+const session = await sessions.create({
+  userId: "user-42",
+  agentName: "assistant",
+  metadata: { channel: "web", topic: "onboarding" },
+});
+
+console.log("Created session:", session.id);
+
+await agent.run("How do I set up my account?", { sessionId: session.id });
+await agent.run("What about two-factor authentication?", { sessionId: session.id });
+
+const allSessions = await sessions.list({ userId: "user-42" });
+console.log(`User has ${allSessions.length} sessions`);
+
+for (const s of allSessions) {
+  console.log(`  ${s.id} — ${s.metadata.topic} — ${s.messageCount} messages`);
+}
+
+const history = await sessions.getHistory(session.id);
+for (const msg of history) {
+  console.log(`  [${msg.role}] ${msg.content.slice(0, 80)}`);
+}
+
+const session2 = await sessions.create({
+  userId: "user-42",
+  agentName: "assistant",
+  metadata: { channel: "slack", topic: "billing" },
+});
+await agent.run("I need to update my payment method.", { sessionId: session2.id });
+
+const billingSession = await sessions.find({
+  userId: "user-42",
+  metadata: { topic: "billing" },
+});
+console.log("Found billing session:", billingSession?.id);
+
+await sessions.delete(session.id);
+console.log("Deleted onboarding session");
+```
+
+---
+
+## Memory with Summarization
+
+When conversations grow long, the memory system automatically summarizes overflow messages so the agent retains context without exceeding the context window.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "project-manager",
+  model: openai("gpt-4o"),
+  instructions:
+    "You are a project management assistant. Track tasks, deadlines, and blockers discussed in the conversation.",
+  memory: {
+    storage,
+    maxMessages: 10,
+    summaries: {
+      maxCount: 5,
+      maxTokens: 2000,
+    },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const sessionId = "sprint-planning-q1";
+
+const updates = [
+  "We need to ship the auth rewrite by March 15. Assign it to Priya.",
+  "The database migration is blocked on DevOps approval. ETA unknown.",
+  "Frontend team finished the dashboard redesign ahead of schedule.",
+  "QA found 3 critical bugs in the payment flow. Needs hotfix by Friday.",
+  "Priya says auth rewrite is 60% done. Needs help with OAuth integration.",
+  "DevOps approved the migration. Scheduled for next Tuesday.",
+  "New requirement from product: add SSO support to the auth rewrite.",
+  "Payment hotfix deployed. QA verified — all 3 bugs resolved.",
+  "Sprint velocity is 42 points. We're on track for the release.",
+  "Stakeholder review moved to Thursday. Prepare the demo.",
+  "Priya finished OAuth. Auth rewrite is now 85% complete.",
+  "Database migration completed successfully. No data loss.",
+];
+
+for (const update of updates) {
+  const result = await agent.run(update, { sessionId });
+  console.log(`Agent: ${result.text.slice(0, 100)}...`);
+}
+
+// After 12 messages with maxMessages=10, older messages are summarized.
+const finalResult = await agent.run(
+  "Give me a full status update on everything we've discussed.",
+  { sessionId }
+);
+
+console.log("\n--- Full Status ---");
+console.log(finalResult.text);
+// The agent produces a comprehensive summary drawing from both
+// the active message history AND the summarized older context.
+```
+
+---
+
+## User Memory
+
+Enable `userFacts` to automatically extract and remember facts about users across sessions. The agent personalizes responses based on accumulated knowledge.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "personal-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You are a personal assistant. Use what you know about the user 
+to give personalized, proactive suggestions. Reference their preferences naturally.`,
+  memory: {
+    storage,
+    userFacts: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "user-akash";
+
+// Session 1: The user mentions preferences casually
+await agent.run("I'm based in Mumbai and I prefer dark mode in all my apps.", {
+  sessionId: "session-onboarding",
+  userId,
+});
+
+// Session 2: Different session, different topic — but facts carry over
+const r2 = await agent.run("Can you suggest a good time for a meeting with our NYC team?", {
+  sessionId: "session-scheduling",
+  userId,
+});
+console.log("Agent:", r2.text);
+// → Suggests times accounting for IST (Mumbai) ↔ EST (NYC) conversion
+
+// Session 3: The agent uses accumulated facts
+await agent.run("I'm a vegetarian and I love Italian food.", {
+  sessionId: "session-preferences",
+  userId,
+});
+
+const r3 = await agent.run("I'm traveling to London next week. Any restaurant tips?", {
+  sessionId: "session-travel",
+  userId,
+});
+console.log("Agent:", r3.text);
+// → Recommends vegetarian Italian restaurants in London
+
+// Inspect what facts have been extracted
+const mm = agent.memory!;
+const facts = await mm.getUserFacts()!.getFacts(userId);
+console.log("\nExtracted user facts:");
+for (const fact of facts) {
+  console.log(`  - ${fact.content} (extracted: ${fact.createdAt})`);
+}
+// → "Based in Mumbai"
+// → "Prefers dark mode"
+// → "Vegetarian"
+// → "Loves Italian food"
+```
+
+---
+
+## Entity Memory
+
+Track people, companies, products, and other entities mentioned in conversations. Entities are automatically extracted and searchable across sessions.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "crm-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You are a CRM assistant for a sales team. Track all companies, 
+contacts, and deals mentioned in conversations. Provide context from previous 
+interactions when relevant.`,
+  memory: {
+    storage,
+    entities: { namespace: "global" },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "sales-rep-1";
+
+// Call 1: Discovery call notes
+await agent.run(
+  `Just finished a call with Sarah Chen, VP of Engineering at Acme Corp. 
+   They have 200 developers and are evaluating our platform. 
+   Budget is $50k/year. Decision by end of Q2.`,
+  { sessionId: "call-acme-1", userId }
+);
+
+// Call 2: Different prospect
+await agent.run(
+  `Met with Globex Industries. Their CTO, Marcus Webb, is interested in 
+   our enterprise plan. They're currently using CompetitorX and unhappy with 
+   the performance. 500-person engineering org.`,
+  { sessionId: "call-globex-1", userId }
+);
+
+// Call 3: Follow-up — the agent remembers entities from prior calls
+const followUp = await agent.run(
+  "I have a follow-up with Acme Corp tomorrow. What do I need to know?",
+  { sessionId: "prep-acme-2", userId }
+);
+console.log("Agent:", followUp.text);
+// → Recalls Sarah Chen, 200 devs, $50k budget, Q2 deadline
+
+// Access entity memory directly
+const entityMemory = agent.memory!.getEntityMemory()!;
+const entities = await entityMemory.listEntities();
+
+console.log("\nTracked entities:");
+for (const entity of entities) {
+  console.log(`  [${entity.type}] ${entity.name}`);
+  for (const [key, value] of Object.entries(entity.attributes)) {
+    console.log(`    ${key}: ${value}`);
+  }
+}
+// → [company] Acme Corp — engineers: 200, budget: $50k/year
+// → [person] Sarah Chen — role: VP of Engineering, company: Acme Corp
+// → [company] Globex Industries — engineers: 500, current_tool: CompetitorX
+// → [person] Marcus Webb — role: CTO, company: Globex Industries
+
+// Search entities by keyword
+const results = await entityMemory.searchEntities("engineering leadership");
+console.log("\nSearch results:", results.map((e) => e.name));
+// → ["Sarah Chen", "Marcus Webb"]
+```
+
+---
+
+## Decision Log
+
+Log and retrieve past decisions with reasoning and outcomes. Builds an audit trail the agent can reference for consistency.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "policy-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a customer support agent with authority to issue refunds 
+up to $100. For larger amounts, escalate. Always log your decisions with reasoning. 
+Check past decisions for consistency.`,
+  memory: {
+    storage,
+    decisions: { maxContextDecisions: 5 },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "support-agent-1";
+
+// Case 1: Small refund — agent decides autonomously
+await agent.run(
+  "Customer Jane Doe (order #1234) received a damaged item worth $45. Requesting full refund.",
+  { sessionId: "ticket-1234", userId }
+);
+// Agent logs: decision="Approved $45 refund", reasoning="Damaged item, within $100 authority"
+
+// Case 2: Large refund — agent escalates
+await agent.run(
+  "Customer Bob Smith (order #5678) wants a refund for $250 subscription. Says service was down for 3 days.",
+  { sessionId: "ticket-5678", userId }
+);
+// Agent logs: decision="Escalated to manager", reasoning="$250 exceeds $100 authority limit"
+
+// Case 3: Similar to Case 1 — agent references past decisions for consistency
+const r3 = await agent.run(
+  "Customer Alice Wang (order #9012) received wrong color item worth $62. Wants refund.",
+  { sessionId: "ticket-9012", userId }
+);
+console.log("Agent:", r3.text);
+// → References the Jane Doe precedent and applies consistent policy
+
+// Access decision log directly
+const decisionStore = agent.memory!.getDecisions()!;
+const decisions = await decisionStore.listDecisions({ userId });
+
+console.log("\nDecision log:");
+for (const d of decisions) {
+  console.log(`  [${d.id}] ${d.decision}`);
+  console.log(`    Reasoning: ${d.reasoning}`);
+  console.log(`    Outcome: ${d.outcome ?? "pending"}`);
+}
+
+// Record an outcome for a past decision
+if (decisions.length > 0) {
+  await decisionStore.recordOutcome({
+    decisionId: decisions[0].id,
+    outcome: "success",
+    notes: "Customer confirmed refund received. Issue resolved.",
+  });
+}
+
+// Search past decisions for policy reference
+const refundDecisions = await decisionStore.searchDecisions("refund damaged item");
+console.log("\nPast refund decisions:", refundDecisions.length);
+```
+
+---
+
+## User Profile
+
+Build structured user profiles automatically from conversation data. The agent extracts name, role, company, timezone, and custom fields.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "onboarding-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are an onboarding assistant. Help new users set up their account. 
+Naturally extract and confirm their details during the conversation.`,
+  memory: {
+    storage,
+    userProfile: {
+      customFields: ["department", "team_size", "subscription_tier"],
+    },
+    userFacts: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "user-new-hire";
+
+// Conversation where profile data is mentioned naturally
+await agent.run(
+  "Hi! I'm Priya Sharma, I just joined as a Senior Engineer on the platform team.",
+  { sessionId: "onboarding-1", userId }
+);
+
+await agent.run(
+  "I'm based in Bangalore. Our team has about 12 people. We're on the Enterprise plan.",
+  { sessionId: "onboarding-1", userId }
+);
+
+await agent.run(
+  "My working hours are 10 AM to 7 PM IST. I prefer Slack over email for notifications.",
+  { sessionId: "onboarding-1", userId }
+);
+
+// In a later session, the agent uses the profile for personalization
+const r = await agent.run("Set up my notification preferences.", {
+  sessionId: "onboarding-2",
+  userId,
+});
+console.log("Agent:", r.text);
+// → Suggests Slack notifications during 10 AM–7 PM IST
+
+// Inspect the extracted profile
+const profileStore = agent.memory!.getUserProfile()!;
+const profile = await profileStore.getProfile(userId);
+
+console.log("\nUser profile:");
+console.log(`  Name: ${profile.name}`);
+console.log(`  Role: ${profile.role}`);
+console.log(`  Company: ${profile.company}`);
+console.log(`  Timezone: ${profile.timezone}`);
+console.log(`  Department: ${profile.customFields?.department}`);
+console.log(`  Team Size: ${profile.customFields?.team_size}`);
+console.log(`  Subscription: ${profile.customFields?.subscription_tier}`);
+// → Name: Priya Sharma
+// → Role: Senior Engineer
+// → Timezone: Asia/Kolkata
+// → Department: platform
+// → Team Size: 12
+// → Subscription: Enterprise
+
+// Update profile manually if needed
+await profileStore.updateProfile(userId, {
+  customFields: { subscription_tier: "Enterprise Plus" },
+});
+```
+
+---
+
+## Memory Curator
+
+Maintain healthy memory stores by pruning stale data, deduplicating facts, and clearing user data on request.
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage({ uri: process.env.MONGODB_URI! });
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage,
+    summaries: true,
+    userFacts: true,
+    entities: true,
+    decisions: true,
+  },
+});
+
+const curator = agent.memory!.curator;
+
+// --- Prune entries older than 90 days ---
+const pruned = await curator.prune({
+  maxAgeDays: 90,
+  agentName: "assistant",
+});
+console.log(`Pruned ${pruned} old entries`);
+
+// --- Deduplicate facts for a specific user ---
+const deduped = await curator.deduplicate({ userId: "user-42" });
+console.log(`Removed ${deduped} duplicate facts`);
+
+// --- Clear all memory for a user (e.g., GDPR deletion request) ---
+await curator.clearAll({
+  userId: "user-42",
+  agentName: "assistant",
+});
+console.log("Cleared all memory for user-42");
+
+// --- Batch maintenance across all users ---
+async function runWeeklyMaintenance() {
+  const activeUsers = await storage.listUsers("assistant");
+  let totalPruned = 0;
+  let totalDeduped = 0;
+
+  for (const userId of activeUsers) {
+    totalPruned += await curator.prune({ maxAgeDays: 60, userId });
+    totalDeduped += await curator.deduplicate({ userId });
+  }
+
+  console.log(
+    `Weekly maintenance: ${totalPruned} pruned, ${totalDeduped} deduped across ${activeUsers.length} users`
+  );
+}
+
+// --- Selective clearing ---
+
+// Clear only entity memory for a user
+await curator.clearAll({ userId: "user-42", stores: ["entities"] });
+
+// Clear only decisions for an agent
+await curator.clearAll({ agentName: "assistant", stores: ["decisions"] });
+
+// Nuclear: clear everything
+await curator.clearAll({});
+
+// --- Schedule with cron ---
+import { CronJob } from "cron";
+
+new CronJob("0 3 * * 0", runWeeklyMaintenance).start();
+console.log("Weekly maintenance scheduled for Sunday 3 AM");
+```
+
+---
+
+## Cross-Session Intelligence
+
+Combine session history, user facts, entity memory, and decision logs to give the agent full cross-session awareness. This is the "everything enabled" configuration.
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage({ uri: process.env.MONGODB_URI! });
+
+const agent = new Agent({
+  name: "executive-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You are an executive assistant for a startup CEO. You have access to 
+all past conversations, user preferences, entity knowledge, and decision history. 
+Use this context to be proactive and anticipate needs.`,
+  memory: {
+    storage,
+    maxMessages: 30,
+    summaries: { maxCount: 10, maxTokens: 3000 },
+    userFacts: true,
+    userProfile: {
+      customFields: ["company", "industry", "funding_stage"],
+    },
+    entities: { namespace: "global" },
+    decisions: { maxContextDecisions: 10 },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "ceo-sarah";
+
+// --- Week 1: Fundraising discussions ---
+await agent.run(
+  `We're raising Series B. Met with Sequoia today — they're interested but want 
+   to see Q4 numbers. Our revenue is $4.2M ARR, growing 15% MoM.`,
+  { sessionId: "fundraise-week1", userId }
+);
+
+await agent.run(
+  "Also talked to Andreessen Horowitz. They want a follow-up in 2 weeks. Their partner is Ben.",
+  { sessionId: "fundraise-week1", userId }
+);
+
+// --- Week 2: Product planning ---
+await agent.run(
+  `The engineering team needs 3 more hires to hit our Q1 roadmap. 
+   We're launching the enterprise tier in February.`,
+  { sessionId: "planning-week2", userId }
+);
+
+// --- Week 3: Follow-up prep — agent combines everything ---
+const prep = await agent.run(
+  "I have the Andreessen Horowitz follow-up tomorrow. Help me prepare.",
+  { sessionId: "prep-week3", userId }
+);
+console.log("Agent:", prep.text);
+// → Recalls: Ben is the partner, they wanted a follow-up in 2 weeks,
+//   references $4.2M ARR and 15% MoM growth, mentions the enterprise
+//   tier launch as a talking point, and notes that Sequoia is also in play.
+
+// --- Inspect what context the agent sees ---
+const context = await agent.memory!.buildContext({
+  sessionId: "prep-week3",
+  userId,
+  agentName: "executive-assistant",
+});
+console.log("\n--- Memory Context Injected ---");
+console.log(context);
+// Shows: session summary, user profile, entity details for Sequoia/a16z/Ben,
+// any decisions logged, and extracted user facts.
+
+// --- The agent also remembers across completely unrelated sessions ---
+const r = await agent.run(
+  "Schedule a board meeting for next month.",
+  { sessionId: "admin-tasks", userId }
+);
+console.log("\nAgent:", r.text);
+// → Knows the CEO's timezone, the fundraising context, and suggests
+//   including a Series B update on the agenda.
+```
+
+---
+
+## Memory with Storage
+
+Persist memory to durable storage backends. Use `InMemoryStorage` for development, `SqliteStorage` for single-server apps, and `MongoDBStorage` or `PostgresStorage` for production.
+
+```typescript
+import {
+  Agent,
+  InMemoryStorage,
+  SqliteStorage,
+  MongoDBStorage,
+  PostgresStorage,
+  openai,
+} from "@radaros/core";
+
+// --- Development: In-memory (no persistence, wiped on restart) ---
+const devAgent = new Agent({
+  name: "dev-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage: new InMemoryStorage(),
+    userFacts: true,
+  },
+});
+
+// --- Single-server / CLI tools: SQLite ---
+const sqliteAgent = new Agent({
+  name: "local-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage: new SqliteStorage("./data/memory.db"),
+    summaries: true,
+    userFacts: true,
+    entities: true,
+  },
+});
+
+// --- Production: MongoDB ---
+const mongoAgent = new Agent({
+  name: "prod-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage: new MongoDBStorage({
+      uri: process.env.MONGODB_URI!,
+      database: "radaros",
+    }),
+    summaries: true,
+    userFacts: true,
+    userProfile: true,
+    entities: true,
+    decisions: true,
+  },
+});
+
+// --- Production: PostgreSQL ---
+const pgAgent = new Agent({
+  name: "pg-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage: new PostgresStorage({
+      connectionString: process.env.DATABASE_URL!,
+      schema: "radaros",
+    }),
+    summaries: true,
+    userFacts: true,
+    userProfile: true,
+    entities: true,
+    decisions: true,
+  },
+});
+
+// --- All storage backends share the same API ---
+async function demonstrateStorage(agent: Agent, label: string) {
+  const sessionId = `demo-${Date.now()}`;
+  const userId = "user-demo";
+
+  await agent.run("I'm a frontend developer who loves React and TypeScript.", {
+    sessionId,
+    userId,
+  });
+
+  await agent.run("My company is building a SaaS platform for logistics.", {
+    sessionId,
+    userId,
+  });
+
+  const result = await agent.run(
+    "Based on what you know about me, suggest a side project.",
+    { sessionId, userId }
+  );
+
+  console.log(`[${label}] Agent: ${result.text.slice(0, 120)}...`);
+}
+
+await demonstrateStorage(devAgent, "InMemory");
+await demonstrateStorage(sqliteAgent, "SQLite");
+// await demonstrateStorage(mongoAgent, "MongoDB");   // needs running MongoDB
+// await demonstrateStorage(pgAgent, "PostgreSQL");    // needs running Postgres
+```
+
+Storage backends support the same interface — swap one line to migrate:
+
+```typescript
+// Switch from SQLite to Postgres by changing one line
+const storage = process.env.NODE_ENV === "production"
+  ? new PostgresStorage({ connectionString: process.env.DATABASE_URL! })
+  : new SqliteStorage("./dev.db");
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: { storage, summaries: true, userFacts: true },
+});
+```
