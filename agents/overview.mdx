@@ -177,10 +177,51 @@ The object returned by `run()`:
 |----------|------|-------------|
 | `text` | `string` | The assistant's text response. |
 | `toolCalls` | `ToolCallResult[]` | Results from any tool calls made during the run. |
-| `usage` | `TokenUsage` | `{ promptTokens, completionTokens, totalTokens, reasoningTokens? }`. |
+| `usage` | `TokenUsage` | Token usage breakdown (see below). |
 | `structured` | `unknown` | Parsed structured output when `structuredOutput` schema is set. |
 | `thinking` | `string` | Model's internal reasoning content (when reasoning is enabled). |
 | `durationMs` | `number` | Wall-clock duration of the run in milliseconds. |
+| `timeToFirstTokenMs` | `number` | Time from request start to the first token received from the model. |
+| `runId` | `string` | Unique identifier for this run (UUID). |
+| `agentName` | `string` | Name of the agent that produced this output. |
+| `sessionId` | `string` | Session ID used for this run. |
+| `userId` | `string` | User ID used for this run. |
+| `model` | `string` | Model identifier (e.g., `"gpt-4o"`, `"gemini-2.5-flash"`). |
+| `modelProvider` | `string` | Provider identifier (e.g., `"openai"`, `"vertex"`, `"anthropic"`). |
+| `status` | `string` | Run status: `"completed"` or `"error"`. |
+| `createdAt` | `number` | Unix timestamp (ms) when the run started. |
+| `responseId` | `string` | Provider-specific response ID (e.g., OpenAI's `chatcmpl-*`). |
+| `messages` | `ChatMessage[]` | Full message history sent to the model (system + history + user). |
+| `metrics` | `RunMetrics` | Aggregated metrics for the run (see below). |
+
+### TokenUsage
+
+```typescript
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
+  cachedTokens?: number;
+  audioInputTokens?: number;
+  audioOutputTokens?: number;
+  providerMetrics?: Record<string, unknown>;
+}
+```
+
+The `providerMetrics` field contains the **raw, unmodified usage object** returned by the underlying provider API. This gives you full transparency into provider-specific metrics (e.g., `thoughtsTokenCount` from Gemini, `prompt_tokens_details` from OpenAI, `cache_read_input_tokens` from Anthropic).
+
+### RunMetrics
+
+```typescript
+interface RunMetrics {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  timeToFirstTokenMs?: number;
+  durationMs?: number;
+}
+```
 
 ---
 

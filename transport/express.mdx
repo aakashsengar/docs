@@ -189,7 +189,35 @@ curl -X POST http://localhost:3000/api/agents/assistant/run \
   "usage": {
     "promptTokens": 25,
     "completionTokens": 150,
-    "totalTokens": 175
+    "totalTokens": 175,
+    "providerMetrics": {
+      "prompt_tokens": 25,
+      "completion_tokens": 150,
+      "total_tokens": 175,
+      "prompt_tokens_details": { "cached_tokens": 0 },
+      "completion_tokens_details": { "reasoning_tokens": 0 }
+    }
+  },
+  "timeToFirstTokenMs": 320,
+  "runId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "agentName": "assistant",
+  "sessionId": "",
+  "userId": "",
+  "model": "gpt-4o",
+  "modelProvider": "openai",
+  "status": "completed",
+  "createdAt": 1772453994305,
+  "responseId": "chatcmpl-abc123",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "What is TypeScript?" }
+  ],
+  "metrics": {
+    "inputTokens": 25,
+    "outputTokens": 150,
+    "totalTokens": 175,
+    "timeToFirstTokenMs": 320,
+    "durationMs": 1234
   },
   "structured": null,
   "durationMs": 1234

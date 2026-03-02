@@ -47,6 +47,74 @@ The `CostTracker` captures all token types returned by the API:
 
 All token types are tracked per-message, per-run, and per-session. The `getSummary()` method aggregates totals across all tracked dimensions.
 
+## Raw Provider Metrics
+
+Every `RunOutput.usage` object includes a `providerMetrics` field containing the **raw, unmodified usage data** returned by the provider API. This gives full transparency without any normalization loss:
+
+```typescript
+const result = await agent.run("Hello!");
+
+// Normalized RadarOS fields
+console.log(result.usage.promptTokens);       // 16
+console.log(result.usage.completionTokens);   // 10
+
+// Raw provider-specific data (varies by provider)
+console.log(result.usage.providerMetrics);
+```
+
+Example `providerMetrics` by provider:
+
+<CodeGroup>
+
+```json OpenAI
+{
+  "prompt_tokens": 16,
+  "completion_tokens": 10,
+  "total_tokens": 26,
+  "prompt_tokens_details": { "cached_tokens": 0 },
+  "completion_tokens_details": { "reasoning_tokens": 0 }
+}
+```
+
+```json Google / Vertex AI
+{
+  "promptTokenCount": 16,
+  "candidatesTokenCount": 10,
+  "totalTokenCount": 26,
+  "thoughtsTokenCount": 0,
+  "promptTokensDetails": [{ "modality": "TEXT", "tokenCount": 16 }],
+  "candidatesTokensDetails": [{ "modality": "TEXT", "tokenCount": 10 }]
+}
+```
+
+```json Anthropic
+{
+  "input_tokens": 16,
+  "output_tokens": 10,
+  "cache_read_input_tokens": 0,
+  "cache_creation_input_tokens": 0
+}
+```
+
+```json AWS Bedrock
+{
+  "inputTokens": 16,
+  "outputTokens": 10,
+  "totalTokens": 26
+}
+```
+
+```json Ollama
+{
+  "prompt_eval_count": 16,
+  "eval_count": 10,
+  "prompt_eval_duration": 500000000,
+  "eval_duration": 800000000
+}
+```
+
+</CodeGroup>
+
 ## Cost Breakdown
 
 Each cost entry includes a 6-category breakdown:

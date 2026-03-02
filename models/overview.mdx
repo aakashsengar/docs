@@ -226,6 +226,36 @@ For dual-mode providers, install the native SDK to access provider-specific feat
 
 ---
 
+## TokenUsage
+
+Every model response includes a `TokenUsage` object with normalized counts and the raw provider metrics:
+
+```typescript
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
+  cachedTokens?: number;
+  audioInputTokens?: number;
+  audioOutputTokens?: number;
+  providerMetrics?: Record<string, unknown>;
+}
+```
+
+The `providerMetrics` field contains the **raw usage object** from the underlying API (e.g., `usageMetadata` from Gemini, `usage` from OpenAI, `usage` from Anthropic). This is useful for debugging, auditing, or accessing provider-specific fields that aren't captured in the normalized interface (e.g., `thoughtsTokenCount`, `prompt_tokens_details`, `cache_read_input_tokens`).
+
+```typescript
+const result = await agent.run("Hello!");
+
+console.log(result.usage.promptTokens);       // 16 (normalized)
+console.log(result.usage.providerMetrics);     // Raw API response
+// OpenAI: { prompt_tokens: 16, completion_tokens: 10, ... }
+// Vertex: { promptTokenCount: 16, candidatesTokenCount: 10, thoughtsTokenCount: 0, ... }
+```
+
+---
+
 ## Next Steps
 
 <CardGroup cols={2}>

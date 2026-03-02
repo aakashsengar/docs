@@ -79,6 +79,17 @@ The `instrument()` function attaches three listeners to the agent's `EventBus`:
 
 Since core already emits rich events for every operation, observability works automatically with all features: handoffs, teams, cost tracking, caching, tools, etc.
 
+### Provider Metrics in Traces & Logs
+
+When a run completes, the `run.complete` event includes `providerMetrics` — the raw usage object from the underlying model API. This is automatically captured by:
+
+- **Tracer** — stored as a span attribute (`providerMetrics`) on the root run span
+- **StructuredLogger** — included in the JSON log payload for `run.complete` events
+- **MetricsExporter** — stored in the `RunRecord` for export and dashboard consumption
+- **LangfuseExporter** — forwarded as generation metadata in Langfuse
+
+This means you get full provider-level transparency (e.g., `thoughtsTokenCount`, `prompt_tokens_details`, `cache_read_input_tokens`) in your observability pipeline without any extra configuration.
+
 ## Trace Tree
 
 Every `agent.run()` produces a trace like:

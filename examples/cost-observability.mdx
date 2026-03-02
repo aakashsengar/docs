@@ -227,7 +227,7 @@ console.log(`  Total:        $${b.total.toFixed(6)}`);
 
 ## Token Usage Details
 
-Access the full token usage breakdown including reasoning and audio tokens.
+Access the full token usage breakdown including reasoning and audio tokens, plus the raw provider metrics.
 
 ```typescript
 import { Agent, CostTracker, openai } from "@radaros/core";
@@ -243,7 +243,7 @@ const agent = new Agent({
 
 const result = await agent.run("Summarize the history of the internet.");
 
-// From the RunOutput
+// From the RunOutput — normalized token counts
 console.log("Run usage:", {
   promptTokens: result.usage.promptTokens,
   completionTokens: result.usage.completionTokens,
@@ -253,6 +253,17 @@ console.log("Run usage:", {
   audioInputTokens: result.usage.audioInputTokens,
   audioOutputTokens: result.usage.audioOutputTokens,
 });
+
+// Raw provider metrics — unmodified API response
+console.log("Provider metrics:", result.usage.providerMetrics);
+// OpenAI example:
+// {
+//   prompt_tokens: 25,
+//   completion_tokens: 150,
+//   total_tokens: 175,
+//   prompt_tokens_details: { cached_tokens: 0 },
+//   completion_tokens_details: { reasoning_tokens: 0 }
+// }
 
 // From the CostTracker summary
 const summary = costTracker.getSummary();
@@ -264,6 +275,53 @@ console.log("Aggregated tokens:", {
   audioIn: summary.totalTokens.audioInputTokens,
   audioOut: summary.totalTokens.audioOutputTokens,
 });
+```
+
+## Raw Provider Metrics
+
+Access the full, unmodified usage data returned by the underlying model API. This is useful for debugging token count discrepancies or accessing provider-specific fields.
+
+```typescript
+import { Agent, openai, vertex, anthropic } from "@radaros/core";
+
+// OpenAI — includes prompt_tokens_details, completion_tokens_details
+const openaiAgent = new Agent({
+  name: "openai-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are helpful.",
+});
+
+const openaiResult = await openaiAgent.run("Hello!");
+console.log("OpenAI raw:", openaiResult.usage.providerMetrics);
+// { prompt_tokens: 16, completion_tokens: 10, total_tokens: 26,
+//   prompt_tokens_details: { cached_tokens: 0 },
+//   completion_tokens_details: { reasoning_tokens: 0 } }
+
+// Vertex AI — includes thoughtsTokenCount, per-modality breakdowns
+const vertexAgent = new Agent({
+  name: "vertex-agent",
+  model: vertex("gemini-2.5-flash", { project: "my-project" }),
+  instructions: "You are helpful.",
+});
+
+const vertexResult = await vertexAgent.run("Hello!");
+console.log("Vertex raw:", vertexResult.usage.providerMetrics);
+// { promptTokenCount: 16, candidatesTokenCount: 10, totalTokenCount: 26,
+//   thoughtsTokenCount: 0,
+//   promptTokensDetails: [{ modality: "TEXT", tokenCount: 16 }],
+//   candidatesTokensDetails: [{ modality: "TEXT", tokenCount: 10 }] }
+
+// Anthropic — includes cache_read_input_tokens
+const anthropicAgent = new Agent({
+  name: "anthropic-agent",
+  model: anthropic("claude-sonnet-4-20250514"),
+  instructions: "You are helpful.",
+});
+
+const anthropicResult = await anthropicAgent.run("Hello!");
+console.log("Anthropic raw:", anthropicResult.usage.providerMetrics);
+// { input_tokens: 16, output_tokens: 10,
+//   cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 ```
 
 ## Tracer Setup

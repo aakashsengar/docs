@@ -151,6 +151,30 @@ interface RunOutput {
   structured?: unknown;
   thinking?: string;
   durationMs?: number;
+  timeToFirstTokenMs?: number;
+  runId?: string;
+  agentName?: string;
+  sessionId?: string;
+  userId?: string;
+  model?: string;
+  modelProvider?: string;
+  status?: "completed" | "error";
+  createdAt?: number;
+  responseId?: string;
+  messages?: ChatMessage[];
+  metrics?: RunMetrics;
+}
+```
+
+## RunMetrics
+
+```typescript
+interface RunMetrics {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  timeToFirstTokenMs?: number;
+  durationMs?: number;
 }
 ```
 
@@ -162,8 +186,14 @@ interface TokenUsage {
   completionTokens: number;
   totalTokens: number;
   reasoningTokens?: number;
+  cachedTokens?: number;
+  audioInputTokens?: number;
+  audioOutputTokens?: number;
+  providerMetrics?: Record<string, unknown>;
 }
 ```
+
+The `providerMetrics` field contains the raw, unmodified usage object returned by the underlying provider API. This varies by provider — see [Cost Tracking](/cost/overview#raw-provider-metrics) for examples per provider.
 
 ## StreamChunk
 

@@ -131,6 +131,7 @@ The OpenAPI spec includes:
 - **Paths** for each agent, team, and workflow
 - **Schemas** for RunRequest, RunOutput, StreamChunk, MultipartRunRequest
 - **Per-agent structured output schemas** — agents with `structuredOutput` get a dedicated response schema (e.g., `RunOutput_analyst`) that includes the full typed `structured` field
+- **Token usage with `providerMetrics`** — the `usage` schema includes a `providerMetrics` object field containing raw provider API data
 - **Security schemes** for provider-specific API keys (`x-openai-api-key`, `x-google-api-key`, `x-anthropic-api-key`, `x-api-key`)
 
 ### Structured Output in Swagger

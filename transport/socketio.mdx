@@ -147,7 +147,7 @@ createAgentGateway({
 | `agent.chunk` | `{ chunk: string }` | Streamed text chunk |
 | `agent.tool.call` | `{ toolName, args }` | Tool call started |
 | `agent.tool.done` | `{ toolCallId }` | Tool call finished |
-| `agent.done` | `{ output: { text } }` | Run complete |
+| `agent.done` | `{ output: { text, usage? } }` | Run complete — `usage` includes `providerMetrics` with raw API data |
 | `agent.error` | `{ error: string }` | Error occurred |
 
 ---
