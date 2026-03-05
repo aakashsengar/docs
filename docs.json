@@ -184,6 +184,7 @@
               "toolkits/pdf",
               "toolkits/git",
               "toolkits/code-interpreter",
+              "toolkits/google-workspace",
               "toolkits/google-sheets",
               "toolkits/redis",
               "toolkits/s3",

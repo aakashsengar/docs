@@ -1,0 +1,255 @@
+---
+title: Google Workspace
+description: Access 30+ Google Workspace APIs (Drive, Gmail, Calendar, Sheets, Docs, Chat, Admin, and more) via the gws CLI.
+---
+
+# Google Workspace
+
+Access **all of Google Workspace** — Drive, Gmail, Calendar, Sheets, Docs, Chat, Admin, and 20+ more services — through a single toolkit. Powered by the [gws CLI](https://github.com/googleworkspace/cli) and the Model Context Protocol, tools are discovered dynamically at runtime. When Google adds new APIs or gws ships updates, your agent picks them up automatically with zero code changes.
+
+---
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the gws CLI">
+    ```bash
+    npm install -g @googleworkspace/cli
+    ```
+  </Step>
+  <Step title="Authenticate with Google">
+    ```bash
+    gws auth setup    # First time: creates GCP project + OAuth + login
+    gws auth login    # Subsequent logins
+    ```
+    See the [gws auth docs](https://github.com/googleworkspace/cli#authentication) for service accounts, CI/CD, and multi-account setup.
+  </Step>
+  <Step title="Install the MCP SDK">
+    ```bash
+    npm install @modelcontextprotocol/sdk
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, openai, GoogleWorkspaceToolkit } from "@radaros/core";
+
+const gw = new GoogleWorkspaceToolkit({
+  services: ["drive", "gmail", "calendar", "sheets"],
+});
+await gw.connect();
+
+const agent = new Agent({
+  name: "workspace-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You help manage Google Workspace. Be concise.",
+  tools: gw.getTools(),
+});
+
+const result = await agent.run("List my 5 most recent Drive files.");
+console.log(result.text);
+
+await gw.close();
+```
+
+---
+
+## Config
+
+<ParamField body="services" type="string[]" default='["drive", "gmail", "calendar", "sheets"]'>
+  Google Workspace services to expose as tools. Use `["all"]` to enable every service.
+</ParamField>
+
+<ParamField body="gwsBinaryPath" type="string" default="gws">
+  Path to the `gws` binary. Override if it's not on your PATH.
+</ParamField>
+
+<ParamField body="includeWorkflows" type="boolean" default="false">
+  Include higher-level workflow tools (e.g., composing and sending a Gmail message, uploading to Drive with metadata).
+</ParamField>
+
+<ParamField body="includeHelpers" type="boolean" default="false">
+  Include helper tools for common multi-step operations.
+</ParamField>
+
+<ParamField body="env" type="Record<string, string>">
+  Environment variables forwarded to the gws process. Useful for overriding auth (e.g., `GOOGLE_WORKSPACE_CLI_TOKEN`).
+</ParamField>
+
+---
+
+## Service Selection
+
+Each service adds roughly 10-80 tools. Select only what you need to keep the tool set manageable:
+
+```typescript
+// Core productivity
+const gw = new GoogleWorkspaceToolkit({
+  services: ["drive", "gmail", "calendar", "sheets"],
+});
+
+// Extended workspace
+const gw = new GoogleWorkspaceToolkit({
+  services: ["drive", "gmail", "calendar", "sheets", "docs", "chat", "tasks"],
+});
+
+// Everything
+const gw = new GoogleWorkspaceToolkit({
+  services: ["all"],
+});
+```
+
+### Available Services
+
+| Service | Description |
+|---------|-------------|
+| `drive` | Files, folders, permissions, shared drives |
+| `gmail` | Messages, threads, labels, drafts, settings |
+| `calendar` | Events, calendars, ACLs |
+| `sheets` | Spreadsheets, values, charts |
+| `docs` | Documents, content manipulation |
+| `chat` | Spaces, messages, memberships |
+| `admin` | Users, groups, organizational units |
+| `contacts` | People, contact groups |
+| `tasks` | Task lists, tasks |
+| `forms` | Forms, responses |
+| `slides` | Presentations, pages |
+| `keep` | Notes, lists |
+| `vault` | Matters, holds, exports |
+| `groups` | Group settings |
+| `alertcenter` | Alerts |
+| `classroom` | Courses, students, teachers |
+| `meet` | Conference records, spaces |
+| `sites` | Sites management |
+
+---
+
+## Using ToolRouter for Large Tool Sets
+
+When enabling many services, use `toolRouter` to automatically select only the relevant tools per query. This keeps LLM prompts small and responses fast:
+
+```typescript
+const gw = new GoogleWorkspaceToolkit({ services: ["all"] });
+await gw.connect();
+
+const agent = new Agent({
+  name: "workspace-assistant",
+  model: openai("gpt-4o"),
+  tools: gw.getTools(),
+  toolRouter: {
+    model: openai("gpt-4o-mini"),
+    maxTools: 10,
+  },
+});
+```
+
+The ToolRouter uses a cheap model to pre-select the best 10 tools for each query before sending them to the main model.
+
+---
+
+## Advanced: Raw MCPToolProvider
+
+For full control over the MCP connection (custom filtering, include/exclude tools), use `MCPToolProvider` directly:
+
+```typescript
+import { Agent, openai, MCPToolProvider } from "@radaros/core";
+
+const gws = new MCPToolProvider({
+  name: "gws",
+  transport: "stdio",
+  command: "gws",
+  args: ["mcp", "-s", "drive,gmail"],
+});
+
+await gws.connect();
+
+// Filter to specific tools
+const tools = await gws.getTools({
+  include: ["drive_files_list", "drive_files_get", "gmail_users_messages_list"],
+});
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  tools,
+});
+
+await agent.run("List my recent Drive files");
+await gws.close();
+```
+
+---
+
+## Lifecycle
+
+The toolkit must be connected before use and closed when done:
+
+```typescript
+const gw = new GoogleWorkspaceToolkit({ services: ["drive"] });
+
+await gw.connect();         // Spawns gws process, discovers tools
+console.log(gw.connected);  // true
+console.log(gw.getTools()); // ToolDef[]
+
+await gw.refresh();          // Re-discover tools (e.g., after gws update)
+await gw.close();            // Kill gws process, clean up
+```
+
+---
+
+## Comparison with Individual Toolkits
+
+RadarOS also ships dedicated toolkits for [Gmail](/toolkits/gmail), [Google Sheets](/toolkits/google-sheets), and [Google Calendar](/toolkits/calendar). Here's when to use which:
+
+| | `GoogleWorkspaceToolkit` | Individual Toolkits |
+|---|---|---|
+| **Coverage** | 30+ services, 500+ API methods | 3-4 hand-crafted tools per service |
+| **Setup** | Install gws CLI + MCP SDK | Install `googleapis` npm package |
+| **Auth** | Managed by gws (encrypted, multi-account) | Manual OAuth2 credentials + token files |
+| **Tool quality** | Auto-generated from API schemas | Hand-tuned descriptions and parameters |
+| **Dependencies** | `gws` binary + `@modelcontextprotocol/sdk` | `googleapis` |
+| **Best for** | Broad workspace access, rapid prototyping | Fine-grained control over specific services |
+
+---
+
+## Troubleshooting
+
+### "gws: command not found"
+
+The gws CLI is not installed or not on your PATH.
+
+```bash
+npm install -g @googleworkspace/cli
+```
+
+Or specify the full path:
+
+```typescript
+const gw = new GoogleWorkspaceToolkit({
+  gwsBinaryPath: "/usr/local/bin/gws",
+});
+```
+
+### "Access blocked" during gws auth
+
+Your OAuth app is in testing mode and your account isn't listed as a test user. See the [gws troubleshooting guide](https://github.com/googleworkspace/cli#troubleshooting).
+
+### Too many tools overwhelming the LLM
+
+Reduce the service list or use `toolRouter`:
+
+```typescript
+const gw = new GoogleWorkspaceToolkit({
+  services: ["drive", "gmail"],  // Only what you need
+});
+
+// Or keep all services but use ToolRouter
+const agent = new Agent({
+  tools: gw.getTools(),
+  toolRouter: { model: openai("gpt-4o-mini"), maxTools: 8 },
+});
+```
