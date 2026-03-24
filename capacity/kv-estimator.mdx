@@ -1,0 +1,86 @@
+---
+title: KV Estimator
+description: Calculate KV cache sizes, memory requirements, and weight memory for any model architecture
+---
+
+# KV Estimator
+
+Pure functions for computing KV cache memory requirements. No side effects, no runtime dependencies.
+
+## `kvBytesPerToken(arch, precision?)`
+
+Returns the number of bytes required to store one token's KV cache entry.
+
+```typescript
+import { kvBytesPerToken, DEFAULT_ARCHITECTURES } from "@radaros/core";
+
+const llama70b = DEFAULT_ARCHITECTURES["llama-3.1-70b"];
+
+kvBytesPerToken(llama70b, "bf16");  // 327,680 bytes (320 KB)
+kvBytesPerToken(llama70b, "fp8");   // 163,840 bytes (160 KB)
+kvBytesPerToken(llama70b, "int4");  //  81,920 bytes (80 KB)
+```
+
+**Formula:** `2 × layers × kvHeads × headDim × precisionBytes`
+
+The `2×` accounts for both K and V tensors.
+
+## `kvCacheForContext(arch, tokens, precision?)`
+
+Total KV cache memory for a given context length.
+
+```typescript
+import { kvCacheForContext } from "@radaros/core";
+
+const result = kvCacheForContext(llama70b, 131_072, "bf16");
+// { bytes: 42_949_672_960, gb: 40.0 }
+
+const short = kvCacheForContext(llama70b, 4_096, "fp8");
+// { bytes: 671_088_640, gb: 0.625 }
+```
+
+## `maxContextForMemory(arch, memoryGb, precision?)`
+
+Inverse: how many tokens fit in a given memory budget?
+
+```typescript
+import { maxContextForMemory } from "@radaros/core";
+
+maxContextForMemory(llama70b, 20, "bf16");  // ~65,536 tokens
+maxContextForMemory(llama70b, 20, "fp8");   // ~131,072 tokens (2× with fp8)
+```
+
+## `weightMemory(arch, precision?)`
+
+Model weight memory at the given quantization level.
+
+```typescript
+import { weightMemory } from "@radaros/core";
+
+weightMemory(llama70b, "bf16");  // 140 GB
+weightMemory(llama70b, "int8");  //  70 GB
+weightMemory(llama70b, "int4");  //  35 GB
+```
+
+---
+
+## Practical Examples
+
+### How many 4K sessions fit on 2× H100?
+
+```typescript
+import { kvCacheForContext, weightMemory, OVERHEAD_GB } from "@radaros/core";
+
+const totalHbm = 80 * 2;  // 160 GB
+const weights = weightMemory(llama70b, "bf16");  // 140 GB
+const freeHbm = totalHbm - weights - OVERHEAD_GB;  // 15 GB
+const kvPerSession = kvCacheForContext(llama70b, 4096, "fp8").gb;  // 0.625 GB
+const sessions = Math.floor(freeHbm / kvPerSession);  // 24 sessions
+```
+
+### What's the KV budget for a 128K context?
+
+```typescript
+const fullContext = kvCacheForContext(llama70b, 131_072, "bf16");
+// 40 GB — this is why 128K context needs 4+ H100s
+```

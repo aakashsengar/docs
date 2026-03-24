@@ -1,0 +1,122 @@
+---
+title: Capacity Planning
+description: Examples for KV cache sizing, GPU planning, latency modeling, and live monitoring
+---
+
+# Capacity Planning Examples
+
+## Basic KV Cache Sizing
+
+```typescript
+import { kvBytesPerToken, kvCacheForContext, DEFAULT_ARCHITECTURES } from "@radaros/core";
+
+const llama70b = DEFAULT_ARCHITECTURES["llama-3.1-70b"];
+
+// Per-token KV cost
+console.log(kvBytesPerToken(llama70b, "bf16"));  // 327,680 bytes
+console.log(kvBytesPerToken(llama70b, "fp8"));   // 163,840 bytes
+
+// Full 128K context
+const full = kvCacheForContext(llama70b, 131_072, "bf16");
+console.log(`${full.gb.toFixed(1)} GB`);  // 40.0 GB
+```
+
+## GPU Sizing for a Workload
+
+```typescript
+import { planCapacity, DEFAULT_ARCHITECTURES, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const plan = planCapacity(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 0, nandBandwidthGBs: 7 },
+  { extreme: 1, heavy: 2, medium: 3, light: 4 },
+  "fp8", "bf16",
+);
+
+console.log(`HBM slots:     ${plan.hbmSlots}`);
+console.log(`TTFT breach:   ${plan.ttftBreachPoint} users`);
+console.log(`Monthly cost:  $${plan.monthlyGpuCostUsd.toLocaleString()}`);
+```
+
+## Comparing Hardware Configs
+
+```typescript
+import { compareConfigs, DEFAULT_ARCHITECTURES, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const results = compareConfigs(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  [
+    { label: "4× H100",          hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 0, nandBandwidthGBs: 7 } },
+    { label: "4× H100 + 4TB SSD", hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 4000, nandBandwidthGBs: 7 } },
+    { label: "8× H100",          hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 8, nandPerGpuGb: 0, nandBandwidthGBs: 7 } },
+  ],
+  { extreme: 1, heavy: 2, medium: 3, light: 4 },
+);
+
+for (const r of results) {
+  console.log(`${r.label}: ${r.plan.totalSessions} sessions, $${r.monthlyCost}/mo, $${r.costPerSession.toFixed(2)}/session`);
+}
+```
+
+## Live Agent Monitor
+
+The full live monitoring example connects a real agent to the capacity planning system. It runs varied workloads, classifies sessions in real-time, and prints a capacity report.
+
+```bash
+# With OpenAI (default)
+OPENAI_API_KEY=sk-... npx tsx examples/capacity/live-monitor.ts
+
+# With a self-hosted vLLM endpoint
+VLLM_BASE_URL=https://your-endpoint/v1 \
+VLLM_API_KEY=your-key \
+npx tsx examples/capacity/live-monitor.ts
+```
+
+The example:
+1. Creates an agent with `EventBus`
+2. Attaches `SessionProfiler` and `MetricsExporter`
+3. Runs 4 sessions (2 light, 1 medium, 1 heavy) with 10 total messages
+4. Prints observed workload stats (real token counts from API)
+5. Maps to theoretical capacity on 8× H100 (Llama 70B int4 AWQ)
+6. Shows headroom check and Prometheus metrics
+
+Sample output:
+
+```
+── Observed Workload ──────────────────────────────────────
+  Sessions:           light=4, medium=0, heavy=0, extreme=0
+  Total tokens:       13,067
+  Avg tokens/session: 3,267
+  Estimated KV (bf16):3.988 GB
+
+── Theoretical Capacity (8× NVIDIA H100 SXM) ──────────────
+  Total HBM:          640 GB
+  Weight memory:      35 GB (int4 AWQ)
+  Free for KV:        600 GB
+  HBM slots:          112
+  Total sessions:     112
+
+── Latency Estimates ──────────────────────────────────────
+  TTFT breach point:  629 concurrent users (5s SLA)
+
+── Cost ──────────────────────────────────────────────────
+  Monthly GPU cost:   $23,302
+  Per slot/day:       $6.94 (112 slots)
+  Est. cost/1K tok:   $1.2384 (self-hosted)
+
+── Headroom Check ────────────────────────────────────────
+  ✓ 108 more sessions can fit in HBM (4/112 used)
+  ✓ TTFT safe — 4 users well below 629-user breach point
+```
+
+## NAND SSD Restore Latency
+
+```typescript
+import { restoreLatency, kvCacheForContext, DEFAULT_ARCHITECTURES } from "@radaros/core";
+
+const llama70b = DEFAULT_ARCHITECTURES["llama-3.1-70b"];
+const kvGb = kvCacheForContext(llama70b, 32768, "fp8").gb;
+
+console.log(`Gen4 NVMe: ${(restoreLatency(kvGb, 7) / 1000).toFixed(1)}s`);
+console.log(`Gen5 NVMe: ${(restoreLatency(kvGb, 14) / 1000).toFixed(1)}s`);
+```

@@ -1,0 +1,102 @@
+---
+title: Capacity Planner
+description: Plan GPU requirements, session capacity, and infrastructure sizing for LLM deployments
+---
+
+# Capacity Planner
+
+Combines KV estimator + hardware config + workload mix into actionable capacity numbers.
+
+## `planCapacity(arch, hardware, workload, kvPrecision?, weightPrecision?)`
+
+The all-in-one function. Returns a complete `CapacityPlan` with memory breakdown, session counts, latency estimates, and cost.
+
+```typescript
+import { planCapacity, DEFAULT_ARCHITECTURES, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const plan = planCapacity(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  {
+    gpu: DEFAULT_GPU_SPECS["h100-sxm"],
+    gpuCount: 8,
+    nandPerGpuGb: 4000,       // 4 TB NAND per GPU
+    nandBandwidthGBs: 7,      // NVMe Gen4
+  },
+  { extreme: 1, heavy: 2, medium: 3, light: 4 },
+  "fp8",
+  "bf16",
+);
+
+plan.totalHbmGb        // 640 GB
+plan.weightMemoryGb    // 140 GB
+plan.freeHbmForKvGb    // 495 GB
+plan.kvBytesPerToken   // 163,840
+plan.hbmSlots          // active concurrent sessions
+plan.nandSlots         // parked sessions on SSD
+plan.totalSessions     // hbmSlots + nandSlots
+plan.tpotMs            // estimated TPOT
+plan.ttftMs            // estimated TTFT
+plan.ttftBreachPoint   // max users before 5s SLA breach
+plan.restoreLatencyMs  // NAND → HBM restore time (null if no NAND)
+plan.monthlyGpuCostUsd // estimated monthly cost
+```
+
+## `maxConcurrentSessions(arch, hardware, avgContextTokens, kvPrecision?, weightPrecision?)`
+
+Compute how many sessions fit in HBM and on NAND for a given average context size.
+
+```typescript
+import { maxConcurrentSessions } from "@radaros/core";
+
+const sessions = maxConcurrentSessions(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 2000, nandBandwidthGBs: 7 },
+  16384,  // 16K average context
+  "fp8",
+  "bf16",
+);
+
+sessions.hbmSlots   // active sessions in GPU memory
+sessions.nandSlots  // parked sessions on SSD
+sessions.total      // hbm + nand
+```
+
+## `estimateGpuCount(arch, targetUsers, avgContextTokens, kvPrecision?, weightPrecision?, gpu?)`
+
+Solve for the minimum GPU count needed to serve N concurrent users (HBM-only).
+
+```typescript
+import { estimateGpuCount } from "@radaros/core";
+
+const gpus = estimateGpuCount(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  100,      // target 100 concurrent users
+  16384,    // 16K average context
+  "fp8",
+  "bf16",
+  DEFAULT_GPU_SPECS["h100-sxm"],
+);
+// → minimum GPU count needed
+```
+
+## `compareConfigs(arch, configs, workload, kvPrecision?, weightPrecision?)`
+
+Compare multiple hardware configurations side-by-side.
+
+```typescript
+import { compareConfigs, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const results = compareConfigs(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  [
+    { label: "4× H100 no SSD", hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 0, nandBandwidthGBs: 7 } },
+    { label: "4× H100 + 4TB SSD", hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 4000, nandBandwidthGBs: 7 } },
+    { label: "8× H100 no SSD", hardware: { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 8, nandPerGpuGb: 0, nandBandwidthGBs: 7 } },
+  ],
+  { extreme: 1, heavy: 2, medium: 3, light: 4 },
+);
+
+for (const r of results) {
+  console.log(`${r.label}: ${r.plan.totalSessions} sessions, $${r.monthlyCost}/mo`);
+}
+```

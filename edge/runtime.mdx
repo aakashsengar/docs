@@ -136,3 +136,42 @@ A lightweight HTTP server on port 9090 (configurable) responds to `GET /health`:
 <ParamField body="disableHealthCheck" type="boolean" default="false">
   Disable the health endpoint entirely.
 </ParamField>
+
+---
+
+## GPU Monitoring
+
+The `ResourceMonitor` automatically detects NVIDIA GPUs via `nvidia-smi` and includes GPU metrics in every snapshot:
+
+```typescript
+import { ResourceMonitor } from "@radaros/edge";
+
+const monitor = new ResourceMonitor({ intervalMs: 5000 });
+
+monitor.on("snapshot", (snap) => {
+  if (snap.gpu) {
+    console.log(`GPU: ${snap.gpu.name}`);
+    console.log(`Memory: ${snap.gpu.memoryUsedGb.toFixed(1)}/${snap.gpu.memoryTotalGb.toFixed(1)} GB`);
+    console.log(`Utilization: ${snap.gpu.utilizationPercent}%`);
+    console.log(`Temperature: ${snap.gpu.temperatureC}°C`);
+  }
+});
+
+monitor.on("gpu-warning", (data) => {
+  console.log(`GPU HBM pressure: ${data.memoryUsedGb.toFixed(1)}/${data.memoryTotalGb.toFixed(1)} GB`);
+});
+
+monitor.start();
+```
+
+### GPU Snapshot Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gpu.name` | `string` | GPU model name (e.g. "NVIDIA H100 SXM") |
+| `gpu.memoryUsedGb` | `number` | Used HBM in GB |
+| `gpu.memoryTotalGb` | `number` | Total HBM in GB |
+| `gpu.utilizationPercent` | `number` | GPU compute utilization (0–100) |
+| `gpu.temperatureC` | `number` | GPU temperature in Celsius |
+
+The `gpu-warning` event fires when GPU memory usage exceeds the `memoryThreshold` (default 85%). GPU monitoring is automatic — if `nvidia-smi` is not available (e.g. on CPU-only machines), the `gpu` field is simply omitted from snapshots.

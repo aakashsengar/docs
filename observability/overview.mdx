@@ -278,3 +278,39 @@ function average(arr: number[]): number {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 ```
+
+---
+
+## Capacity Metrics
+
+When the [Session Profiler](/capacity/session-profiler) is attached to the same `EventBus`, `MetricsExporter` automatically captures capacity-related metrics:
+
+### AgentMetrics fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `estimatedKvCacheGb` | `number?` | Estimated total KV cache memory across all sessions |
+| `avgContextLength` | `number?` | Average prompt tokens per run |
+| `sessionCategories` | `Record<string, number>?` | Session counts by category (light/medium/heavy/extreme) |
+
+### Prometheus output
+
+The `toPrometheus()` method includes three new capacity counters:
+
+```
+# HELP radaros_kv_cache_estimated_gb Estimated KV cache size in GB
+# TYPE radaros_kv_cache_estimated_gb gauge
+radaros_kv_cache_estimated_gb 12.5
+
+# HELP radaros_session_category_total Sessions by category
+# TYPE radaros_session_category_total counter
+radaros_session_category_total{category="light"} 5
+radaros_session_category_total{category="medium"} 2
+radaros_session_category_total{category="heavy"} 1
+
+# HELP radaros_capacity_sessions_total Total tracked sessions
+# TYPE radaros_capacity_sessions_total counter
+radaros_capacity_sessions_total 8
+```
+
+These appear automatically when `capacity.session.classified` and `capacity.warning` events are emitted on the EventBus — no additional configuration needed.

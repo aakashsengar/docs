@@ -1,0 +1,110 @@
+---
+title: Session Profiler
+description: Runtime session monitoring with automatic classification and KV cache estimation
+---
+
+# Session Profiler
+
+The `SessionProfiler` attaches to the RadarOS `EventBus` and monitors real agent sessions in real-time. It classifies sessions by token volume and estimates the KV cache pressure your workload generates.
+
+## Quick Start
+
+```typescript
+import { Agent, openai, EventBus, SessionProfiler, DEFAULT_ARCHITECTURES } from "@radaros/core";
+
+const eventBus = new EventBus();
+
+const profiler = new SessionProfiler({
+  modelArch: DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  kvWarningThresholdGb: 100,
+});
+profiler.attach(eventBus);
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  eventBus,
+});
+
+// Run some sessions
+await agent.run("Hello!", { sessionId: "s1" });
+await agent.run("Tell me more", { sessionId: "s1" });
+await agent.run("Quick question", { sessionId: "s2" });
+
+// Get live stats
+const stats = profiler.getSessionStats();
+console.log(stats.byCategory);     // { light: 2, medium: 0, heavy: 0, extreme: 0 }
+console.log(stats.totalTokens);    // actual token count from API
+console.log(stats.estimatedKvGb);  // tokens × kvBytesPerToken
+```
+
+## Session Categories
+
+Sessions are classified by cumulative token count:
+
+| Category | Token Range | Typical Use Case |
+|----------|------------|------------------|
+| **light** | 0 – 50K | Quick Q&A, simple lookups |
+| **medium** | 50K – 200K | Multi-turn explanations, code review |
+| **heavy** | 200K – 500K | Deep research, SWE tasks |
+| **extreme** | 500K+ | Full repo analysis, long research sessions |
+
+## Events
+
+The profiler emits two events on the `EventBus`:
+
+### `capacity.session.classified`
+
+Fired when a session crosses a category threshold.
+
+```typescript
+eventBus.on("capacity.session.classified", (data) => {
+  console.log(`Session ${data.sessionId} → ${data.category}`);
+  console.log(`Total tokens: ${data.totalTokens}`);
+  console.log(`Previous: ${data.previousCategory}`);
+});
+```
+
+### `capacity.warning`
+
+Fired when estimated KV cache exceeds `kvWarningThresholdGb`.
+
+```typescript
+eventBus.on("capacity.warning", (data) => {
+  console.log(data.message);
+  console.log(`KV: ${data.estimatedKvGb} GB`);
+  console.log(`Sessions: ${data.sessionCount}`);
+});
+```
+
+## Feeding into Capacity Planning
+
+The profiler's output plugs directly into Tier 1 functions:
+
+```typescript
+import { planCapacity, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const mix = profiler.getWorkloadMix();
+// → { extreme: 0, heavy: 1, medium: 2, light: 5 }
+
+const plan = planCapacity(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 0, nandBandwidthGBs: 7 },
+  mix,     // real observed workload
+  "fp8",
+  "bf16",
+);
+
+console.log(`Need ${plan.hbmSlots} HBM slots for observed workload`);
+```
+
+## Prometheus Integration
+
+When paired with `MetricsExporter` from `@radaros/observability`, session categories are automatically exported as Prometheus counters:
+
+```
+radaros_session_category_total{category="light"} 5
+radaros_session_category_total{category="heavy"} 1
+radaros_capacity_sessions_total 6
+radaros_kv_cache_estimated_gb 12.5
+```

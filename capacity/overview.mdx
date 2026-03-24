@@ -1,0 +1,182 @@
+---
+title: Capacity Planning
+description: Estimate GPU requirements, KV cache sizing, latency, and infrastructure cost for self-hosted LLM deployments
+---
+
+# Capacity Planning
+
+RadarOS includes a built-in capacity planning library for modeling LLM inference infrastructure. It answers questions like:
+
+- How many GPUs do I need for N concurrent users?
+- What happens to latency when I add NAND SSD offloading?
+- What's the KV cache pressure for my workload mix?
+- Where is the TTFT SLA breach point?
+
+The system has three tiers:
+
+| Tier | What | Where |
+|------|------|-------|
+| **Tier 1** | Pure-math capacity library | `@radaros/core` — zero dependencies |
+| **Tier 2** | Runtime session profiling | `@radaros/core` + `@radaros/observability` |
+| **Tier 3** | Interactive dashboard app | `apps/capacity-planner/` (Next.js) |
+
+---
+
+## Quick Start
+
+```typescript
+import {
+  planCapacity,
+  DEFAULT_ARCHITECTURES,
+  DEFAULT_GPU_SPECS,
+} from "@radaros/core";
+
+const plan = planCapacity(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  {
+    gpu: DEFAULT_GPU_SPECS["h100-sxm"],
+    gpuCount: 4,
+    nandPerGpuGb: 0,
+    nandBandwidthGBs: 7,
+  },
+  { extreme: 1, heavy: 2, medium: 3, light: 4 },
+  "fp8",   // KV precision
+  "bf16",  // weight precision
+);
+
+console.log(plan.hbmSlots);        // concurrent sessions in HBM
+console.log(plan.ttftBreachPoint);  // max users before 5s TTFT SLA breach
+console.log(plan.monthlyGpuCostUsd);
+```
+
+---
+
+## Core Concepts
+
+### KV Cache Sizing
+
+Every token in the context window stores Key and Value tensors per layer:
+
+```
+KV bytes/token = 2 × layers × kv_heads × head_dim × precision_bytes
+```
+
+For Llama 3.1 70B in bf16: `2 × 80 × 8 × 128 × 2 = 327,680 bytes (~320 KB/token)`.
+
+GQA (Grouped Query Attention) is the key — Llama 3.1 uses 8 KV heads instead of 64 query heads, reducing KV cache by 8×.
+
+### Memory Budget
+
+```
+free_hbm = (gpu_hbm × gpu_count) - weight_memory - overhead
+hbm_slots = floor(free_hbm / kv_per_session)
+```
+
+Weight quantization (int4 AWQ) shrinks weights from 140 GB to 35 GB, freeing massive KV headroom.
+
+### Latency Model
+
+**TPOT** (Time Per Output Token) — memory-bandwidth-bound:
+```
+TPOT = (context × batch × kv_bytes_per_token) / aggregate_bandwidth
+```
+
+**TTFT** (Time To First Token) — compute-bound, queued:
+```
+TTFT(C users) = single_prefill_time × (C + 1) / 2
+```
+
+Adding NAND expands session capacity but does **not** improve prefill speed.
+
+---
+
+## Model Architectures
+
+15 models are included out of the box:
+
+| Model | Type | KV Heads | KV/token (bf16) |
+|-------|------|----------|-----------------|
+| Llama 3.1 8B | GQA | 8 | 128 KB |
+| Llama 3.1 70B | GQA | 8 | 320 KB |
+| Llama 3.1 405B | GQA | 8 | 504 KB |
+| Llama 2 7B | MHA | 32 | 512 KB |
+| Mixtral 8×7B | GQA | 8 | 128 KB |
+| Mixtral 8×22B | GQA | 8 | 176 KB |
+| Falcon 7B | MQA | 1 | 8 KB |
+| Mistral 7B | GQA | 8 | 128 KB |
+| Phi-3 Mini | MHA | 32 | 384 KB |
+| Gemma 2 9B | GQA | 8 | 168 KB |
+| Gemma 2 27B | GQA | 16 | 184 KB |
+
+Custom architectures can be passed to any function:
+
+```typescript
+const myModel: ModelArchitecture = {
+  id: "my-model",
+  displayName: "My Custom 13B",
+  family: "custom",
+  params: "13B",
+  layers: 40,
+  attentionHeads: 40,
+  kvHeads: 8,
+  headDim: 128,
+  hiddenDim: 5120,
+  ffnDim: 13824,
+  maxContext: 32768,
+  attentionType: "gqa",
+  weightSizeBf16Gb: 26,
+};
+```
+
+## GPU Specs
+
+| GPU | HBM | Bandwidth | bf16 TFLOPS |
+|-----|-----|-----------|------------|
+| H100 SXM | 80 GB | 3.35 TB/s | 989 |
+| A100 SXM | 80 GB | 2.0 TB/s | 312 |
+| L40S | 48 GB | 0.864 TB/s | 366 |
+| RTX 4090 | 24 GB | 1.008 TB/s | 330 |
+
+---
+
+## Precision Options
+
+| Precision | Bytes | Use Case |
+|-----------|-------|----------|
+| `bf16` | 2 | Full quality baseline |
+| `fp8` | 1 | Standard production KV — negligible quality loss |
+| `int8` | 1 | Alternative to fp8 |
+| `int4` | 0.5 | Aggressive — noticeable on long contexts |
+
+KV and weight precision are independent. The standard production setup is **fp8 KV + bf16 weights** (or int4 weights for AWQ/GPTQ models).
+
+---
+
+## Interactive Dashboard
+
+The `apps/capacity-planner/` Next.js app provides a full interactive UI with:
+
+- Model selector (all 15 architectures)
+- GPU type, count, NAND per GPU sliders
+- KV/weight precision selectors
+- Workload controls (avg context, cold ratio, SLA thresholds)
+- Per-GPU breakdown panel
+- 6 interactive charts (Users vs GPUs, TPOT, TTFT, Restore, Cost, GPU vs NAND)
+
+```bash
+cd apps/capacity-planner
+npm install
+npm run dev
+# → http://localhost:3000
+```
+
+---
+
+## API Reference
+
+See the detailed API pages:
+
+- [KV Estimator](/capacity/kv-estimator) — `kvBytesPerToken`, `kvCacheForContext`, `maxContextForMemory`, `weightMemory`
+- [Capacity Planner](/capacity/capacity-planner) — `planCapacity`, `maxConcurrentSessions`, `estimateGpuCount`
+- [Latency Estimator](/capacity/latency-estimator) — `estimateTpot`, `estimateTtft`, `ttftBreachPoint`, `restoreLatency`
+- [Session Profiler](/capacity/session-profiler) — Runtime monitoring with EventBus integration

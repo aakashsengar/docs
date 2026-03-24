@@ -1,0 +1,87 @@
+---
+title: Latency Estimator
+description: Model TPOT, TTFT, prefill time, and NAND restore latency for LLM inference
+---
+
+# Latency Estimator
+
+Physics-based latency modeling for LLM inference. Captures the two fundamental bottlenecks: **memory bandwidth** (decode) and **compute** (prefill).
+
+## `estimateTpot(arch, contextTokens, batchSize, hardware, kvPrecision?)`
+
+Time Per Output Token — each decode step streams the full KV cache from HBM.
+
+```typescript
+import { estimateTpot, DEFAULT_ARCHITECTURES, DEFAULT_GPU_SPECS } from "@radaros/core";
+
+const tpot = estimateTpot(
+  DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+  4096,    // 4K context
+  1,       // batch size
+  { gpu: DEFAULT_GPU_SPECS["h100-sxm"], gpuCount: 4, nandPerGpuGb: 0, nandBandwidthGBs: 7 },
+  "fp8",
+);
+// → milliseconds per output token
+```
+
+TPOT scales linearly with context length and batch size. fp8 halves it vs bf16.
+
+## `estimateTtft(arch, promptTokens, concurrentUsers, hardware)`
+
+Time To First Token — compute-bound prefill with queue congestion.
+
+```typescript
+import { estimateTtft } from "@radaros/core";
+
+// Single user
+estimateTtft(llama70b, 4096, 1, hw);   // fast — just one prefill
+
+// 20 concurrent users
+estimateTtft(llama70b, 4096, 20, hw);  // 10× worse — queue serialization
+```
+
+The model uses `TTFT(C) = singlePrefill × (C+1)/2` — with C concurrent users, the average user waits for C/2 prefills ahead of them.
+
+## `singlePrefillMs(arch, promptTokens, hardware)`
+
+Base prefill time for a single prompt with no queue contention.
+
+```typescript
+import { singlePrefillMs } from "@radaros/core";
+
+singlePrefillMs(llama70b, 4096, hw);    // ~16ms on 4× H100
+singlePrefillMs(llama70b, 32768, hw);   // much longer — quadratic attention
+```
+
+Prefill is compute-bound: `flops = (4 × N² × hiddenDim + 4 × N × ffnDim) × layers`.
+
+## `ttftBreachPoint(arch, hardware, ttftSlaMs, promptTokens?)`
+
+Maximum concurrent users before TTFT exceeds the SLA.
+
+```typescript
+import { ttftBreachPoint } from "@radaros/core";
+
+const breach = ttftBreachPoint(llama70b, hw, 5000, 4096);
+// → e.g. 629 users before 5s SLA breach
+
+// More GPUs push the breach point out
+const breach8gpu = ttftBreachPoint(llama70b, { ...hw, gpuCount: 8 }, 5000);
+// → higher number — more TFLOPS
+```
+
+Adding NAND does **not** change the breach point — NAND doesn't help prefill compute.
+
+## `restoreLatency(kvSizeGb, nandBandwidthGBs, parallelism?)`
+
+Time to restore a cold session from NAND SSD to GPU HBM.
+
+```typescript
+import { restoreLatency } from "@radaros/core";
+
+restoreLatency(40, 7);     // 40 GB at Gen4 (7 GB/s) → 5,714ms
+restoreLatency(40, 14);    // 40 GB at Gen5 (14 GB/s) → 2,857ms
+restoreLatency(40, 7, 4);  // 4 parallel streams → 22,857ms per stream
+```
+
+Parallel restore streams share the same SSD pipe — higher parallelism helps throughput but increases per-stream latency.

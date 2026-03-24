@@ -87,6 +87,16 @@
             ]
           },
           {
+            "group": "Capacity Planning",
+            "pages": [
+              "capacity/overview",
+              "capacity/kv-estimator",
+              "capacity/capacity-planner",
+              "capacity/latency-estimator",
+              "capacity/session-profiler"
+            ]
+          },
+          {
             "group": "Observability",
             "pages": [
               "observability/overview"
@@ -308,7 +318,8 @@
           {
             "group": "Monitoring & Cost",
             "pages": [
-              "examples/cost-observability"
+              "examples/cost-observability",
+              "examples/capacity-planning"
             ]
           },
           {
