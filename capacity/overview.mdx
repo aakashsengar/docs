@@ -358,6 +358,370 @@ const myModel: ModelArchitecture = {
 
 ---
 
+## How the Math Works — Step by Step
+
+This section walks through every calculation the capacity planner performs, with a worked example using **Llama 3.1 70B on 8× RTX A5000 with int4 AWQ weights and fp8 KV cache**.
+
+### Step 1: KV Bytes Per Token
+
+**What:** How many bytes does one token cost in the KV cache?
+
+**Formula:**
+```
+kv_bytes_per_token = 2 × layers × kv_heads × head_dim × precision_bytes
+```
+
+**Why each term:**
+- `2` — one Key vector + one Value vector per layer
+- `layers` (80) — each of the 80 transformer blocks stores its own K and V
+- `kv_heads` (8) — GQA means only 8 KV heads (not all 64 query heads)
+- `head_dim` (128) — each head stores a 128-dimensional vector
+- `precision_bytes` (1 for fp8) — bytes per floating-point element
+
+**Calculation:**
+```
+2 × 80 × 8 × 128 × 1 = 163,840 bytes = 160 KB/token
+```
+
+If we used bf16 instead of fp8, it would be `× 2 bytes = 327,680 bytes = 320 KB/token` — double.
+
+**Code:** `kvBytesPerToken(arch, "fp8")` in `kv-estimator.ts`
+
+---
+
+### Step 2: KV Cache Per Session
+
+**What:** Total KV memory for one session at a given average context length.
+
+**Formula:**
+```
+kv_per_session = avg_context_tokens × kv_bytes_per_token
+```
+
+**Calculation (16K context):**
+```
+16,384 tokens × 163,840 bytes = 2,684,354,560 bytes = 2.5 GB per session
+```
+
+**Calculation (128K full context):**
+```
+131,072 tokens × 163,840 bytes = 21,474,836,480 bytes = 20 GB per session
+```
+
+**Code:** `kvCacheForContext(arch, 16384, "fp8")` in `kv-estimator.ts`
+
+---
+
+### Step 3: Weight Memory
+
+**What:** GPU memory consumed by the model's parameters.
+
+**Formula:**
+```
+weight_memory = weight_size_bf16 × precision_ratio
+```
+
+**Precision ratios:** bf16 = 1.0, int8 = 0.5, int4 = 0.25
+
+**Calculation (int4 AWQ):**
+```
+140 GB × 0.25 = 35 GB
+```
+
+Without quantization (bf16), weights would be 140 GB — needing 2× H100s just for weights. With int4, they fit on a single GPU with room to spare.
+
+**Code:** `weightMemory(arch, "int4")` in `kv-estimator.ts`
+
+---
+
+### Step 4: Free HBM for KV Cache
+
+**What:** How much GPU memory is available for KV cache after weights and overhead.
+
+**Formula:**
+```
+total_hbm = gpu_hbm × gpu_count
+free_hbm = total_hbm - weight_memory - overhead
+```
+
+**Calculation (8× RTX A5000):**
+```
+total_hbm = 22.5 GB × 8 = 180 GB
+free_hbm  = 180 - 35 - 5 = 140 GB
+```
+
+The 5 GB overhead covers CUDA contexts, vLLM paging metadata, activation buffers, and framework state.
+
+**Code:** Lines 92-94 in `capacity-planner.ts`
+
+---
+
+### Step 5: HBM Slots (Active Sessions)
+
+**What:** How many concurrent sessions fit in free HBM.
+
+**Formula:**
+```
+hbm_slots = floor(free_hbm / kv_per_session)
+```
+
+**Calculation (16K avg context, fp8):**
+```
+hbm_slots = floor(140 GB / 2.5 GB) = 56 sessions
+```
+
+**Calculation (4K avg context, fp8):**
+```
+kv_per_session = 4,096 × 163,840 = 0.625 GB
+hbm_slots = floor(140 / 0.625) = 224 sessions
+```
+
+Notice how context length dominates: 4× shorter context = 4× more sessions.
+
+**Code:** `maxConcurrentSessions()` in `capacity-planner.ts`
+
+---
+
+### Step 6: NAND Slots (Parked Sessions)
+
+**What:** How many additional sessions can be parked on SSD.
+
+**Formula:**
+```
+total_nand = nand_per_gpu × gpu_count
+nand_slots = floor(total_nand / kv_per_session)
+```
+
+**Calculation (4 TB NAND per GPU, 16K context, fp8):**
+```
+total_nand = 4,000 GB × 8 = 32,000 GB
+nand_slots = floor(32,000 / 2.5) = 12,800 parked sessions
+total_sessions = 56 (HBM) + 12,800 (NAND) = 12,856
+```
+
+NAND massively expands capacity. But those 12,800 sessions are **parked** — they need restore latency to become active.
+
+**Code:** Lines 32-36 in `capacity-planner.ts`
+
+---
+
+### Step 7: TPOT (Decode Latency)
+
+**What:** How long each output token takes to generate.
+
+**Why bandwidth-bound:** Each decode step must read the entire KV cache for all active sequences from HBM. The GPU compute is idle waiting for memory.
+
+**Formula:**
+```
+total_bytes = context_tokens × batch_size × kv_bytes_per_token
+bandwidth = gpu_bandwidth_TBs × gpu_count × 10^12  (convert to bytes/sec)
+tpot_ms = (total_bytes / bandwidth) × 1000
+```
+
+**Calculation (16K context, 1 user, 8× RTX A5000):**
+```
+total_bytes = 16,384 × 1 × 163,840 = 2,684,354,560 bytes
+bandwidth   = 0.768 × 8 × 10^12 = 6,144,000,000,000 bytes/sec
+tpot_ms     = (2,684,354,560 / 6,144,000,000,000) × 1000 = 0.44 ms
+```
+
+**With 10 concurrent users (batch=10):**
+```
+total_bytes = 16,384 × 10 × 163,840 = 26,843,545,600 bytes
+tpot_ms     = (26,843,545,600 / 6,144,000,000,000) × 1000 = 4.37 ms
+```
+
+TPOT scales linearly with batch size. At 50ms SLA, you breach at ~114 concurrent users.
+
+**Code:** `estimateTpot()` in `latency-estimator.ts`
+
+---
+
+### Step 8: Single Prefill Time
+
+**What:** Time to process one prompt through all layers (no queue).
+
+**Why compute-bound:** Prefill runs the full attention computation (O(N²) in prompt length) plus FFN (O(N)). The GPU compute units are saturated, not memory.
+
+**Formula:**
+```
+prefill_flops = (4 × N² × hidden_dim + 4 × N × ffn_dim) × layers
+gpu_flops     = gpu_tflops × gpu_count × efficiency × 10^12
+single_prefill_ms = (prefill_flops / gpu_flops) × 1000
+```
+
+The **efficiency factor is 0.35** (35%) — real-world GPU utilization vs peak spec. This accounts for memory stalls, kernel launch overhead, and tensor parallelism communication.
+
+**Calculation (4K prompt, 8× RTX A5000):**
+```
+N = 4,096
+prefill_flops = (4 × 4096² × 8192 + 4 × 4096 × 28672) × 80
+              = (4 × 16,777,216 × 8192 + 4 × 4096 × 28672) × 80
+              = (549,755,813,888 + 469,762,048) × 80
+              = 550,225,575,936 × 80
+              = 44,018,046,074,880 flops
+
+gpu_flops     = 65 × 8 × 0.35 × 10^12 = 182,000,000,000,000 flops/sec
+
+single_prefill = (44,018,046,074,880 / 182,000,000,000,000) × 1000 = 241.9 ms
+```
+
+**Why 32K prompt is ~64× slower than 4K (not 8×):**
+The `4 × N²` attention term dominates. When N grows 8×, N² grows 64×. This is why long-context prefill is so expensive.
+
+**Code:** `singlePrefillMs()` in `latency-estimator.ts`
+
+---
+
+### Step 9: TTFT Under Load
+
+**What:** How long a user waits for the first token when other users are also submitting prompts.
+
+**Why it degrades:** Prefills are serialized on the GPU compute path. With C concurrent users, each user's prefill waits behind the others in a queue.
+
+**Formula:**
+```
+TTFT(C users) = single_prefill × (C + 1) / 2
+```
+
+The `(C+1)/2` is the average queue position — if C users arrive simultaneously, a random user is at position 1 to C uniformly, so the average wait is (C+1)/2 prefills.
+
+**Calculation (10 concurrent users, 4K prompt):**
+```
+TTFT = 241.9 ms × (10 + 1) / 2 = 241.9 × 5.5 = 1,330 ms (1.3 seconds)
+```
+
+**Calculation (100 concurrent users):**
+```
+TTFT = 241.9 × (100 + 1) / 2 = 241.9 × 50.5 = 12,216 ms (12.2 seconds)
+```
+
+**Code:** `estimateTtft()` in `latency-estimator.ts`
+
+---
+
+### Step 10: TTFT Breach Point
+
+**What:** Maximum concurrent users before average TTFT exceeds the SLA.
+
+**Formula (solving Step 9 for C):**
+```
+single_prefill × (C + 1) / 2 = ttft_sla_ms
+C = 2 × ttft_sla_ms / single_prefill - 1
+```
+
+**Calculation (5 second SLA, 4K prompt):**
+```
+C = 2 × 5000 / 241.9 - 1 = 41.3 - 1 = 40.3 → 41 users
+```
+
+At 41 concurrent users, the average TTFT hits 5 seconds. The 42nd user will experience > 5s wait.
+
+**Important:** Adding NAND does NOT change this number. NAND parks cold sessions but doesn't add TFLOPS — the prefill queue bottleneck is compute, not memory.
+
+**Code:** `ttftBreachPoint()` in `latency-estimator.ts`
+
+---
+
+### Step 11: Restore Latency
+
+**What:** Time to wake up a cold session from NAND SSD.
+
+**Formula:**
+```
+per_gpu_kv = kv_per_session / gpu_count   (tensor parallel sharding)
+restore_ms = (per_gpu_kv / nand_bandwidth) × 1000
+```
+
+Each GPU restores its own shard in parallel, so the KV per session is divided by GPU count.
+
+**Calculation (16K context fp8, 8× GPU, Gen4 NVMe 7 GB/s):**
+```
+kv_per_session = 2.5 GB
+per_gpu_kv     = 2.5 / 8 = 0.3125 GB
+restore_ms     = (0.3125 / 7) × 1000 = 44.6 ms
+```
+
+**With parallel restore streams (4 sessions restoring simultaneously):**
+```
+effective_bw = 7 / 4 = 1.75 GB/s per stream
+restore_ms   = (0.3125 / 1.75) × 1000 = 178.6 ms per session
+```
+
+**Code:** `restoreLatency()` in `latency-estimator.ts`
+
+---
+
+### Step 12: Monthly GPU Cost
+
+**What:** Infrastructure cost estimate.
+
+**Formula:**
+```
+monthly_cost = gpu_count × price_per_hour × 730 hours/month
+```
+
+**Calculation (8× RTX A5000 on-demand at $1.10/hr):**
+```
+monthly_cost = 8 × $1.10 × 730 = $6,424/month
+```
+
+**Per-slot cost:**
+```
+cost_per_slot_per_day = $6,424 / 56 slots / 30 days = $3.82/day
+```
+
+**Code:** `monthlyGpuCost()` in `infra-cost.ts`
+
+---
+
+### Step 13: Weighted Average Context (Workload Mix)
+
+**What:** Converts the session type distribution into a single average context length.
+
+**Formula:**
+```
+avg_context = Σ(count_i × midpoint_i) / Σ(count_i)
+```
+
+**Midpoints:** light=35K, medium=130K, heavy=325K, extreme=1,250K
+
+**Calculation ({extreme: 1, heavy: 2, medium: 3, light: 4}):**
+```
+avg = (1×1,250,000 + 2×325,000 + 3×130,000 + 4×35,000) / (1+2+3+4)
+    = (1,250,000 + 650,000 + 390,000 + 140,000) / 10
+    = 2,430,000 / 10
+    = 243,000 tokens
+```
+
+This weighted average drives all the session slot calculations in `planCapacity()`.
+
+**Code:** `weightedAvgContext()` in `capacity-planner.ts`
+
+---
+
+### Full Worked Example Summary
+
+**Config:** Llama 3.1 70B, 8× RTX A5000, int4 weights, fp8 KV, 16K avg context
+
+| Step | Calculation | Result |
+|------|------------|--------|
+| KV/token | 2 × 80 × 8 × 128 × 1 | 160 KB |
+| KV/session (16K) | 16,384 × 160 KB | 2.5 GB |
+| Weights (int4) | 140 × 0.25 | 35 GB |
+| Total HBM | 22.5 × 8 | 180 GB |
+| Free for KV | 180 - 35 - 5 | 140 GB |
+| HBM slots | floor(140 / 2.5) | 56 |
+| NAND slots (4TB/GPU) | floor(32,000 / 2.5) | 12,800 |
+| TPOT (1 user) | 2.68 GB / 6.14 TB/s | 0.44 ms |
+| Single prefill (4K) | 44T flops / 182T flops/s | 241.9 ms |
+| TTFT (10 users) | 241.9 × 5.5 | 1,330 ms |
+| TTFT breach (5s SLA) | 2×5000/241.9 - 1 | 41 users |
+| Restore (Gen4 NVMe) | 0.3125 GB / 7 GB/s | 44.6 ms |
+| Monthly cost | 8 × $1.10 × 730 | $6,424 |
+
+---
+
 ## The CapacityPlan Object
 
 The `planCapacity()` function returns a complete `CapacityPlan` with every metric:
