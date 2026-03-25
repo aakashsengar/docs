@@ -175,3 +175,45 @@ monitor.start();
 | `gpu.temperatureC` | `number` | GPU temperature in Celsius |
 
 The `gpu-warning` event fires when GPU memory usage exceeds the `memoryThreshold` (default 85%). GPU monitoring is automatic — if `nvidia-smi` is not available (e.g. on CPU-only machines), the `gpu` field is simply omitted from snapshots.
+
+### Connecting to Capacity Planning
+
+The GPU snapshot data can be combined with the [Capacity Planning](/capacity/overview) module to compare actual GPU usage against theoretical capacity:
+
+```typescript
+import { ResourceMonitor } from "@radaros/edge";
+import {
+  planCapacity, SessionProfiler,
+  DEFAULT_ARCHITECTURES, DEFAULT_GPU_SPECS,
+} from "@radaros/core";
+
+const monitor = new ResourceMonitor({ intervalMs: 10_000 });
+
+monitor.on("snapshot", (snap) => {
+  if (!snap.gpu) return;
+
+  // Real GPU data
+  const freeGpuGb = snap.gpu.memoryTotalGb - snap.gpu.memoryUsedGb;
+
+  // Theoretical capacity for this hardware
+  const plan = planCapacity(
+    DEFAULT_ARCHITECTURES["llama-3.1-70b"],
+    {
+      gpu: DEFAULT_GPU_SPECS["rtx-a5000"],
+      gpuCount: 8,
+      nandPerGpuGb: 0,
+      nandBandwidthGBs: 7,
+    },
+    { extreme: 1, heavy: 2, medium: 3, light: 4 },
+    "fp8", "int4",
+  );
+
+  console.log(`Actual free GPU memory: ${freeGpuGb.toFixed(1)} GB`);
+  console.log(`Theoretical free for KV: ${plan.freeHbmForKvGb} GB`);
+  console.log(`Utilization: ${snap.gpu.utilizationPercent}%`);
+});
+
+monitor.start();
+```
+
+When paired with the [Session Profiler](/capacity/session-profiler) on the same `EventBus`, you get a complete picture: real GPU usage from `nvidia-smi`, real token counts from the LLM API, and theoretical capacity limits — all feeding into the same [Prometheus metrics](/observability/overview#capacity-metrics).
