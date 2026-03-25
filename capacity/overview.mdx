@@ -83,7 +83,7 @@ How a model organizes its attention heads directly determines KV cache size:
 | Type | Full Name | Description | KV Heads | KV Size Impact |
 |------|-----------|-------------|----------|---------------|
 | **MHA** | Multi-Head Attention | Every query head has its own dedicated KV head. Original transformer design. | = query heads | Baseline (largest) |
-| **GQA** | Grouped Query Attention | Multiple query heads share one KV head. Groups of query heads attend to the same K/V vectors. | < query heads | Reduced by group factor (typically 4-8×) |
+| **GQA** | Grouped Query Attention | Multiple query heads share one KV head. Groups of query heads attend to the same K/V vectors. | fewer than query heads | Reduced by group factor (typically 4-8×) |
 | **MQA** | Multi-Query Attention | All query heads share a single KV head. Extreme compression. | 1 | Minimal (smallest possible) |
 
 **Why it matters:** Llama 3.1 70B uses GQA with 64 query heads but only 8 KV heads — an 8× reduction in KV cache compared to MHA. Falcon 7B uses MQA with just 1 KV head — KV cache is only 8 KB/token vs 320 KB for Llama 70B.
@@ -243,7 +243,7 @@ The distribution of session types by token intensity:
 
 | Category | Token Range | Typical Use Case | KV Cache (70B, fp8) |
 |----------|------------|------------------|---------------------|
-| **Light** | 0 – 50K | Quick Q&A, lookups | < 7.8 GB |
+| **Light** | 0 – 50K | Quick Q&A, lookups | up to 7.8 GB |
 | **Medium** | 50K – 200K | Multi-turn explanations | 7.8 – 31.2 GB |
 | **Heavy** | 200K – 500K | Deep research, SWE tasks | 31.2 – 78.1 GB |
 | **Extreme** | 500K+ | Full repo analysis, long agents | 78.1+ GB |
@@ -616,7 +616,7 @@ C = 2 × ttft_sla_ms / single_prefill - 1
 C = 2 × 5000 / 241.9 - 1 = 41.3 - 1 = 40.3 → 41 users
 ```
 
-At 41 concurrent users, the average TTFT hits 5 seconds. The 42nd user will experience > 5s wait.
+At 41 concurrent users, the average TTFT hits 5 seconds. The 42nd user will experience over 5s wait.
 
 **Important:** Adding NAND does NOT change this number. NAND parks cold sessions but doesn't add TFLOPS — the prefill queue bottleneck is compute, not memory.
 
@@ -662,7 +662,7 @@ restore_ms   = (0.3125 / 1.75) × 1000 = 178.6 ms per session
 monthly_cost = gpu_count × price_per_hour × 730 hours/month
 ```
 
-**Calculation (8× RTX A5000 on-demand at $1.10/hr):**
+**Calculation (8× RTX A5000 on-demand at \$1.10/hr):**
 ```
 monthly_cost = 8 × $1.10 × 730 = $6,424/month
 ```
@@ -719,7 +719,7 @@ This weighted average drives all the session slot calculations in `planCapacity(
 | TTFT (10 users) | 241.9 × 5.5 | 1,330 ms |
 | TTFT breach (5s SLA) | 2×5000/241.9 - 1 | 41 users |
 | Restore (Gen4 NVMe) | 0.3125 GB / 7 GB/s | 44.6 ms |
-| Monthly cost | 8 × $1.10 × 730 | $6,424 |
+| Monthly cost | 8 × \$1.10 × 730 | \$6,424 |
 
 ---
 
