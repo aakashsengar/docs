@@ -51,62 +51,271 @@ console.log(plan.monthlyGpuCostUsd);
 
 ---
 
-## Core Concepts
+## Glossary
 
-### KV Cache Sizing
+Every term used in the capacity planning system, explained in detail.
 
-Every token in the context window stores Key and Value tensors per layer:
+### KV Cache (Key-Value Cache)
+
+During autoregressive generation, each transformer layer computes Key and Value projections for every token. Without caching, generating token N would require recomputing K and V for all N-1 prior tokens — O(N²) cost per step. The KV cache stores these projections so each decode step only reads them — reducing cost to O(N) per step.
+
+The KV cache is the **single largest consumer of GPU memory** during inference. For Llama 3.1 70B at 128K context, the KV cache alone is ~40 GB in bf16 — larger than many GPUs.
+
+### KV Bytes Per Token
+
+The memory required to store one token's KV cache entry across all layers:
 
 ```
 KV bytes/token = 2 × layers × kv_heads × head_dim × precision_bytes
 ```
 
-For Llama 3.1 70B in bf16: `2 × 80 × 8 × 128 × 2 = 327,680 bytes (~320 KB/token)`.
+The `2×` accounts for both the Key tensor and the Value tensor. Each layer has its own independent set of K and V vectors, and each KV head stores a vector of `head_dim` floating-point values.
 
-GQA (Grouped Query Attention) is the key — Llama 3.1 uses 8 KV heads instead of 64 query heads, reducing KV cache by 8×.
+**Example — Llama 3.1 70B in bf16:**
+`2 × 80 layers × 8 kv_heads × 128 head_dim × 2 bytes = 327,680 bytes (~320 KB per token)`
 
-### Memory Budget
+This means a single 128K-context session consumes 128,000 × 320 KB = **40 GB** of KV cache.
+
+### Attention Types
+
+How a model organizes its attention heads directly determines KV cache size:
+
+| Type | Full Name | Description | KV Heads | KV Size Impact |
+|------|-----------|-------------|----------|---------------|
+| **MHA** | Multi-Head Attention | Every query head has its own dedicated KV head. Original transformer design. | = query heads | Baseline (largest) |
+| **GQA** | Grouped Query Attention | Multiple query heads share one KV head. Groups of query heads attend to the same K/V vectors. | < query heads | Reduced by group factor (typically 4-8×) |
+| **MQA** | Multi-Query Attention | All query heads share a single KV head. Extreme compression. | 1 | Minimal (smallest possible) |
+
+**Why it matters:** Llama 3.1 70B uses GQA with 64 query heads but only 8 KV heads — an 8× reduction in KV cache compared to MHA. Falcon 7B uses MQA with just 1 KV head — KV cache is only 8 KB/token vs 320 KB for Llama 70B.
+
+### Layers
+
+The number of transformer blocks stacked sequentially in the model. Each layer has its own independent attention weights and stores its own KV cache. More layers = deeper model = more KV memory per token.
+
+| Model | Layers | Impact |
+|-------|--------|--------|
+| Llama 3.1 8B | 32 | Lightweight |
+| Llama 3.1 70B | 80 | KV cache scales 2.5× vs 8B |
+| Llama 3.1 405B | 126 | Nearly 4× the 8B's KV per token |
+
+### Head Dimension
+
+The size of each attention vector (both Q/K/V). Determined by `hidden_dim / num_attention_heads`. Larger head dimensions store more information per attention head but increase KV cache proportionally.
+
+Most modern models use 128 (Llama, Mistral, Mixtral). Falcon uses 64. Gemma 2 9B uses 256.
+
+### Hidden Dimension
+
+The width of the model's internal representation — the size of the vector that represents each token as it flows through the network. Determines the model's capacity to represent complex patterns. Related to head_dim via `hidden_dim = attention_heads × head_dim`.
+
+### FFN Dimension
+
+The intermediate size of the feed-forward network inside each transformer layer. Typically 3-4× the hidden dimension. Affects prefill compute cost because FFN operations scale as O(N × ffn_dim) per layer.
+
+### HBM (High Bandwidth Memory)
+
+The GPU's on-chip memory (often called VRAM). This is where model weights, KV cache, and activations must reside for active inference. HBM is fast (~2-3.35 TB/s on modern GPUs) but limited in capacity (24-80 GB per GPU).
+
+The entire capacity planning problem reduces to: **what fits in HBM?**
 
 ```
-free_hbm = (gpu_hbm × gpu_count) - weight_memory - overhead
-hbm_slots = floor(free_hbm / kv_per_session)
+total_hbm = gpu_hbm × gpu_count
+free_for_kv = total_hbm - weight_memory - overhead (5 GB)
+hbm_slots = floor(free_for_kv / kv_per_session)
 ```
 
-Weight quantization (int4 AWQ) shrinks weights from 140 GB to 35 GB, freeing massive KV headroom.
+### HBM Slots
 
-### Latency Model
+The number of concurrent sessions that can have their full KV cache resident in GPU HBM. These sessions can generate tokens at full speed with no restore penalty. When HBM is full, new sessions must either wait or be served from NAND (with restore latency).
 
-**TPOT** (Time Per Output Token) — memory-bandwidth-bound:
+### Weight Memory
+
+The GPU memory consumed by the model's parameters (weights). This is a fixed cost that must be paid regardless of how many users are served.
+
+| Precision | Llama 70B Weight Size | Notes |
+|-----------|----------------------|-------|
+| bf16 | 140 GB | Full quality, needs 2+ H100s |
+| int8 | 70 GB | Fits on 1× H100 |
+| int4 (AWQ/GPTQ) | 35 GB | Fits on 1× RTX A5000 with KV headroom |
+
+### NAND SSD Offloading
+
+Using NVMe solid-state drives attached to each GPU server to store KV cache for **inactive (parked) sessions**. When a parked session becomes active, its KV cache is loaded from NAND back into HBM.
+
+NAND expands the total number of sessions the system can manage but does **not** help active inference speed — decoding still requires KV data in HBM.
+
+| Storage Tier | Bandwidth | Latency | Role |
+|-------------|-----------|---------|------|
+| GPU HBM | 2,000–3,350 GB/s | ~100ns | Active decoding |
+| NVMe Gen4 SSD | ~7 GB/s | ~100µs | Cold session parking |
+| NVMe Gen5 SSD | ~14 GB/s | ~100µs | Faster cold parking |
+
+### NAND Slots
+
+The number of sessions that can be parked on NAND SSD while inactive. Computed as `total_nand_gb / kv_per_session_gb`. These sessions can be restored to HBM when they become active, at the cost of restore latency.
+
+### Restore Latency
+
+The time required to load a parked session's KV cache from NAND SSD back into GPU HBM. This is the "wake-up cost" for a cold session.
+
 ```
-TPOT = (context × batch × kv_bytes_per_token) / aggregate_bandwidth
+restore_time = kv_size_gb / nand_bandwidth_gb_per_sec
 ```
 
-**TTFT** (Time To First Token) — compute-bound, queued:
+**Example:** 5 GB KV cache on Gen4 NVMe (7 GB/s) = 714ms restore time.
+
+When multiple sessions restore simultaneously, they share the SSD bandwidth pipe, increasing individual restore time: `effective_bw = nand_bw / parallel_streams`.
+
+### Cold Ratio
+
+The percentage of total sessions that are parked on NAND at any given moment (inactive, not generating tokens). Typical values:
+
+- **20-30%** — most sessions are active (interactive chat)
+- **50%** — half parked (async agent workloads with tool waits)
+- **70-80%** — most parked (background research agents)
+
+`concurrent_active = total_sessions × (1 - cold_ratio)`
+
+### TPOT (Time Per Output Token)
+
+The latency for each decode step — generating one output token. Decoding is **memory-bandwidth-bound** because each step must stream the entire KV cache for all active sequences through HBM.
+
+```
+TPOT = (context_tokens × batch_size × kv_bytes_per_token) / aggregate_bandwidth
+```
+
+TPOT scales linearly with context length and batch size. A user perceives this as the streaming speed — lower TPOT = faster text output. Interactive applications target < 50ms TPOT (~20 tokens/sec streaming).
+
+### TTFT (Time To First Token)
+
+The latency from when a user submits their prompt to when the first output token arrives. TTFT is dominated by **prefill** — processing the entire input prompt through every layer to build the KV cache.
+
+Prefill is **compute-bound** (not memory-bound like decode) because attention is O(N²) in the prompt length.
+
+Under concurrent load, prefills are serialized on the GPU compute path. With C concurrent users, a random user waits for C/2 prefills ahead of them:
+
 ```
 TTFT(C users) = single_prefill_time × (C + 1) / 2
 ```
 
-Adding NAND expands session capacity but does **not** improve prefill speed.
+Interactive applications target < 1-5 seconds TTFT.
+
+### TTFT Breach Point
+
+The maximum number of concurrent users before average TTFT exceeds the configured SLA threshold. Computed by solving:
+
+```
+single_prefill × (C + 1) / 2 = ttft_sla
+→ C = 2 × ttft_sla / single_prefill - 1
+```
+
+Adding more GPUs increases TFLOPS, which reduces single prefill time, which pushes the breach point out. Adding NAND does **not** move the breach point — NAND doesn't help prefill compute.
+
+### Single Prefill Time
+
+The time to process one prompt through all layers with no queue contention. This is the atomic unit that TTFT is built from.
+
+```
+prefill_flops = (4 × N² × hidden_dim + 4 × N × ffn_dim) × layers
+single_prefill = prefill_flops / (gpu_tflops × gpu_count × efficiency)
+```
+
+Where efficiency is ~35% (real-world vs peak TFLOPS). The N² term (attention) dominates at long contexts — a 32K prompt takes ~64× longer than a 4K prompt, not 8×.
+
+### Prefix Caching / Prefix Hit Rate
+
+When multiple requests share the same prefix (system prompt, RAG context, few-shot examples), the KV cache for that prefix can be computed once and reused. A prefix cache hit skips the expensive prefill entirely for the shared portion.
+
+A 60% hit rate can effectively double throughput — the biggest "free" optimization in production inference.
+
+### Tensor Parallelism
+
+Splitting a model across multiple GPUs within the same node. Each GPU holds a shard of the weights and a shard of each KV cache. GPUs communicate via NVLink during each forward pass.
+
+- Increases total HBM (more GPUs = more memory)
+- Increases aggregate bandwidth (faster TPOT)
+- Increases aggregate TFLOPS (faster prefill, lower TTFT)
+- Adds ~5-15% communication overhead via NVLink
+
+### Workload Mix
+
+The distribution of session types by token intensity:
+
+| Category | Token Range | Typical Use Case | KV Cache (70B, fp8) |
+|----------|------------|------------------|---------------------|
+| **Light** | 0 – 50K | Quick Q&A, lookups | < 7.8 GB |
+| **Medium** | 50K – 200K | Multi-turn explanations | 7.8 – 31.2 GB |
+| **Heavy** | 200K – 500K | Deep research, SWE tasks | 31.2 – 78.1 GB |
+| **Extreme** | 500K+ | Full repo analysis, long agents | 78.1+ GB |
+
+The workload mix determines the weighted average context length and drives the capacity plan. A mix of `{ extreme: 1, heavy: 2, medium: 3, light: 4 }` (10 users) produces a weighted average context of ~197K tokens.
+
+### Session Category Thresholds
+
+The token boundaries used by the `SessionProfiler` to classify live sessions:
+
+```typescript
+SESSION_CATEGORY_THRESHOLDS = {
+  light:   50_000,     // up to 50K tokens
+  medium:  200_000,    // 50K - 200K
+  heavy:   500_000,    // 200K - 500K
+  extreme: Infinity,   // 500K+
+};
+```
+
+### Overhead
+
+A fixed 5 GB budget for activations, CUDA contexts, framework metadata, and vLLM's internal data structures (page tables, scheduling state). This is subtracted from total HBM before computing KV capacity.
+
+---
+
+## Precision Options
+
+KV cache and model weights can be quantized independently:
+
+### KV Precision
+
+| Precision | Bytes/element | KV/token (70B) | Quality Impact |
+|-----------|--------------|-----------------|---------------|
+| `bf16` | 2 | 320 KB | Lossless — baseline |
+| `fp8` | 1 | 160 KB | ~0.1-0.3% perplexity increase — **standard production choice** |
+| `int8` | 1 | 160 KB | Slightly more lossy than fp8 |
+| `int4` | 0.5 | 80 KB | Noticeable degradation on long contexts |
+
+**fp8 KV is standard practice** — it halves memory and bandwidth usage with negligible quality loss.
+
+### Weight Precision
+
+| Precision | 70B Size | Min GPUs (H100) | Quality Impact |
+|-----------|---------|-----------------|---------------|
+| `bf16` | 140 GB | 2× H100 | Lossless |
+| `int8` | 70 GB | 1× H100 | Minor degradation |
+| `int4` (AWQ/GPTQ) | 35 GB | 1× RTX A5000 | Acceptable for most tasks |
+
+The standard production setup is **fp8 KV + bf16 weights** for cloud GPUs, or **fp8 KV + int4 weights** for cost-sensitive self-hosted deployments.
 
 ---
 
 ## Model Architectures
 
-15 models are included out of the box:
+15 models included out of the box, with specs sourced from HuggingFace `config.json`:
 
-| Model | Type | KV Heads | KV/token (bf16) |
-|-------|------|----------|-----------------|
-| Llama 3.1 8B | GQA | 8 | 128 KB |
-| Llama 3.1 70B | GQA | 8 | 320 KB |
-| Llama 3.1 405B | GQA | 8 | 504 KB |
-| Llama 2 7B | MHA | 32 | 512 KB |
-| Mixtral 8×7B | GQA | 8 | 128 KB |
-| Mixtral 8×22B | GQA | 8 | 176 KB |
-| Falcon 7B | MQA | 1 | 8 KB |
-| Mistral 7B | GQA | 8 | 128 KB |
-| Phi-3 Mini | MHA | 32 | 384 KB |
-| Gemma 2 9B | GQA | 8 | 168 KB |
-| Gemma 2 27B | GQA | 16 | 184 KB |
+| Model | Type | Layers | KV Heads | Head Dim | KV/token (bf16) | Max Context |
+|-------|------|--------|----------|----------|-----------------|------------|
+| Llama 3.1 8B | GQA | 32 | 8 | 128 | 128 KB | 128K |
+| Llama 3.1 70B | GQA | 80 | 8 | 128 | 320 KB | 128K |
+| Llama 3.1 405B | GQA | 126 | 8 | 128 | 504 KB | 128K |
+| Llama 2 7B | MHA | 32 | 32 | 128 | 512 KB | 4K |
+| Llama 2 13B | MHA | 40 | 40 | 128 | 640 KB | 4K |
+| Llama 2 70B | GQA | 80 | 8 | 128 | 320 KB | 4K |
+| Mixtral 8×7B | GQA | 32 | 8 | 128 | 128 KB | 32K |
+| Mixtral 8×22B | GQA | 56 | 8 | 128 | 176 KB | 64K |
+| Falcon 7B | MQA | 32 | 1 | 64 | 8 KB | 8K |
+| Falcon 40B | GQA | 60 | 8 | 64 | 60 KB | 8K |
+| Mistral 7B | GQA | 32 | 8 | 128 | 128 KB | 32K |
+| Phi-3 Mini | MHA | 32 | 32 | 96 | 384 KB | 128K |
+| Gemma 2 9B | GQA | 42 | 8 | 256 | 168 KB | 8K |
+| Gemma 2 27B | GQA | 46 | 16 | 128 | 184 KB | 8K |
 
 Custom architectures can be passed to any function:
 
@@ -128,27 +337,49 @@ const myModel: ModelArchitecture = {
 };
 ```
 
+---
+
 ## GPU Specs
 
-| GPU | HBM | Bandwidth | bf16 TFLOPS |
-|-----|-----|-----------|------------|
-| H100 SXM | 80 GB | 3.35 TB/s | 989 |
-| A100 SXM | 80 GB | 2.0 TB/s | 312 |
-| L40S | 48 GB | 0.864 TB/s | 366 |
-| RTX 4090 | 24 GB | 1.008 TB/s | 330 |
+| GPU | HBM | Bandwidth | bf16 TFLOPS | NVLink | Use Case |
+|-----|-----|-----------|------------|--------|----------|
+| H100 SXM | 80 GB | 3.35 TB/s | 989 | 900 GB/s | Premium cloud inference |
+| A100 SXM | 80 GB | 2.0 TB/s | 312 | 600 GB/s | Standard cloud inference |
+| L40S | 48 GB | 0.864 TB/s | 366 | None | Mid-tier / batch workloads |
+| RTX A5000 | 22.5 GB | 0.768 TB/s | 65 | None | Cost-sensitive self-hosted |
+| RTX 4090 | 24 GB | 1.008 TB/s | 330 | None | Dev / small-scale serving |
+
+**Key metrics explained:**
+
+- **HBM** — Total GPU memory. Determines how much fits (weights + KV + overhead).
+- **Bandwidth** — How fast data streams from HBM. Determines TPOT (decode speed).
+- **bf16 TFLOPS** — Peak compute throughput. Determines prefill speed and TTFT.
+- **NVLink** — GPU-to-GPU interconnect bandwidth. Only matters for tensor parallelism across multiple GPUs in the same node. GPUs without NVLink communicate over PCIe (~64 GB/s), which adds latency for multi-GPU setups.
 
 ---
 
-## Precision Options
+## The CapacityPlan Object
 
-| Precision | Bytes | Use Case |
-|-----------|-------|----------|
-| `bf16` | 2 | Full quality baseline |
-| `fp8` | 1 | Standard production KV — negligible quality loss |
-| `int8` | 1 | Alternative to fp8 |
-| `int4` | 0.5 | Aggressive — noticeable on long contexts |
+The `planCapacity()` function returns a complete `CapacityPlan` with every metric:
 
-KV and weight precision are independent. The standard production setup is **fp8 KV + bf16 weights** (or int4 weights for AWQ/GPTQ models).
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | `ModelArchitecture` | The model being planned for |
+| `hardware` | `HardwareConfig` | GPU setup (type, count, NAND) |
+| `kvPrecision` | `KvPrecision` | KV cache precision used |
+| `weightPrecision` | `WeightPrecision` | Weight quantization used |
+| `totalHbmGb` | `number` | Total GPU memory across all GPUs |
+| `weightMemoryGb` | `number` | Memory consumed by model weights |
+| `freeHbmForKvGb` | `number` | HBM available for KV cache after weights + overhead |
+| `kvBytesPerToken` | `number` | Bytes per token in KV cache |
+| `hbmSlots` | `number` | Concurrent sessions fitting in HBM |
+| `nandSlots` | `number` | Sessions parkable on NAND SSD |
+| `totalSessions` | `number` | hbmSlots + nandSlots |
+| `tpotMs` | `number` | Estimated Time Per Output Token (ms) |
+| `ttftMs` | `number` | Estimated Time To First Token (ms) |
+| `restoreLatencyMs` | `number \| null` | NAND → HBM restore time (null if no NAND) |
+| `ttftBreachPoint` | `number` | Max concurrent users before 5s TTFT SLA breach |
+| `monthlyGpuCostUsd` | `number` | Estimated monthly GPU infrastructure cost |
 
 ---
 
@@ -160,8 +391,14 @@ The `apps/capacity-planner/` Next.js app provides a full interactive UI with:
 - GPU type, count, NAND per GPU sliders
 - KV/weight precision selectors
 - Workload controls (avg context, cold ratio, SLA thresholds)
-- Per-GPU breakdown panel
-- 6 interactive charts (Users vs GPUs, TPOT, TTFT, Restore, Cost, GPU vs NAND)
+- Per-GPU breakdown panel (shows free HBM + NAND per card)
+- 6 interactive charts:
+  - **Users vs GPUs** — session capacity scaling with GPU count
+  - **Users vs Context** — how capacity drops as context grows
+  - **TPOT vs Users** — decode latency at different context sizes
+  - **TTFT vs Users** — prefill queue congestion with SLA breach markers
+  - **Restore Budget** — NAND restore time at Gen4/Gen5 bandwidth
+  - **GPU vs NAND** — total sessions across NAND sizes
 
 ```bash
 cd apps/capacity-planner
