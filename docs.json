@@ -105,7 +105,8 @@
           {
             "group": "Voice Agents",
             "pages": [
-              "voice/overview"
+              "voice/overview",
+              "voice/vision-agents"
             ]
           },
           {

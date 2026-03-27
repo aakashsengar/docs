@@ -57,7 +57,7 @@ Every term used in the capacity planning system, explained in detail.
 
 ### KV Cache (Key-Value Cache)
 
-During autoregressive generation, each transformer layer computes Key and Value projections for every token. Without caching, generating token N would require recomputing K and V for all N-1 prior tokens — O(N²) cost per step. The KV cache stores these projections so each decode step only reads them — reducing cost to O(N) per step.
+During autoregressive generation, each transformer layer computes Key and Value projections for every token. Without caching, generating token N would require recomputing K and V for all N-1 prior tokens — quadratic cost per step. The KV cache stores these projections so each decode step only reads them — reducing cost to linear per step.
 
 The KV cache is the **single largest consumer of GPU memory** during inference. For Llama 3.1 70B at 128K context, the KV cache alone is ~40 GB in bf16 — larger than many GPUs.
 
@@ -110,7 +110,7 @@ The width of the model's internal representation — the size of the vector that
 
 ### FFN Dimension
 
-The intermediate size of the feed-forward network inside each transformer layer. Typically 3-4× the hidden dimension. Affects prefill compute cost because FFN operations scale as O(N × ffn_dim) per layer.
+The intermediate size of the feed-forward network inside each transformer layer. Typically 3-4× the hidden dimension. Affects prefill compute cost because FFN operations scale linearly with N per layer.
 
 ### HBM (High Bandwidth Memory)
 
@@ -190,7 +190,7 @@ TPOT scales linearly with context length and batch size. A user perceives this a
 
 The latency from when a user submits their prompt to when the first output token arrives. TTFT is dominated by **prefill** — processing the entire input prompt through every layer to build the KV cache.
 
-Prefill is **compute-bound** (not memory-bound like decode) because attention is O(N²) in the prompt length.
+Prefill is **compute-bound** (not memory-bound like decode) because attention scales quadratically with prompt length.
 
 Under concurrent load, prefills are serialized on the GPU compute path. With C concurrent users, a random user waits for C/2 prefills ahead of them:
 
@@ -220,7 +220,7 @@ prefill_flops = (4 × N² × hidden_dim + 4 × N × ffn_dim) × layers
 single_prefill = prefill_flops / (gpu_tflops × gpu_count × efficiency)
 ```
 
-Where efficiency is ~35% (real-world vs peak TFLOPS). The N² term (attention) dominates at long contexts — a 32K prompt takes ~64× longer than a 4K prompt, not 8×.
+Where efficiency is ~35% (real-world vs peak TFLOPS). The quadratic attention term dominates at long contexts — a 32K prompt takes ~64x longer than a 4K prompt, not 8x.
 
 ### Prefix Caching / Prefix Hit Rate
 
@@ -542,7 +542,7 @@ TPOT scales linearly with batch size. At 50ms SLA, you breach at ~114 concurrent
 
 **What:** Time to process one prompt through all layers (no queue).
 
-**Why compute-bound:** Prefill runs the full attention computation (O(N²) in prompt length) plus FFN (O(N)). The GPU compute units are saturated, not memory.
+**Why compute-bound:** Prefill runs the full attention computation (quadratic in prompt length) plus FFN (linear). The GPU compute units are saturated, not memory.
 
 **Formula:**
 ```
@@ -568,7 +568,7 @@ single_prefill = (44,018,046,074,880 / 182,000,000,000,000) × 1000 = 241.9 ms
 ```
 
 **Why 32K prompt is ~64× slower than 4K (not 8×):**
-The `4 × N²` attention term dominates. When N grows 8×, N² grows 64×. This is why long-context prefill is so expensive.
+The quadratic attention term dominates. When N grows 8x, the attention cost grows 64x. This is why long-context prefill is so expensive.
 
 **Code:** `singlePrefillMs()` in `latency-estimator.ts`
 

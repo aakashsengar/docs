@@ -1,0 +1,517 @@
+---
+title: Vision Agents
+description: Build real-time audio + video agents that can see, hear, and speak — with voice selection, multilingual auto-detection, screen sharing, camera feeds, and interruption support.
+---
+
+# Vision Agents
+
+RadarOS supports **real-time vision+audio conversations** through the `VisionAgent` class. Vision agents stream both audio and video frames to multimodal models, enabling agents that can see camera feeds, screen shares, or images while having a spoken conversation.
+
+`VisionAgent` is a separate class from `VoiceAgent` with its own `VisionProvider` interface, designed for clean multi-provider support.
+
+---
+
+## Quick Start
+
+```bash
+npm install @radaros/core @google/genai
+```
+
+```typescript
+import { VisionAgent, geminiVisionLive } from "@radaros/core";
+import { readFileSync } from "fs";
+
+const agent = new VisionAgent({
+  name: "vision-assistant",
+  provider: geminiVisionLive("gemini-3.1-flash-live-preview"),
+  instructions: "You can see and hear. Describe what you see when asked.",
+  voice: "Aoede",
+  fps: 1,
+  thinkingLevel: "minimal",
+});
+
+const session = await agent.connect();
+
+// Send an image frame (JPEG from camera, screenshot, etc.)
+const frame = readFileSync("./photo.jpg");
+session.sendImage(frame, "image/jpeg");
+
+// Send audio (PCM 16kHz)
+session.sendAudio(micBuffer);
+
+// Send text
+session.sendText("What do you see?");
+
+// Listen for responses
+session.on("transcript", ({ text, role }) => {
+  console.log(`[${role}] ${text}`);
+});
+
+session.on("audio", ({ data }) => {
+  // Play audio response (PCM 24kHz)
+});
+
+session.on("interrupted", () => {
+  // User started speaking — stop playback
+});
+```
+
+---
+
+## Architecture: Agent vs VoiceAgent vs VisionAgent
+
+RadarOS has three independent agent tiers:
+
+| Class | Provider | Input | Output | Use Case |
+|-------|----------|-------|--------|----------|
+| `Agent` | `ModelProvider` | Text | Text + tools | Chat, RAG, workflows |
+| `VoiceAgent` | `RealtimeProvider` | Audio | Audio + text | Voice assistants |
+| `VisionAgent` | `VisionProvider` | Audio + Images | Audio + text | Vision assistants, video analysis |
+
+Each tier has its own provider interface. Existing code is never affected when a new tier is added.
+
+---
+
+## VisionProvider Interface
+
+Any provider that supports audio + video can implement this:
+
+```typescript
+interface VisionProvider {
+  readonly providerId: string;
+  readonly modelId: string;
+  connect(config: VisionSessionConfig): Promise<VisionConnection>;
+}
+
+interface VisionConnection {
+  sendAudio(data: Buffer): void;
+  sendImage(data: Buffer, mimeType?: string): void;
+  sendText(text: string): void;
+  sendToolResult(callId: string, result: string): void;
+  interrupt(): void;
+  close(): Promise<void>;
+  on(event, handler): void;
+  off(event, handler): void;
+}
+```
+
+The difference from `RealtimeConnection` (voice) is `sendImage()` — this is what makes a provider "vision-capable."
+
+---
+
+## Gemini 3.1 Flash Live
+
+The first `VisionProvider` implementation uses Google's Gemini 3.1 Flash Live model.
+
+```typescript
+import { geminiVisionLive } from "@radaros/core";
+
+const provider = geminiVisionLive("gemini-3.1-flash-live-preview");
+```
+
+Model specs:
+- **Input:** Text, images, audio, video
+- **Output:** Text and audio
+- **Context:** 131K input, 65K output
+- **Features:** Function calling, search grounding, thinking
+- **Thinking:** Uses `thinkingLevel` ("minimal", "low", "medium", "high") instead of `thinkingBudget`
+
+---
+
+## Configuration
+
+```typescript
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  instructions: "You are a helpful vision assistant.",
+  voice: "Aoede",              // voice selection (30 voices available)
+  language: "hi-IN",           // optional — force a BCP-47 language code
+  fps: 1,                      // frame rate hint
+  thinkingLevel: "minimal",    // lowest latency
+  temperature: 0.7,
+  tools: [myTool],
+  memory: { /* UnifiedMemoryConfig */ },
+});
+```
+
+### Full Configuration Reference
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | **required** | Agent name for logging and identification |
+| `provider` | `VisionProvider` | **required** | The vision provider to use |
+| `instructions` | `string` | — | System prompt / instructions |
+| `voice` | `string` | Provider default | Voice name for audio responses |
+| `language` | `string` | Auto-detect | BCP-47 language code (e.g. `"en-US"`, `"hi-IN"`) |
+| `fps` | `number` | `1` | Suggested video frame rate |
+| `thinkingLevel` | `"minimal" \| "low" \| "medium" \| "high"` | `"minimal"` | Reasoning depth (Gemini 3.1+) |
+| `temperature` | `number` | — | Sampling temperature |
+| `tools` | `ToolDef[]` | — | Tools the agent can call |
+| `memory` | `UnifiedMemoryConfig` | — | Memory configuration |
+| `logLevel` | `LogLevel` | — | Logging verbosity |
+
+---
+
+## Voice Selection
+
+Gemini Live supports **30 prebuilt voices**, each with a distinct personality. Set the `voice` property on the agent config:
+
+```typescript
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  voice: "Puck",  // Upbeat personality
+});
+```
+
+### Available Voices
+
+| Voice | Personality | | Voice | Personality |
+|-------|-------------|-|-------|-------------|
+| **Puck** | Upbeat | | **Laomedeia** | Upbeat |
+| **Kore** | Firm | | **Schedar** | Even |
+| **Charon** | Informative | | **Achird** | Friendly |
+| **Fenrir** | Excitable | | **Sadachbia** | Lively |
+| **Aoede** | Breezy | | **Enceladus** | Breathy |
+| **Zephyr** | Bright | | **Algieba** | Smooth |
+| **Orus** | Firm | | **Algenib** | Gravelly |
+| **Autonoe** | Bright | | **Achernar** | Soft |
+| **Umbriel** | Easy-going | | **Gacrux** | Mature |
+| **Erinome** | Clear | | **Zubenelgenubi** | Casual |
+| **Leda** | Youthful | | **Sadaltager** | Knowledgeable |
+| **Callirrhoe** | Easy-going | | **Rasalgethi** | Informative |
+| **Iapetus** | Clear | | **Alnilam** | Firm |
+| **Despina** | Smooth | | **Pulcherrima** | Forward |
+| **Vindemiatrix** | Gentle | | **Sulafat** | Warm |
+
+### Per-Session Voice Selection
+
+You can create agents with different voices per session — useful for letting users pick:
+
+```typescript
+socket.on("vision.start", async ({ voice }) => {
+  const agent = new VisionAgent({
+    name: "assistant",
+    provider: geminiVisionLive(),
+    instructions: "You are a helpful assistant.",
+    voice: voice || undefined,  // user's choice or provider default
+  });
+  const session = await agent.connect();
+});
+```
+
+---
+
+## Multilingual Support
+
+Vision agents support **24+ languages** with automatic language detection.
+
+### Auto-Detection (Recommended)
+
+The agent detects the user's spoken language and responds in kind — no configuration needed. Add a language rule to your instructions:
+
+```typescript
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  instructions: [
+    "You are a helpful multilingual vision assistant.",
+    "LANGUAGE RULE: Always detect the language the user is speaking and respond in that same language.",
+    "If the user switches languages mid-conversation, switch with them immediately.",
+  ].join(" "),
+});
+```
+
+The user can speak Hindi, switch to English, then ask something in Japanese — the agent follows naturally.
+
+### Explicit Language (Optional)
+
+Force a specific language using the `language` config with a BCP-47 code:
+
+```typescript
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  language: "hi-IN",  // always respond in Hindi
+});
+```
+
+### Supported Languages
+
+| Language | Code | | Language | Code |
+|----------|------|-|----------|------|
+| English (US) | `en-US` | | Korean | `ko-KR` |
+| Hindi | `hi-IN` | | Japanese | `ja-JP` |
+| Spanish (US) | `es-US` | | Arabic (Egyptian) | `ar-EG` |
+| French | `fr-FR` | | Bengali | `bn-BD` |
+| German | `de-DE` | | Marathi | `mr-IN` |
+| Portuguese (Brazil) | `pt-BR` | | Tamil | `ta-IN` |
+| Italian | `it-IT` | | Telugu | `te-IN` |
+| Dutch | `nl-NL` | | Thai | `th-TH` |
+| Polish | `pl-PL` | | Turkish | `tr-TR` |
+| Romanian | `ro-RO` | | Ukrainian | `uk-UA` |
+| Russian | `ru-RU` | | Vietnamese | `vi-VN` |
+| Indonesian | `id-ID` | | English (India) | `en-IN` |
+
+---
+
+## Audio Interruption
+
+When the user starts speaking while the agent is responding, the agent automatically stops its current response. This is handled by Gemini Live's built-in Voice Activity Detection (VAD).
+
+### Server-Side
+
+The `VisionSession` emits an `interrupted` event:
+
+```typescript
+const session = await agent.connect();
+
+session.on("interrupted", () => {
+  console.log("User interrupted — response stopped");
+  // Forward to client to stop audio playback
+});
+```
+
+### Client-Side
+
+Stop all queued audio playback when interrupted:
+
+```javascript
+let activeSources = [];
+
+socket.on("vision.audio", (data) => {
+  const source = playbackCtx.createBufferSource();
+  // ... decode and play audio ...
+  activeSources.push(source);
+  source.onended = () => {
+    activeSources = activeSources.filter(s => s !== source);
+  };
+});
+
+socket.on("vision.interrupted", () => {
+  activeSources.forEach(s => { try { s.stop(); } catch(e) {} });
+  activeSources = [];
+  nextPlayTime = 0;
+});
+```
+
+---
+
+## Sending Image Frames
+
+### From a file
+
+```typescript
+import { readFileSync } from "fs";
+
+const frame = readFileSync("./screenshot.jpg");
+session.sendImage(frame, "image/jpeg");
+```
+
+### Screen sharing (via browser getDisplayMedia)
+
+```javascript
+const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+const video = document.createElement("video");
+video.srcObject = stream;
+await video.play();
+
+const canvas = document.createElement("canvas");
+const nw = video.videoWidth;
+const nh = video.videoHeight;
+const scale = Math.min(1, 1280 / nw);
+canvas.width = Math.round(nw * scale);
+canvas.height = Math.round(nh * scale);
+const ctx = canvas.getContext("2d");
+
+setInterval(() => {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob((blob) => {
+    blob.arrayBuffer().then((buf) => {
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      socket.emit("vision.image", {
+        data: base64,
+        mimeType: "image/jpeg",
+        source: "screen",
+      });
+    });
+  }, "image/jpeg", 0.7);
+}, 2000);
+```
+
+### Camera feed (via browser getUserMedia)
+
+```javascript
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { width: 640, height: 480, facingMode: "user" },
+  audio: false,
+});
+const video = document.createElement("video");
+video.srcObject = stream;
+await video.play();
+
+const canvas = document.createElement("canvas");
+canvas.width = video.videoWidth || 640;
+canvas.height = video.videoHeight || 480;
+const ctx = canvas.getContext("2d");
+
+setInterval(() => {
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob((blob) => {
+    blob.arrayBuffer().then((buf) => {
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      socket.emit("vision.image", {
+        data: base64,
+        mimeType: "image/jpeg",
+        source: "camera",
+      });
+    });
+  }, "image/jpeg", 0.7);
+}, 2000);
+```
+
+### Server-side relay (Socket.IO)
+
+```typescript
+import { createVisionGateway } from "@radaros/transport";
+
+createVisionGateway({
+  agents: { assistant: visionAgent },
+  io: socketIoServer,
+});
+```
+
+---
+
+## Socket.IO Vision Gateway
+
+The vision gateway relays audio, images, and text between browser clients and VisionAgent sessions.
+
+**Namespace:** `/radaros-vision`
+
+### Client-to-server events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `vision.start` | `{ agentName, voice?, apiKey?, userId?, sessionId? }` | Start a vision session (with optional voice) |
+| `vision.audio` | `{ data: base64 }` | Send audio frame |
+| `vision.image` | `{ data: base64, mimeType?, source? }` | Send image/video frame (`source`: "screen" or "camera") |
+| `vision.text` | `{ text }` | Send text message |
+| `vision.interrupt` | — | Interrupt response |
+| `vision.stop` | — | End session |
+
+### Server-to-client events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `vision.started` | `{ userId }` | Session connected |
+| `vision.audio` | `{ data: base64, mimeType }` | Audio response |
+| `vision.transcript` | `{ text, role }` | Transcript |
+| `vision.text` | `{ text }` | Text response |
+| `vision.tool.call` | `{ name, args }` | Tool invocation |
+| `vision.tool.result` | `{ name, result }` | Tool result |
+| `vision.interrupted` | — | Response interrupted (stop audio playback) |
+| `vision.stopped` | — | Session ended |
+| `vision.error` | `{ error }` | Error |
+
+---
+
+## Tool Calling
+
+Vision agents support the same tool system as voice and text agents:
+
+```typescript
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const weatherTool = defineTool({
+  name: "getWeather",
+  description: "Get weather for a city",
+  parameters: z.object({ city: z.string() }),
+  execute: async ({ city }) => `Sunny, 22C in ${city}`,
+});
+
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  tools: [weatherTool],
+});
+```
+
+The model can call tools based on what it sees or hears. For example, it could read a barcode from a camera frame and look up the product.
+
+---
+
+## Memory
+
+Vision agents support the same unified memory system as other agents:
+
+```typescript
+const agent = new VisionAgent({
+  name: "assistant",
+  provider: geminiVisionLive(),
+  memory: {
+    storage: new SqliteStorage("vision-memory.db"),
+    summary: { enabled: true },
+    userProfile: { enabled: true },
+  },
+});
+```
+
+Transcripts from the vision session are persisted to memory when the session ends, enabling context across sessions.
+
+---
+
+## Full Example: Screen + Camera Assistant
+
+A complete example with screen sharing, camera feed, voice selection, multilingual auto-detection, and interruption support:
+
+```bash
+GOOGLE_API_KEY=your-key npx tsx examples/voice/screen-assistant.ts
+```
+
+This starts a web UI at `http://localhost:4200` with:
+
+- **Voice picker** — choose from 30 Gemini voices before starting the session
+- **Screen sharing** — share your entire screen or a specific window
+- **Camera feed** — enable your webcam for face-to-face conversation
+- **Microphone** — speak naturally in any language
+- **Text chat** — type messages as an alternative to speech
+- **Auto language detection** — speak Hindi, English, Spanish, etc. and the agent responds in your language
+- **Interruption** — start speaking to immediately stop the agent's response
+
+```typescript
+import { VisionAgent, geminiVisionLive } from "@radaros/core";
+
+const INSTRUCTIONS = [
+  "You are a helpful multilingual vision assistant.",
+  "You can see the user's screen and/or camera feed, and hear them speak.",
+  "LANGUAGE RULE: Always detect the language the user is speaking and respond in that same language.",
+  "If the user switches languages mid-conversation, switch with them immediately.",
+  "Keep responses conversational and concise. Speak naturally in the user's language.",
+].join(" ");
+
+// Create a per-session agent with the user's chosen voice
+const agent = new VisionAgent({
+  name: "VisionAssistant",
+  provider: geminiVisionLive("gemini-3.1-flash-live-preview"),
+  instructions: INSTRUCTIONS,
+  voice: "Puck",     // or let the user pick
+  fps: 1,
+  thinkingLevel: "low",
+});
+
+const session = await agent.connect();
+
+// Forward screen/camera frames
+session.sendImage(jpegBuffer, "image/jpeg");
+
+// Forward microphone audio
+session.sendAudio(pcm16kBuffer);
+
+// Handle responses
+session.on("audio", ({ data }) => { /* play PCM 24kHz */ });
+session.on("transcript", ({ text, role }) => { /* show text */ });
+session.on("interrupted", () => { /* stop audio playback */ });
+```
