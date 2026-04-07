@@ -30,12 +30,12 @@ const agent = new Agent({
 
 ## Built-in Complexity Classifier
 
-The built-in classifier runs in <1ms with no LLM call. It scores on:
+The built-in classifier runs in under 1ms with no LLM call. It scores on:
 
 | Signal | Weight | Example |
 |--------|--------|---------|
 | Token count | +0.05–0.15 | Long prompts → higher complexity |
-| Code markers | +0.15 | ```, `function`, `class`, `import` |
+| Code markers | +0.15 | Code fences, `function`, `class`, `import` |
 | Reasoning keywords | +0.20 | "analyze", "compare", "step by step" |
 | Complex instructions | +0.15 | "build a system", "design an API" |
 | Tool count | +0.08–0.15 | More tools → harder routing |
