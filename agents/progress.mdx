@@ -1,0 +1,102 @@
+---
+title: "Streaming Progress Protocol"
+description: "Rich progress events for real-time visibility during long-running agent tasks"
+---
+
+## Overview
+
+Users stare at blank screens during 30+ second agent runs. The **Progress Protocol** provides structured events for every phase of execution — thinking, tool execution, intermediate results, and completion.
+
+## Progress Events
+
+```typescript
+type ProgressEvent =
+  | { type: "run.started"; runId: string; agentName: string }
+  | { type: "step.started"; step: string; description?: string }
+  | { type: "step.finished"; step: string; durationMs: number }
+  | { type: "thinking"; content: string }
+  | { type: "tool.executing"; toolName: string; args?: unknown }
+  | { type: "tool.completed"; toolName: string; durationMs: number; preview?: string }
+  | { type: "text.delta"; text: string }
+  | { type: "progress"; percent: number; message?: string }
+  | { type: "intermediate.result"; content: string }
+  | { type: "run.finished"; runId: string; durationMs: number; tokenCount?: number }
+  | { type: "run.error"; runId: string; error: string }
+  | { type: "run.cancelled"; runId: string };
+```
+
+## Progress Estimation
+
+The built-in estimator calculates progress based on roundtrip count:
+
+```typescript
+import { estimateProgress } from "@radaros/core";
+
+const percent = estimateProgress(
+  2,    // current roundtrip
+  10,   // max roundtrips
+  "tools" // current phase: "llm" or "tools"
+);
+// Returns ~25
+```
+
+## Tool Result Previews
+
+Generate concise previews for tool results:
+
+```typescript
+import { toolResultPreview } from "@radaros/core";
+
+const preview = toolResultPreview(longToolResult, 100);
+// "Found 15 matching records. First result: Order #1234 placed on 2025-01-..."
+```
+
+## Frontend Integration
+
+### Server-Sent Events (SSE)
+
+```typescript
+// Server — progress events are automatically forwarded
+// Client:
+const source = new EventSource("/api/agent/stream");
+source.addEventListener("progress", (e) => {
+  const event = JSON.parse(e.data);
+  switch (event.type) {
+    case "tool.executing":
+      showSpinner(`Running ${event.toolName}...`);
+      break;
+    case "progress":
+      updateProgressBar(event.percent);
+      break;
+    case "text.delta":
+      appendText(event.text);
+      break;
+  }
+});
+```
+
+### Socket.IO
+
+```typescript
+socket.on("agent.progress", (event) => {
+  // Same event types as SSE
+});
+```
+
+## Event Timeline Example
+
+A typical agent run emits:
+
+```
+run.started          → { runId, agentName }
+step.started         → { step: "llm-call-1" }
+thinking             → { content: "Let me search..." }
+step.finished        → { step: "llm-call-1", durationMs: 1200 }
+tool.executing       → { toolName: "search", args: {...} }
+tool.completed       → { toolName: "search", durationMs: 340, preview: "Found 5 results" }
+progress             → { percent: 30, message: "Processing search results" }
+step.started         → { step: "llm-call-2" }
+text.delta           → { text: "Based on the search results..." }
+step.finished        → { step: "llm-call-2", durationMs: 2100 }
+run.finished         → { runId, durationMs: 4200, tokenCount: 1500 }
+```

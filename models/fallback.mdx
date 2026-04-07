@@ -1,0 +1,105 @@
+---
+title: "Model Fallback & Circuit Breaker"
+description: "Automatic provider failover with circuit breaker pattern for production LLM resilience"
+---
+
+## Overview
+
+LLM APIs fail constantly — rate limits (429), server errors (5xx), auth expiry, and network timeouts. The **FallbackProvider** wraps multiple model providers with per-provider circuit breakers, automatically cascading to backup providers when failures occur.
+
+## Quick Start
+
+```typescript
+import { openai, anthropic, withFallback } from "@radaros/core";
+
+const resilientModel = withFallback([
+  openai("gpt-4o"),
+  anthropic("claude-sonnet-4-20250514"),
+  openai("gpt-4o-mini"),
+]);
+
+const agent = new Agent({
+  name: "resilient-agent",
+  model: resilientModel,
+  instructions: "You are a helpful assistant.",
+});
+```
+
+## Circuit Breaker
+
+Each provider in the fallback chain has its own circuit breaker with three states:
+
+| State | Behavior |
+|-------|----------|
+| **Closed** | Healthy — requests flow normally |
+| **Open** | Tripped — requests skip this provider |
+| **Half-Open** | Probing — limited requests to test recovery |
+
+### Configuration
+
+```typescript
+import { CircuitBreaker } from "@radaros/core";
+
+const breaker = new CircuitBreaker({
+  failureThreshold: 5,      // failures before opening
+  cooldownMs: 30_000,       // time before half-open
+  halfOpenMaxAttempts: 2,    // probes before closing
+  classifyError: (error) => {
+    // Custom error classification
+    if (isRateLimit(error)) return "retry";
+    if (isAuthError(error)) return "cascade";
+    return "fatal";
+  },
+});
+```
+
+### Error Classification
+
+| Classification | Behavior |
+|---------------|----------|
+| `"retry"` | Counts toward circuit breaker threshold, tries next provider |
+| `"cascade"` | Immediately cascades to next provider |
+| `"fatal"` | Throws immediately, no fallback |
+
+Default classification:
+- **429, 5xx, network errors** → `"retry"`
+- **401, 403, 404** → `"cascade"`
+- **Content policy violations** → `"fatal"`
+
+## FallbackProvider
+
+The `FallbackProvider` implements `ModelProvider`, making it transparent to the rest of the framework:
+
+```typescript
+import { FallbackProvider, openai, anthropic, google } from "@radaros/core";
+
+const provider = new FallbackProvider({
+  providers: [
+    openai("gpt-4o"),
+    anthropic("claude-sonnet-4-20250514"),
+    google("gemini-2.5-flash"),
+  ],
+  circuitBreaker: {
+    failureThreshold: 3,
+    cooldownMs: 60_000,
+  },
+  onFallback: (from, to, error) => {
+    console.log(`Falling back from ${from} to ${to}: ${error}`);
+  },
+});
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `model.fallback` | `{ from, to, error }` |
+| `model.circuit.open` | `{ provider, modelId, failureCount }` |
+| `model.circuit.close` | `{ provider, modelId }` |
+
+## Best Practices
+
+1. **Order providers by preference** — cheapest/fastest first, most reliable last
+2. **Mix providers** — don't put all eggs in one basket (OpenAI + Anthropic + Google)
+3. **Include a cheap fallback** — `gpt-4o-mini` as the last resort keeps things running
+4. **Monitor circuit states** — use `onFallback` callback or events to alert on degradation

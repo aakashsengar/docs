@@ -1,0 +1,115 @@
+---
+title: "Agent Versioning & A/B Testing"
+description: "Version agent configurations and safely test changes on live traffic"
+---
+
+## Overview
+
+Iterate on agents in production without risking all users. **Versioning** persists configuration snapshots, **A/B Testing** splits traffic deterministically, and **Shadow Mode** runs both versions side-by-side.
+
+## Version Store
+
+Persist agent configuration snapshots to any `StorageDriver`:
+
+```typescript
+import { VersionStore, Agent, openai } from "@radaros/core";
+import { SqliteStorage } from "@radaros/core";
+
+const store = new VersionStore(new SqliteStorage("versions.db"));
+
+// Save a version
+const version = await store.save({
+  agentName: "support-agent",
+  instructions: "You are a customer support agent...",
+  modelId: "gpt-4o",
+  providerId: "openai",
+  toolNames: ["search_kb", "create_ticket"],
+  temperature: 0.7,
+});
+
+// List all versions
+const versions = await store.list("support-agent");
+
+// Compare versions
+const diff = store.diff(versions[0], versions[1]);
+// [{ field: "modelId", before: "gpt-4o", after: "gpt-4o-mini" }]
+```
+
+## A/B Testing
+
+Split traffic between control and variant agents:
+
+```typescript
+import { ABRouter } from "@radaros/core";
+
+const router = new ABRouter({
+  name: "new-instructions-test",
+  control: { agentName: "support-v1" },
+  variant: { agentName: "support-v2" },
+  trafficSplit: 0.1,         // 10% to variant
+  routing: "user",           // deterministic by userId
+  autoRollback: {
+    errorRateThreshold: 0.15, // rollback if >15% errors
+    windowMs: 300_000,        // in last 5 minutes
+  },
+});
+
+// Route a request
+const variant = router.route({ userId: "user-123" });
+// Returns "control" or "variant" deterministically
+
+// Record outcome
+router.recordRun(variant, true, 1200, 500);
+
+// Check metrics
+const metrics = router.getMetrics();
+// { control: { totalRuns: 900, successCount: 880, ... },
+//   variant: { totalRuns: 100, successCount: 95, ... } }
+
+// Auto-rollback check
+if (router.shouldAutoRollback()) {
+  console.log("Variant error rate too high, rolling back");
+}
+```
+
+### Routing Strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `"random"` | Pure random split |
+| `"user"` | Hash userId for deterministic assignment |
+| `"session"` | Hash sessionId for per-session consistency |
+
+## Shadow Mode
+
+Run both agents in parallel, return primary result, log comparison:
+
+```typescript
+import { ShadowRunner, Agent, openai } from "@radaros/core";
+
+const shadow = new ShadowRunner(
+  primaryAgent,
+  shadowAgent,
+  {
+    compareOutputs: (primary, shadow) => ({
+      match: primary.text === shadow.text,
+      similarity: computeSimilarity(primary.text, shadow.text),
+      differences: ["Tool call count differs"],
+    }),
+  },
+);
+
+const result = await shadow.run("How do I reset my password?");
+// result.primaryOutput — always returned to user
+// result.shadowOutput  — logged for comparison
+// result.comparison    — { match, similarity, differences }
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `version.created` | `{ agentName, versionId }` |
+| `ab.routed` | `{ testName, variant, userId }` |
+| `ab.metrics` | `{ testName, control, variant }` |
+| `shadow.compared` | `{ agentName, match, similarity }` |

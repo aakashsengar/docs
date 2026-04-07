@@ -1,0 +1,93 @@
+---
+title: "Rate Limiting & Backpressure"
+description: "Token-aware rate limiting with per-tenant scoping and graceful degradation"
+---
+
+## Overview
+
+One user action can trigger dozens of LLM calls. Token-unaware rate limits block 41% of legitimate traffic. RadarOS provides **token-aware** rate limiting with sliding windows, concurrency control, and graceful degradation.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "rate-limited-agent",
+  model: openai("gpt-4o"),
+  rateLimit: {
+    maxTokensPerMinute: 100_000,
+    maxRequestsPerMinute: 60,
+    maxConcurrent: 5,
+    perTenant: true,
+    onLimitReached: "degrade",
+    degradeStrategy: {
+      useCheaperModel: openai("gpt-4o-mini"),
+      reduceMaxTokens: 1000,
+    },
+  },
+});
+```
+
+## Token Rate Limiter
+
+Sliding-window token counting with per-scope tracking:
+
+```typescript
+import { TokenRateLimiter } from "@radaros/core";
+
+const limiter = new TokenRateLimiter({
+  maxTokensPerMinute: 100_000,
+  maxTokensPerHour: 1_000_000,
+  maxRequestsPerMinute: 60,
+  perTenant: true,
+  perUser: true,
+});
+
+// Check without consuming
+const status = limiter.check({ tenantId: "acme", userId: "u1" });
+// { allowed: true, remaining: 95000, resetMs: 45000 }
+
+// Acquire tokens (pre-call estimate)
+const result = limiter.acquire(500, { tenantId: "acme" });
+
+// Reconcile after actual usage
+limiter.record(actualTokens, estimatedTokens, { tenantId: "acme" });
+```
+
+## Concurrency Limiter
+
+Control maximum concurrent LLM calls:
+
+```typescript
+import { ConcurrencyLimiter } from "@radaros/core";
+
+const limiter = new ConcurrencyLimiter(5, 30_000); // max 5, 30s timeout
+
+const release = await limiter.acquire();
+try {
+  await callLLM();
+} finally {
+  release();
+}
+
+console.log(limiter.active);    // current concurrent calls
+console.log(limiter.pending);   // queued requests
+console.log(limiter.available); // remaining capacity
+```
+
+## Limit Reached Strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `"queue"` | Queue requests until capacity is available |
+| `"reject"` | Immediately reject with error |
+| `"degrade"` | Switch to cheaper model and reduce token limits |
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `rateLimit.throttled` | `{ scope, limitType, resetMs }` |
+| `rateLimit.degraded` | `{ scope, originalModel, degradedModel }` |
+| `rateLimit.rejected` | `{ scope, reason }` |

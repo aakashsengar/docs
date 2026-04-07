@@ -1,0 +1,283 @@
+---
+title: "Production Features"
+description: "Examples for model resilience, agent reflection, versioning, compliance, multi-tenant, rate limiting, scheduling, conversational testing, context curation, and streaming progress"
+---
+
+## Model Fallback & Circuit Breaker
+
+A 3-provider fallback chain that automatically cascades through OpenAI, Anthropic, and Google when failures occur.
+
+```typescript
+import { Agent, openai, anthropic, google, withFallback, EventBus } from "@radaros/core";
+
+const eventBus = new EventBus();
+eventBus.on("model.fallback", ({ from, to }) => {
+  console.log(`Fallback: ${from} → ${to}`);
+});
+
+const resilientModel = withFallback(
+  [openai("gpt-4o"), anthropic("claude-sonnet-4-20250514"), google("gemini-2.5-flash")],
+  {
+    circuitBreaker: { failureThreshold: 3, cooldownMs: 30_000 },
+    onFallback: (from, to, error) => {
+      eventBus.emit("model.fallback", { from, to, error: String(error) });
+    },
+  },
+);
+
+const agent = new Agent({
+  name: "resilient-agent",
+  model: resilientModel,
+  instructions: "You are a helpful assistant.",
+  eventBus,
+});
+
+const result = await agent.run("What is the capital of France?");
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/models/fallback-chain.ts">
+  `examples/models/fallback-chain.ts`
+</Card>
+
+---
+
+## Smart Model Router
+
+Route requests to the cheapest capable model based on query complexity:
+
+```typescript
+import { Agent, openai, ModelRouter } from "@radaros/core";
+
+const router = new ModelRouter({
+  tiers: [
+    { model: openai("gpt-4o-mini"), maxComplexity: 0.3 },
+    { model: openai("gpt-4o"), maxComplexity: 0.7 },
+    { model: openai("o3"), maxComplexity: 1.0 },
+  ],
+  outcomeTracking: true,
+});
+
+const agent = new Agent({ name: "smart-agent", model: router });
+// Simple queries → gpt-4o-mini, complex → gpt-4o, reasoning → o3
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/models/smart-router.ts">
+  `examples/models/smart-router.ts`
+</Card>
+
+---
+
+## Agent Reflection & Self-Correction
+
+Enable agents to critique their own outputs and detect tool call loops:
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "reflective-agent",
+  model: openai("gpt-4o"),
+  reflection: {
+    enabled: true,
+    maxReflections: 2,
+    loopEscapeDetection: true,
+    postMortemLearning: true,
+  },
+});
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/agents/reflection.ts">
+  `examples/agents/reflection.ts`
+</Card>
+
+---
+
+## A/B Testing Agent Versions
+
+Deterministic traffic splitting with metric tracking:
+
+```typescript
+import { ABRouter, VersionStore, InMemoryStorage } from "@radaros/core";
+
+const store = new VersionStore(new InMemoryStorage());
+const v1 = await store.save({ agentName: "support", instructions: "Be concise", ... });
+const v2 = await store.save({ agentName: "support", instructions: "Be warm", ... });
+
+const router = new ABRouter({
+  name: "instructions-test",
+  control: { agentName: "support", versionId: v1.versionId },
+  variant: { agentName: "support", versionId: v2.versionId },
+  trafficSplit: 0.2,
+  routing: "user",
+  autoRollback: { errorRateThreshold: 0.15, windowMs: 300_000 },
+});
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/agents/ab-testing.ts">
+  `examples/agents/ab-testing.ts`
+</Card>
+
+---
+
+## Compliance & Audit Trail
+
+Hash-chained audit logging for EU AI Act compliance:
+
+```typescript
+import { AuditLogger, ComplianceReporter, InMemoryStorage } from "@radaros/core";
+
+const logger = new AuditLogger(new InMemoryStorage());
+await logger.log({
+  traceId: "run-001",
+  agentName: "support-agent",
+  action: "llm.call",
+  userId: "user-123",
+  input: "How do I reset my password?",
+  output: "Go to Settings > Security...",
+});
+
+const { valid } = await logger.verify(); // Verify hash chain
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/compliance/audit-trail.ts">
+  `examples/compliance/audit-trail.ts`
+</Card>
+
+---
+
+## Multi-Tenant Isolation
+
+Transparent tenant-scoped storage:
+
+```typescript
+import { TenantScopedStorage, InMemoryStorage } from "@radaros/core";
+
+const base = new InMemoryStorage();
+const acme = new TenantScopedStorage(base, "acme");
+const globex = new TenantScopedStorage(base, "globex");
+
+await acme.set("sessions", "s1", { user: "alice" });
+await globex.set("sessions", "s1", { user: "bob" });
+// Same key, completely isolated data
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/multi-tenant/isolation.ts">
+  `examples/multi-tenant/isolation.ts`
+</Card>
+
+---
+
+## Token-Aware Rate Limiting
+
+Sliding-window rate limiting with per-tenant scoping:
+
+```typescript
+import { TokenRateLimiter, ConcurrencyLimiter } from "@radaros/core";
+
+const limiter = new TokenRateLimiter({
+  maxTokensPerMinute: 100_000,
+  perTenant: true,
+});
+
+const status = limiter.acquire(500, { tenantId: "acme" });
+// { allowed: true, remaining: 99500, resetMs: 58000 }
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/rate-limiting/token-aware.ts">
+  `examples/rate-limiting/token-aware.ts`
+</Card>
+
+---
+
+## Scheduled Agents
+
+Cron-based scheduling with event-driven triggers:
+
+```typescript
+import { Agent, AgentScheduler, openai } from "@radaros/core";
+
+const scheduler = new AgentScheduler(eventBus);
+scheduler.schedule(agent, {
+  cron: "0 9 * * *",
+  input: "Generate today's report.",
+  contextContinuity: true,
+});
+
+scheduler.trigger(agent, {
+  event: "run.error",
+  input: (data) => `Error: ${data.error.message}. Investigate.`,
+  debounceMs: 60_000,
+});
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/scheduling/cron-agent.ts">
+  `examples/scheduling/cron-agent.ts`
+</Card>
+
+---
+
+## Conversational Testing
+
+Multi-turn conversation testing with synthetic users:
+
+```typescript
+import { ConversationSuite } from "@radaros/eval";
+
+const suite = new ConversationSuite({
+  name: "Support Tests",
+  scenarios: [{
+    name: "Password Reset",
+    persona: { name: "Jane", description: "Non-technical user", goal: "Reset password" },
+    initialMessage: "I can't log in!",
+    expectedTrajectory: { requiredTools: ["send_reset_email"] },
+  }],
+}, openai("gpt-4o-mini"));
+
+const results = await suite.run(agent);
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/eval/conversational-test.ts">
+  `examples/eval/conversational-test.ts`
+</Card>
+
+---
+
+## Context Pollution Prevention
+
+Automatically clean failed results and stale messages:
+
+```typescript
+import { ContextCurator } from "@radaros/core";
+
+const curator = new ContextCurator({
+  enabled: true,
+  failedResultHandling: "deprioritize",
+  relevanceDecay: { enabled: true, halfLifeTurns: 10, minWeight: 0.1 },
+});
+
+const cleaned = curator.curate(messages, currentQuery);
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/agents/context-curator.ts">
+  `examples/agents/context-curator.ts`
+</Card>
+
+---
+
+## Streaming Progress Protocol
+
+Rich progress events for real-time UI updates:
+
+```typescript
+import { estimateProgress, toolResultPreview } from "@radaros/core";
+
+// Estimate progress based on roundtrip count
+const percent = estimateProgress(2, 10, "tools"); // ~25%
+
+// Generate concise previews for long tool results
+const preview = toolResultPreview(longResult, 100);
+```
+
+<Card title="Full Example" icon="code" href="https://github.com/xhipment/radar-os/blob/main/examples/agents/progress-stream.ts">
+  `examples/agents/progress-stream.ts`
+</Card>

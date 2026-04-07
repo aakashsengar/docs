@@ -1,0 +1,88 @@
+---
+title: "Multi-Tenant Isolation"
+description: "Tenant-level data isolation for SaaS products with namespace or strict separation"
+---
+
+## Overview
+
+SaaS products need tenant-level data isolation. A missing `tenantId` means a data leak. RadarOS provides `TenantScopedStorage` that transparently wraps any `StorageDriver` with tenant namespace prefixing.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "saas-agent",
+  model: openai("gpt-4o"),
+  tenant: {
+    required: true,      // throw if tenantId missing
+    isolation: "namespace", // prefix storage keys
+  },
+});
+
+// Pass tenantId per request
+const result = await agent.run("Help me with my order", {
+  tenantId: "tenant-acme",
+  userId: "user-123",
+});
+```
+
+## Tenant-Scoped Storage
+
+Wraps any `StorageDriver` to prefix all keys with the tenant ID:
+
+```typescript
+import { TenantScopedStorage } from "@radaros/core";
+import { SqliteStorage } from "@radaros/core";
+
+const baseStorage = new SqliteStorage("app.db");
+const tenantStorage = new TenantScopedStorage(baseStorage, "tenant-acme");
+
+// get("sessions", "abc") → inner.get("t:tenant-acme:sessions", "abc")
+await tenantStorage.set("sessions", "abc", { data: "..." });
+```
+
+### Isolation Modes
+
+| Mode | Behavior |
+|------|----------|
+| `"namespace"` | Prefix all storage keys with `t:{tenantId}:` |
+| `"strict"` | Require separate storage instance per tenant |
+
+## Extracting Tenant ID
+
+### From Headers
+
+```typescript
+import { extractTenantFromHeaders } from "@radaros/core";
+
+// In your Express middleware:
+const tenantId = extractTenantFromHeaders(req.headers);
+// Reads X-Tenant-Id header
+```
+
+### From JWT Claims
+
+```typescript
+import { extractTenantFromJwt } from "@radaros/core";
+
+const tenantId = extractTenantFromJwt(decodedToken);
+// Reads tenantId, tenant_id, org_id, or organization_id
+```
+
+## Context Propagation
+
+The `tenantId` flows through the entire request lifecycle:
+
+1. **RunOpts** → `agent.run(input, { tenantId: "acme" })`
+2. **RunContext** → `ctx.tenantId` available in hooks and tools
+3. **Storage** → All reads/writes scoped automatically
+4. **Events** → `tenant.scoped` event emitted
+5. **Audit** → `tenantId` recorded in audit entries
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `tenant.scoped` | `{ tenantId, agentName }` |

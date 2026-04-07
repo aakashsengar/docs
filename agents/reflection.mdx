@@ -1,0 +1,108 @@
+---
+title: "Agent Reflection & Self-Correction"
+description: "Enable agents to critique their own outputs, detect loops, and learn from failures"
+---
+
+## Overview
+
+Agents hit an 85–90% reliability ceiling without self-correction. The **ReflectionManager** adds a critique loop that catches errors, detects stuck loops, and records post-mortem lessons for continuous improvement.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "self-correcting-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a careful research assistant.",
+  reflection: {
+    enabled: true,
+    maxReflections: 2,
+    loopEscapeDetection: true,
+    postMortemLearning: true,
+  },
+});
+```
+
+## Configuration
+
+```typescript
+interface ReflectionConfig {
+  enabled: boolean;
+  maxReflections?: number;     // max critique-revise cycles (default: 2)
+  critic?: ModelProvider;       // cheaper model for critique
+  preExecutionReview?: boolean; // critique plan before execution
+  loopEscapeDetection?: boolean; // detect repeated tool calls
+  postMortemLearning?: boolean;  // store failure lessons in memory
+  customCriteria?: string;       // additional critique instructions
+}
+```
+
+## Features
+
+### Output Critique
+
+After the LLM generates a response, the reflection manager evaluates it on:
+- **Correctness** — factual accuracy, no hallucinations
+- **Completeness** — addresses all parts of the query
+- **Relevance** — stays on topic
+- **Clarity** — well-structured output
+
+If the critique fails, feedback is injected and the LLM re-generates (up to `maxReflections` times).
+
+### Loop Escape Detection
+
+Detects when agents get stuck calling the same tool with the same arguments repeatedly:
+
+```typescript
+// Automatic detection — if a tool is called 3+ times with identical args,
+// an escape prompt is injected:
+// "You have called 'search' with the same arguments 3 times.
+//  Try a different approach or explain what's blocking you."
+```
+
+### Post-Mortem Learning
+
+When a run fails and memory is available, the reflection manager generates a lesson and stores it in `LearnedKnowledge`:
+
+```typescript
+// Automatically stored:
+// { lesson: "API X requires auth header", category: "tool_error" }
+// Available in future runs via memory context
+```
+
+### Plan Critique
+
+Before executing tool calls, review the planned actions:
+
+```typescript
+const agent = new Agent({
+  reflection: {
+    enabled: true,
+    preExecutionReview: true, // critique before tool execution
+  },
+});
+```
+
+## Using a Cheaper Critic
+
+Save costs by using a smaller model for critique:
+
+```typescript
+const agent = new Agent({
+  model: openai("gpt-4o"),
+  reflection: {
+    enabled: true,
+    critic: openai("gpt-4o-mini"), // 10x cheaper for quality checks
+  },
+});
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `reflection.critique` | `{ runId, pass, score, feedback }` |
+| `reflection.loop.escaped` | `{ runId, tool, repeatCount }` |
+| `reflection.postmortem` | `{ runId, lesson, category }` |

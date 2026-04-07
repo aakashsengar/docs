@@ -1,0 +1,105 @@
+---
+title: "Context Pollution Prevention"
+description: "Automatically curate conversation context to prevent drift from failed results and stale messages"
+---
+
+## Overview
+
+Context pollution is the #1 production failure mode. Old/failed messages accumulate, causing agents to drift toward "plausible-but-wrong" outputs. The **ContextCurator** automatically cleans conversation context before each LLM call.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "clean-context-agent",
+  model: openai("gpt-4o"),
+  contextCurator: {
+    enabled: true,
+    failedResultHandling: "deprioritize",
+    relevanceDecay: {
+      enabled: true,
+      halfLifeTurns: 10,
+      minWeight: 0.1,
+    },
+    maxFailedResults: 1,
+  },
+});
+```
+
+## Failed Result Handling
+
+Tool calls fail. Those error messages stay in context and confuse the model. The curator handles them:
+
+| Strategy | Behavior |
+|----------|----------|
+| `"remove"` | Remove failed results entirely (keep last N) |
+| `"deprioritize"` | Prefix with `[PREVIOUS ERROR - may not be relevant]` |
+| `"summarize"` | Compress to one-line summary |
+
+### What counts as a "failed result"?
+
+The curator detects errors by pattern matching:
+- `[ERROR]` markers
+- `Error:` prefixes
+- HTTP 4xx/5xx status codes
+- `timeout`, `ECONNREFUSED`, `Permission denied`
+- Stack traces
+
+## Relevance Decay
+
+Messages far back in the conversation become less relevant. The curator assigns a weight based on turn distance:
+
+```
+weight = max(minWeight, 0.5 ^ (turnDistance / halfLifeTurns))
+```
+
+Messages below the threshold are either dropped or compressed to one-line summaries. Messages containing entities mentioned in the current query are always preserved.
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `halfLifeTurns` | 10 | Turns until weight halves |
+| `minWeight` | 0.1 | Floor weight (below this → consider dropping) |
+
+## Clean-Room Mode
+
+Instead of filtering the full conversation, build a purpose-specific context:
+
+```typescript
+const agent = new Agent({
+  contextCurator: {
+    enabled: true,
+    cleanRoomMode: true, // Build filtered view per call
+  },
+});
+```
+
+Clean-room context includes:
+1. System prompt
+2. Memory context
+3. Messages containing entities from the current query
+4. Last N recent messages
+
+## Standalone Usage
+
+```typescript
+import { ContextCurator } from "@radaros/core";
+
+const curator = new ContextCurator({
+  enabled: true,
+  failedResultHandling: "summarize",
+  relevanceDecay: { enabled: true, halfLifeTurns: 8, minWeight: 0.15 },
+  cleanRoomMode: false,
+});
+
+const curated = curator.curate(messages, "What are our Q4 results?");
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `context.curated` | `{ runId, originalCount, curatedCount, failedRemoved }` |

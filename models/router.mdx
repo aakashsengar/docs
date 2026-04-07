@@ -1,0 +1,84 @@
+---
+title: "Smart Model Router"
+description: "Automatically route requests to the cheapest capable model based on complexity"
+---
+
+## Overview
+
+85% of agent traffic is simple queries hitting expensive models. The **ModelRouter** classifies incoming requests by complexity and routes them to the cheapest model that can handle them, achieving 40–85% cost savings.
+
+## Quick Start
+
+```typescript
+import { ModelRouter, openai } from "@radaros/core";
+
+const router = new ModelRouter({
+  tiers: [
+    { model: openai("gpt-4o-mini"), maxComplexity: 0.3 },
+    { model: openai("gpt-4o"), maxComplexity: 0.7 },
+    { model: openai("o3"), maxComplexity: 1.0 },
+  ],
+  outcomeTracking: true,
+});
+
+const agent = new Agent({
+  name: "cost-efficient-agent",
+  model: router,
+  instructions: "You are a helpful assistant.",
+});
+```
+
+## Built-in Complexity Classifier
+
+The built-in classifier runs in <1ms with no LLM call. It scores on:
+
+| Signal | Weight | Example |
+|--------|--------|---------|
+| Token count | +0.05–0.15 | Long prompts → higher complexity |
+| Code markers | +0.15 | ```, `function`, `class`, `import` |
+| Reasoning keywords | +0.20 | "analyze", "compare", "step by step" |
+| Complex instructions | +0.15 | "build a system", "design an API" |
+| Tool count | +0.08–0.15 | More tools → harder routing |
+| Structured output | +0.10 | JSON schema responses |
+| Multi-turn depth | +0.05–0.10 | Deep conversations |
+
+## Custom Routing Rules
+
+Override the classifier with explicit rules:
+
+```typescript
+const router = new ModelRouter({
+  tiers: [
+    { model: openai("gpt-4o-mini"), maxComplexity: 0.3 },
+    { model: openai("gpt-4o"), maxComplexity: 1.0 },
+  ],
+  rules: [
+    {
+      condition: (msgs, opts) => (opts?.tools?.length ?? 0) > 5,
+      tier: 1, // Always use GPT-4o for many tools
+    },
+    {
+      condition: (msgs) => msgs.some(m =>
+        typeof m.content === "string" && m.content.includes("```")
+      ),
+      tier: 1, // Code tasks to GPT-4o
+    },
+  ],
+});
+```
+
+## Outcome Tracking
+
+When `outcomeTracking: true`, the router logs success/failure per tier in a ring buffer:
+
+```typescript
+const stats = router.getOutcomeStats();
+// [{ tierIndex: 0, total: 145, successes: 140, rate: 0.97 },
+//  { tierIndex: 1, total: 32, successes: 31, rate: 0.97 }]
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `model.routed` | `{ tier, complexity, modelId }` |

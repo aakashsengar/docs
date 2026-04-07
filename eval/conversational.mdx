@@ -1,0 +1,124 @@
+---
+title: "Conversational Testing"
+description: "Test multi-turn agent conversations with synthetic users and trajectory scoring"
+---
+
+## Overview
+
+You can't test multi-turn conversations with static I/O pairs. The **ConversationSuite** simulates realistic users that engage in multi-turn dialogue, score trajectory correctness, and compare agent versions head-to-head.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+import { ConversationSuite, ConversationRunner } from "@radaros/eval";
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a customer support agent.",
+});
+
+const suite = new ConversationSuite(
+  {
+    name: "Support Scenarios",
+    scenarios: [
+      {
+        name: "Password Reset",
+        persona: {
+          name: "Frustrated User",
+          description: "Non-technical user who is frustrated",
+          goal: "Successfully reset their password",
+          maxTurns: 10,
+        },
+        initialMessage: "I can't log in! I forgot my password.",
+        successCriteria: "User successfully resets their password",
+        expectedTrajectory: {
+          requiredTools: ["send_reset_email"],
+          forbiddenTools: ["delete_account"],
+        },
+      },
+    ],
+    concurrency: 3,
+  },
+  openai("gpt-4o-mini"), // Model for synthetic user
+);
+
+const results = await suite.run(agent);
+console.log(`Passed: ${results.passed}/${results.total}`);
+console.log(`Average turns: ${results.averageTurns}`);
+```
+
+## Synthetic Users
+
+The `SyntheticUser` simulates a persona-driven user:
+
+```typescript
+import { SyntheticUser } from "@radaros/eval";
+
+const user = new SyntheticUser(
+  {
+    name: "Impatient Executive",
+    description: "C-level executive with no time for details",
+    goal: "Get a summary of Q4 revenue",
+    maxTurns: 5,
+  },
+  openai("gpt-4o-mini"),
+);
+```
+
+The synthetic user:
+- Stays in character throughout the conversation
+- Works toward the defined goal
+- Signals `GOAL_COMPLETE` when the goal is achieved
+- Naturally asks follow-ups, provides corrections, etc.
+
+## Trajectory Scoring
+
+Assert the agent used the right tools in the right order:
+
+```typescript
+const scenario = {
+  name: "Order Lookup",
+  expectedTrajectory: {
+    requiredTools: ["search_orders", "get_order_details"],
+    orderedTools: ["search_orders", "get_order_details"],
+    forbiddenTools: ["cancel_order", "refund_order"],
+    maxToolCalls: 5,
+  },
+};
+```
+
+| Assertion | Description |
+|-----------|-------------|
+| `requiredTools` | Must be called (any order) |
+| `orderedTools` | Must be called in this sequence |
+| `forbiddenTools` | Must NOT be called |
+| `maxToolCalls` | Upper bound on total tool calls |
+
+## Agent Comparison
+
+Test two agents head-to-head:
+
+```typescript
+const runner = new ConversationRunner(openai("gpt-4o-mini"));
+const result = await runner.runComparison(agentA, agentB, scenario);
+// result.winner: "A" | "B" | "tie"
+// result.resultA: full conversation results
+// result.resultB: full conversation results
+```
+
+## Suite Results
+
+```typescript
+interface ConversationSuiteResult {
+  name: string;
+  results: ConversationEvalResult[];
+  passed: number;
+  failed: number;
+  total: number;
+  averageTurns: number;
+  averageScore: number;
+  durationMs: number;
+}
+```

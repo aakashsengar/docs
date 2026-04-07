@@ -42,7 +42,11 @@
               "agents/dependencies",
               "agents/followups",
               "agents/cancellation",
-              "agents/serialization"
+              "agents/serialization",
+              "agents/reflection",
+              "agents/versioning",
+              "agents/context-curation",
+              "agents/progress"
             ]
           },
           {
@@ -92,7 +96,15 @@
               "eval/accuracy",
               "eval/agent-judge",
               "eval/performance",
-              "eval/reliability"
+              "eval/reliability",
+              "eval/conversational"
+            ]
+          },
+          {
+            "group": "Compliance & Audit",
+            "pages": [
+              "compliance/overview",
+              "compliance/retention"
             ]
           },
           {
@@ -140,6 +152,8 @@
             "group": "Models",
             "pages": [
               "models/overview",
+              "models/fallback",
+              "models/router",
               "models/openai",
               "models/anthropic",
               "models/google",
@@ -292,12 +306,15 @@
           {
             "group": "Scheduling",
             "pages": [
-              "schedules/overview"
+              "schedules/overview",
+              "scheduling/overview"
             ]
           },
           {
             "group": "Advanced Features",
             "pages": [
+              "advanced/multi-tenant",
+              "advanced/rate-limiting",
               "features/loop-hooks",
               "features/context-compaction",
               "features/cost-autostop",
@@ -357,7 +374,8 @@
             "group": "Advanced & Integrations",
             "pages": [
               "examples/advanced-features",
-              "examples/integrations"
+              "examples/integrations",
+              "examples/production-features"
             ]
           },
           {

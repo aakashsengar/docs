@@ -1,0 +1,92 @@
+---
+title: "First-Class Scheduling"
+description: "Cron-based agent scheduling and event-driven triggers with context continuity"
+---
+
+## Overview
+
+Most production agent use cases are recurring — daily reports, periodic monitoring, event-driven responses. The **AgentScheduler** provides in-process cron scheduling and event-driven triggers without requiring separate Redis/BullMQ infrastructure.
+
+## Cron Scheduling
+
+```typescript
+import { Agent, AgentScheduler, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "daily-reporter",
+  model: openai("gpt-4o"),
+  instructions: "Generate a daily performance report.",
+});
+
+const scheduler = new AgentScheduler(agent.eventBus);
+
+// Run every day at 9am
+const scheduleId = scheduler.schedule(agent, {
+  cron: "0 9 * * *",
+  timezone: "America/New_York",
+  input: "Generate today's performance report.",
+  maxRetries: 2,
+});
+
+// With context continuity — pass previous result to next run
+scheduler.schedule(agent, {
+  cron: "0 */6 * * *", // Every 6 hours
+  input: (lastResult) =>
+    lastResult
+      ? `Continue monitoring. Previous report: ${lastResult.text.slice(0, 500)}`
+      : "Start monitoring system health.",
+  contextContinuity: true,
+});
+```
+
+## Event-Driven Triggers
+
+Trigger agent runs based on EventBus events:
+
+```typescript
+scheduler.trigger(agent, {
+  event: "run.error",
+  filter: (data) => data.error?.message?.includes("critical"),
+  input: (eventData) =>
+    `A critical error occurred: ${eventData.error.message}. Investigate and suggest fixes.`,
+  debounceMs: 60_000, // Don't trigger more than once per minute
+});
+```
+
+## Schedule Management
+
+```typescript
+// Pause a schedule
+scheduler.pause(scheduleId);
+
+// Resume
+scheduler.resume(scheduleId);
+
+// Cancel
+scheduler.cancel(scheduleId);
+
+// List all schedules and triggers
+const { schedules, triggers } = scheduler.list();
+// schedules: [{ id, agentName, cron, enabled, lastRunAt, runCount, errorCount }]
+// triggers: [{ id, agentName, event, enabled, triggerCount }]
+
+// Cancel everything
+scheduler.cancelAll();
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `schedule.fired` | `{ scheduleId, agentName }` |
+| `schedule.completed` | `{ scheduleId, agentName, runCount }` |
+| `schedule.error` | `{ scheduleId, agentName, error }` |
+| `trigger.fired` | `{ triggerId, agentName, event }` |
+
+## Dependencies
+
+The scheduler uses `node-cron` when available (optional peer dependency). Without it, simple cron expressions like `*/5 * * * *` are converted to `setInterval`.
+
+```bash
+npm install node-cron  # optional, for full cron support
+```

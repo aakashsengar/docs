@@ -1,0 +1,88 @@
+---
+title: "Data Retention & Erasure"
+description: "GDPR-compliant data retention policies and right-to-erasure support"
+---
+
+## Data Retention
+
+The `RetentionManager` enforces configurable retention policies:
+
+```typescript
+import { RetentionManager } from "@radaros/core";
+import { SqliteStorage } from "@radaros/core";
+
+const retention = new RetentionManager(new SqliteStorage("audit.db"), {
+  defaultRetentionDays: 365,
+  personalDataRetentionDays: 730,
+  anonymizeAfterDays: 180,
+  tenantOverrides: {
+    "tenant-eu": { retentionDays: 90 },
+  },
+});
+
+// Purge expired entries
+const { purgedCount } = await retention.purge();
+
+// Anonymize old entries (strip PII, keep metadata)
+const { anonymizedCount } = await retention.anonymize();
+
+// Check compliance status
+const status = await retention.getRetentionStatus();
+// { totalEntries, oldestEntry, entriesNeedingPurge, compliant }
+```
+
+## Right to Erasure (GDPR Article 17)
+
+The `ErasureManager` purges all user data across all stores:
+
+```typescript
+import { ErasureManager } from "@radaros/core";
+
+const erasure = new ErasureManager(storage);
+
+const result = await erasure.eraseUser("user-123");
+// {
+//   userId: "user-123",
+//   erasedAt: Date,
+//   stores: [
+//     { name: "user-facts", itemsErased: 12 },
+//     { name: "sessions", itemsErased: 5 },
+//   ],
+//   auditEntriesAnonymized: 47
+// }
+```
+
+The erasure manager:
+1. Deletes user data from all memory stores (facts, profile, entities, sessions, etc.)
+2. **Anonymizes** audit entries (regulatory requirement — cannot delete audit trail, but strips PII)
+3. Emits `compliance.erasure` event
+
+## Compliance Reports
+
+Generate structured compliance reports:
+
+```typescript
+import { ComplianceReporter } from "@radaros/core";
+
+const reporter = new ComplianceReporter(auditLogger, retentionManager);
+
+const report = await reporter.generateReport({
+  fromDate: new Date("2025-01-01"),
+  toDate: new Date("2025-12-31"),
+});
+
+// report.totalEntries
+// report.entriesByAction  — { "llm.call": 1234, "tool.exec": 567, ... }
+// report.entriesByAgent   — { "support-agent": 800, "sales-agent": 400, ... }
+// report.retentionStatus  — { compliant: true, entriesNeedingPurge: 0 }
+// report.hashChainIntegrity — { verified: true }
+```
+
+## Retention Policy
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `defaultRetentionDays` | 365 | General log retention |
+| `personalDataRetentionDays` | 730 | PII data retention (GDPR) |
+| `anonymizeAfterDays` | — | Strip PII after N days |
+| `tenantOverrides` | — | Per-tenant retention |

@@ -1,0 +1,101 @@
+---
+title: "Compliance & Audit Trail"
+description: "Tamper-evident audit logging for EU AI Act compliance and enterprise governance"
+---
+
+## Overview
+
+The EU AI Act requires tamper-evident logging by August 2026. RadarOS provides hash-chained audit logging, data retention management, GDPR right-to-erasure, and compliance reporting — all built on any `StorageDriver`.
+
+## Quick Start
+
+```typescript
+import { Agent, AuditLogger, openai } from "@radaros/core";
+import { SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("audit.db");
+const auditLogger = new AuditLogger(storage, {
+  hashAlgorithm: "sha256",
+});
+
+const agent = new Agent({
+  name: "compliant-agent",
+  model: openai("gpt-4o"),
+  compliance: {
+    enabled: true,
+    storage,
+    retention: {
+      defaultRetentionDays: 365,
+      personalDataRetentionDays: 730,
+    },
+  },
+});
+```
+
+## Hash-Chained Audit Log
+
+Every audit entry includes a SHA-256 hash of `previousHash + content`, creating a tamper-evident chain:
+
+```typescript
+const entry = await auditLogger.log({
+  traceId: "run-123",
+  agentName: "support-agent",
+  action: "llm.call",
+  input: "How do I reset my password?",
+  output: "To reset your password...",
+  metadata: { model: "gpt-4o", tokens: 150 },
+});
+
+// entry.hash — SHA-256 of (previousHash + content)
+// entry.previousHash — links to previous entry
+```
+
+### Verify Chain Integrity
+
+```typescript
+const result = await auditLogger.verify();
+// { valid: true } or { valid: false, brokenAt: "entry-id" }
+```
+
+## Audit Actions
+
+| Action | Description |
+|--------|-------------|
+| `llm.call` | LLM API call with input/output |
+| `tool.exec` | Tool execution with args/result |
+| `handoff` | Agent-to-agent transfer |
+| `decision` | Agent decision point |
+| `memory.access` | Memory read/write |
+| `output` | Final response to user |
+
+## Querying the Audit Log
+
+```typescript
+const entries = await auditLogger.query({
+  agentName: "support-agent",
+  userId: "user-123",
+  fromDate: new Date("2025-01-01"),
+  toDate: new Date("2025-12-31"),
+  action: "llm.call",
+});
+```
+
+## PII Scrubbing
+
+Integrate with RadarOS PII Guard to automatically scrub PII before logging:
+
+```typescript
+import { PiiGuard } from "@radaros/core";
+
+const auditLogger = new AuditLogger(storage, {
+  piiScrubber: new PiiGuard({ mode: "redact" }),
+});
+```
+
+## Events
+
+| Event | Payload |
+|-------|---------|
+| `compliance.audit.logged` | `{ entryId, action, agentName }` |
+| `compliance.erasure` | `{ userId, storesErased, entriesAnonymized }` |
+| `compliance.retention.purged` | `{ purgedCount }` |
