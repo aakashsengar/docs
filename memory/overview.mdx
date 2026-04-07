@@ -28,6 +28,8 @@ With just `storage`, you get:
 ## Full Configuration
 
 ```typescript
+import { InMemoryGraphStore } from "@radaros/core";
+
 const agent = new Agent({
   name: "assistant",
   model: openai("gpt-4o"),
@@ -44,6 +46,17 @@ const agent = new Agent({
 
     learnings: {              // OFF by default — needs a vector store
       vectorStore: qdrant(...),
+    },
+
+    graph: {                  // OFF by default — knowledge graph
+      store: new InMemoryGraphStore(),
+    },
+
+    procedures: true,         // OFF by default — learns multi-step workflows
+
+    contextBudget: {          // optional — controls context token allocation
+      maxTokens: 4000,
+      priorities: { summaries: 0.3, graph: 0.2 },
     },
 
     model: openai("gpt-4o-mini"), // cheaper model for background extraction
@@ -127,6 +140,28 @@ new VoiceAgent({ provider, memory: { storage } });
 new BrowserAgent({ model, memory: { storage } });
 ```
 
+## Simplified API
+
+For quick operations without dealing with individual stores, use the high-level `remember`, `recall`, and `forget` methods:
+
+```typescript
+const mm = agent.memory!;
+
+// Store a fact
+await mm.remember("User prefers dark mode", { userId: "user-42" });
+
+// Search across all stores with composite scoring
+const results = await mm.recall("dark mode preference", { userId: "user-42" });
+console.log(results[0].content, results[0].score);
+
+// Remove memories
+await mm.forget({ userId: "user-42", factId: "fact-abc" });
+```
+
+See [Simplified API](/memory/simplified-api) for full details.
+
+---
+
 ## Default Feature States
 
 | Feature | Default | Requires |
@@ -138,6 +173,8 @@ new BrowserAgent({ model, memory: { storage } });
 | Entities | OFF | `entities: true` |
 | Decisions | OFF | `decisions: true` |
 | Learnings | OFF | `learnings: { vectorStore }` |
+| Graph Memory | OFF | `graph: { store }` |
+| Procedures | OFF | `procedures: true` |
 
 ## Accessing Stores Directly
 
@@ -177,7 +214,12 @@ This is useful for debugging — if the model seems to "forget" something, check
 ## Cross-References
 
 - [Memory Stores](/memory/stores) — Deep dive into each store type
-- [Memory Curator](/memory/curator) — Pruning, dedup, and maintenance
-- [Learned Skills](/skills/learned-skills) — Vector-backed skill storage
-- [Cost Tracking](/cost/overview) — Memory extraction uses tokens; track the cost
+- [Graph Memory](/memory/graph-memory) — Knowledge graph with traversal
+- [Temporal Awareness](/memory/temporal) — Fact validity and contradiction detection
+- [Composite Scoring](/memory/scoring) — How memories are ranked
+- [Procedural Memory](/memory/procedures) — Learning multi-step workflows
+- [Simplified API](/memory/simplified-api) — remember/recall/forget convenience methods
+- [Cross-Agent Sharing](/memory/sharing) — Shared memory in teams
+- [Context Budget](/memory/budgeting) — Token-aware allocation
+- [Memory Curator](/memory/curator) — Pruning, dedup, consolidation, and maintenance
 - [Storage Backends](/storage/overview) — MongoDB, Postgres, in-memory options

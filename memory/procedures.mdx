@@ -1,0 +1,277 @@
+---
+title: Procedural Memory
+description: Record and reuse successful multi-step workflows automatically.
+---
+
+# Procedural Memory
+
+Agents often solve the same kind of problem repeatedly — refund a delayed order, onboard a new user, debug a failing deployment. Procedural memory lets agents **learn** successful tool-call sequences and **reuse** them when a similar situation arises.
+
+Instead of reasoning from scratch every time, the agent can recall a proven procedure and follow it, reducing latency, token usage, and error rates.
+
+---
+
+## How It Works
+
+1. **After a successful run**, the memory system analyzes the tool-call sequence
+2. If the sequence is multi-step and coherent, it's extracted as a **procedure**
+3. On future runs, `buildContext()` checks if any stored procedure matches the current query
+4. If a match is found, the procedure is injected into the system prompt as a suggested plan
+
+The agent isn't forced to follow the procedure — it's presented as a recommendation. The agent can adapt, skip steps, or ignore it entirely based on the current context.
+
+---
+
+## Quick Start
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    procedures: true,
+  },
+});
+```
+
+That's it. The agent will automatically learn procedures from successful runs and suggest them when relevant.
+
+---
+
+## Configuration
+
+For fine-grained control, pass a configuration object:
+
+```typescript
+memory: {
+  storage,
+  procedures: {
+    maxProcedures: 100,         // max stored procedures (default: 50)
+    minSteps: 2,                // minimum tool calls to qualify (default: 2)
+    maxSteps: 20,               // maximum steps in a procedure (default: 20)
+    matchThreshold: 0.7,        // semantic similarity to suggest (default: 0.7)
+    autoExtract: true,          // extract after successful runs (default: true)
+    successThreshold: 2,        // times a procedure must succeed before suggesting (default: 1)
+  },
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxProcedures` | `number` | `50` | Maximum stored procedures before oldest are evicted |
+| `minSteps` | `number` | `2` | Minimum tool-call steps for a sequence to be extracted |
+| `maxSteps` | `number` | `20` | Maximum steps recorded per procedure |
+| `matchThreshold` | `number` | `0.7` | Semantic similarity threshold to suggest a procedure |
+| `autoExtract` | `boolean` | `true` | Automatically extract procedures after runs |
+| `successThreshold` | `number` | `1` | Minimum success count before a procedure is suggested |
+
+---
+
+## Procedure Structure
+
+Each stored procedure contains:
+
+```typescript
+interface Procedure {
+  id: string;
+  trigger: string;              // natural language description of when to use
+  steps: ProcedureStep[];       // ordered tool-call sequence
+  successCount: number;         // times this procedure led to a successful outcome
+  failureCount: number;         // times the agent deviated or the outcome failed
+  lastUsed: Date;
+  createdAt: Date;
+  embedding: number[];          // vector for semantic matching
+}
+
+interface ProcedureStep {
+  toolName: string;             // which tool to call
+  description: string;          // what this step accomplishes
+  parameterHints: Record<string, string>;  // typical parameter patterns
+  order: number;
+}
+```
+
+### Example Procedure
+
+After the agent successfully processes a refund, this procedure might be extracted:
+
+```typescript
+{
+  trigger: "Customer requests refund for a delayed order",
+  steps: [
+    { toolName: "search_orders", description: "Look up the order by ID or customer", order: 1,
+      parameterHints: { query: "order ID or customer email" } },
+    { toolName: "check_delivery_status", description: "Verify the order is actually delayed", order: 2,
+      parameterHints: { orderId: "from previous step" } },
+    { toolName: "calculate_refund", description: "Compute refund amount based on delay policy", order: 3,
+      parameterHints: { orderId: "from step 1", delayDays: "from step 2" } },
+    { toolName: "process_refund", description: "Issue the refund to the customer", order: 4,
+      parameterHints: { orderId: "from step 1", amount: "from step 3" } },
+    { toolName: "send_notification", description: "Notify the customer about the refund", order: 5,
+      parameterHints: { customerId: "from step 1", message: "refund confirmation" } },
+  ],
+  successCount: 12,
+  failureCount: 1,
+  lastUsed: new Date("2026-04-06"),
+}
+```
+
+---
+
+## How Procedures Are Learned
+
+After each run, the memory system evaluates the tool-call sequence:
+
+```typescript
+// Run completes successfully with this tool sequence:
+// 1. search_orders({ query: "order #7890" })
+// 2. check_delivery_status({ orderId: "7890" })
+// 3. calculate_refund({ orderId: "7890", delayDays: 5 })
+// 4. process_refund({ orderId: "7890", amount: 29.99 })
+// 5. send_notification({ customerId: "cust-456", message: "Refund of $29.99 processed" })
+
+// The extraction model:
+// 1. Identifies this as a coherent multi-step workflow (not random tool calls)
+// 2. Generalizes the parameters (replaces specific IDs with descriptions)
+// 3. Creates a trigger description: "Customer requests refund for a delayed order"
+// 4. Stores as a new procedure (or increments successCount on an existing match)
+```
+
+If a similar sequence is already stored, the existing procedure's `successCount` is incremented rather than creating a duplicate.
+
+---
+
+## Procedure Matching with `suggestProcedure`
+
+Before each run, the memory system checks for matching procedures:
+
+```typescript
+const suggestion = await agent.memory?.suggestProcedure({
+  input: "Customer wants a refund — order #4567 was supposed to arrive last week",
+  tools: agent.tools,   // only suggest procedures whose tools are available
+});
+
+if (suggestion) {
+  console.log(suggestion.trigger);
+  // "Customer requests refund for a delayed order"
+  console.log(suggestion.steps.map(s => s.toolName));
+  // ["search_orders", "check_delivery_status", "calculate_refund", "process_refund", "send_notification"]
+  console.log(suggestion.successCount);
+  // 12
+}
+```
+
+The matching uses semantic similarity between the current input and stored procedure triggers. Only procedures whose required tools are available to the agent are suggested.
+
+---
+
+## The `recall_procedure` Tool
+
+When procedural memory is enabled, the agent gains access to the `recall_procedure` tool, which it can call at any time during a run:
+
+```typescript
+// Agent can explicitly search for a known procedure:
+// recall_procedure({ query: "how to process international shipping" })
+// → {
+//     trigger: "Handle international shipping request",
+//     steps: [
+//       { toolName: "validate_address", description: "Check international address format" },
+//       { toolName: "calculate_duties", description: "Compute customs duties and taxes" },
+//       { toolName: "create_shipment", description: "Create international shipment" },
+//       { toolName: "generate_customs_form", description: "Generate customs declaration" },
+//     ],
+//     successCount: 8,
+//   }
+```
+
+This is useful when the automatic suggestion doesn't fire (e.g., the query doesn't match the trigger closely enough) but the agent recognizes mid-conversation that a known workflow applies.
+
+---
+
+## Full Example: Learning and Reusing
+
+```typescript
+import { Agent, MongoDBStorage, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const searchOrders = defineTool({
+  name: "search_orders",
+  description: "Search orders by ID, email, or keyword",
+  parameters: z.object({ query: z.string() }),
+  execute: async ({ query }) => ({ orderId: "ORD-7890", status: "delayed", customer: "alice@example.com" }),
+});
+
+const checkDelivery = defineTool({
+  name: "check_delivery_status",
+  description: "Check delivery status and delay duration",
+  parameters: z.object({ orderId: z.string() }),
+  execute: async ({ orderId }) => ({ status: "delayed", delayDays: 5, carrier: "FedEx" }),
+});
+
+const processRefund = defineTool({
+  name: "process_refund",
+  description: "Issue a refund for an order",
+  parameters: z.object({ orderId: z.string(), amount: z.number() }),
+  execute: async ({ orderId, amount }) => ({ success: true, refundId: "REF-001" }),
+});
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  tools: [searchOrders, checkDelivery, processRefund],
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    procedures: {
+      maxProcedures: 100,
+      matchThreshold: 0.7,
+    },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+// --- Run 1: Agent solves a refund from scratch ---
+await agent.run({
+  input: "Order #7890 never arrived. I want a refund.",
+  userId: "user-alice",
+});
+// Agent reasons through: search_orders → check_delivery_status → process_refund
+// After run: procedure extracted automatically
+
+// --- Run 2: Similar request, procedure is suggested ---
+await agent.run({
+  input: "My order #1234 is late. Can I get my money back?",
+  userId: "user-bob",
+});
+// Agent sees in its system prompt:
+//   "Suggested procedure (used successfully 1 time):
+//    1. search_orders — look up the order
+//    2. check_delivery_status — verify the delay
+//    3. process_refund — issue the refund"
+//
+// Agent follows the procedure, completing faster with fewer tokens
+```
+
+After multiple successful uses, the procedure's `successCount` grows, and the agent can reference its track record when deciding to follow it.
+
+---
+
+## How Procedures Evolve
+
+Procedures aren't static. Over time:
+
+- **Success reinforcement** — each successful use increments `successCount`
+- **Failure tracking** — if the agent deviates or the user reports a bad outcome, `failureCount` increments
+- **Eviction** — when `maxProcedures` is reached, procedures with the lowest success-to-failure ratio and oldest `lastUsed` date are evicted
+- **Merging** — if two procedures are semantically very similar, they're merged (steps unified, counts combined)
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — Unified memory system
+- [Composite Scoring](/memory/scoring) — How procedure suggestions are ranked
+- [Memory Stores](/memory/stores) — Other memory subsystems
+- [Agents: Tools](/agents/tools) — Tool definitions used in procedures

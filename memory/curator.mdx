@@ -1,6 +1,6 @@
 ---
 title: Memory Curator
-description: Maintenance operations for memory stores — prune, deduplicate, and clear.
+description: Maintenance operations for memory stores — prune, deduplicate, consolidate, and clear.
 ---
 
 # Memory Curator
@@ -32,6 +32,33 @@ const removed = await agent.memory.curator.deduplicate({
 
 console.log(`Removed ${removed} duplicate facts`);
 ```
+
+## Consolidation (LLM-Powered)
+
+Go beyond exact-text dedup — use an LLM to identify and merge semantically similar facts:
+
+```typescript
+import { openai } from "@radaros/core";
+
+const merged = await agent.memory!.curator.consolidate({
+  userId: "user-123",
+  model: openai("gpt-4o-mini"),
+  similarityThreshold: 0.8,
+});
+
+console.log(`Consolidated ${merged} redundant facts`);
+// "Likes dark mode" + "Prefers dark themes in apps" → "Prefers dark mode/themes in all applications"
+```
+
+Consolidation:
+- Groups semantically similar facts using the LLM
+- Merges each group into a single authoritative fact
+- Preserves the most specific/recent information
+- Returns the count of facts that were merged
+
+This is more powerful than `deduplicate()`, which only catches exact text matches.
+
+---
 
 ## Clear All Data
 

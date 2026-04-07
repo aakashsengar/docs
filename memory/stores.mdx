@@ -209,6 +209,54 @@ The agent now proactively checks customs status before approving refunds — eve
 
 ---
 
+## Graph Memory
+
+Knowledge graph with entity-relationship tracking. Unlike flat entity memory, graph memory builds a traversable graph of nodes and edges with temporal metadata.
+
+```typescript
+import { InMemoryGraphStore } from "@radaros/core";
+
+memory: {
+  storage,
+  graph: {
+    store: new InMemoryGraphStore(),
+    autoExtract: true,     // extract entities + relationships from conversations
+    maxContextNodes: 10,   // max nodes in context string
+  },
+}
+```
+
+See [Graph Memory](/memory/graph-memory) for full documentation.
+
+---
+
+## Procedure Memory
+
+Records and reuses successful multi-step tool-call workflows.
+
+```typescript
+memory: {
+  storage,
+  procedures: true,     // or { maxProcedures: 100 }
+}
+```
+
+See [Procedural Memory](/memory/procedures) for full documentation.
+
+---
+
+## Temporal Awareness
+
+All fact-based stores (User Facts, Entity Memory) now support temporal fields:
+- `validFrom` — when the fact became valid
+- `invalidatedAt` — when a newer fact superseded it
+
+The LLM extraction prompts detect contradictions and mark old facts as superseded rather than keeping duplicates.
+
+See [Temporal Awareness](/memory/temporal) for full documentation.
+
+---
+
 ## All Auto-Exposed Tools
 
 When memory stores are enabled, these tools become available to the agent:
@@ -218,5 +266,7 @@ When memory stores are enabled, these tools become available to the agent:
 | Entity Memory | `search_entities`, `create_entity` | Search and create entity records |
 | Decision Log | `log_decision`, `record_outcome`, `search_decisions` | Log decisions and track outcomes |
 | Learnings | `save_learning`, `search_learnings` | Save and retrieve vector-backed insights |
+| Graph Memory | `query_graph`, `traverse_entity`, `add_relationship` | Query and traverse the knowledge graph |
+| Procedures | `recall_procedure` | Find matching multi-step workflows |
 
 These tools are automatically added to the agent's tool set — no manual registration needed.

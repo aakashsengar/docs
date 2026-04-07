@@ -1,0 +1,221 @@
+---
+title: Graph Memory
+description: Knowledge graph with entity-relationship tracking and temporal awareness.
+---
+
+# Graph Memory
+
+Standard entity memory stores flat records — a list of names, types, and attributes. Graph memory upgrades this to a full **knowledge graph** where entities are connected by typed, directed relationships with temporal metadata.
+
+This lets agents answer questions like _"Who on the frontend team works with Raj?"_ or _"What projects depended on the billing API before it was deprecated?"_ — queries that require traversing relationships, not just keyword search.
+
+## Quick Start
+
+```typescript
+import { Agent, InMemoryGraphStore, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    graph: {
+      store: new InMemoryGraphStore(),
+    },
+  },
+});
+```
+
+With `graph` enabled, the agent automatically:
+- **Extracts entities and relationships** from conversations
+- **Exposes graph tools** (`query_graph`, `traverse_entity`, `add_relationship`) to the agent
+- **Injects relevant subgraph context** into the system prompt before each run
+
+## Neo4j Backend
+
+For production, use Neo4j as the graph store:
+
+```typescript
+import { Agent, Neo4jGraphStore, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    graph: {
+      store: new Neo4jGraphStore({
+        uri: "bolt://localhost:7687",
+        username: "neo4j",
+        password: process.env.NEO4J_PASSWORD!,
+        database: "radaros",
+      }),
+      maxContextNodes: 20,
+      maxDepth: 3,
+    },
+  },
+});
+```
+
+Neo4j gives you native graph traversal performance and Cypher queries under the hood, which matters when the graph grows past a few thousand nodes.
+
+---
+
+## Auto-Extraction from Conversations
+
+When graph memory is enabled, the background extraction step (after each run) identifies entities **and their relationships** from the conversation:
+
+```typescript
+// Conversation:
+// User: "Raj from the frontend team just finished the checkout redesign.
+//        He's handing it off to Priya for QA testing."
+
+// Extracted graph:
+// Nodes:
+//   - Raj (type: "person", attributes: { team: "frontend" })
+//   - Priya (type: "person", attributes: { role: "QA" })
+//   - Checkout Redesign (type: "project")
+//   - Frontend Team (type: "team")
+//
+// Edges:
+//   - Raj --[MEMBER_OF]--> Frontend Team
+//   - Raj --[COMPLETED]--> Checkout Redesign
+//   - Raj --[HANDED_OFF_TO]--> Priya
+//   - Priya --[TESTING]--> Checkout Redesign
+```
+
+The extraction model determines relationship types automatically. Over time, repeated mentions reinforce existing edges and add new ones.
+
+---
+
+## Graph Traversal and Search
+
+The agent can query the graph through auto-exposed tools or you can query it programmatically:
+
+### Agent Tools (Automatic)
+
+When graph memory is enabled, three tools are automatically added:
+
+```typescript
+// query_graph — semantic search over nodes and edges
+// Agent calls: query_graph({ query: "who works on checkout" })
+// → [{ name: "Raj", type: "person", relationships: [...] },
+//    { name: "Priya", type: "person", relationships: [...] }]
+
+// traverse_entity — walk outward from a specific node
+// Agent calls: traverse_entity({ entity: "Raj", depth: 2 })
+// → { node: "Raj", edges: [
+//      { type: "MEMBER_OF", target: "Frontend Team" },
+//      { type: "COMPLETED", target: "Checkout Redesign" },
+//      { type: "HANDED_OFF_TO", target: "Priya" },
+//    ]}
+
+// add_relationship — manually link two entities
+// Agent calls: add_relationship({
+//   from: "Priya",
+//   to: "Checkout Redesign",
+//   type: "APPROVED",
+//   attributes: { date: "2026-04-07" },
+// })
+```
+
+### Programmatic Access
+
+```typescript
+const graphStore = agent.memory?.getGraphStore();
+
+const results = await graphStore?.query({
+  text: "billing API dependencies",
+  maxNodes: 10,
+});
+
+const neighborhood = await graphStore?.traverse({
+  entityName: "Billing API",
+  depth: 2,
+  edgeTypes: ["DEPENDS_ON", "USED_BY"],
+});
+```
+
+---
+
+## Temporal Awareness
+
+Every node and edge in the graph carries temporal metadata:
+
+```typescript
+interface GraphNode {
+  name: string;
+  type: string;
+  attributes: Record<string, unknown>;
+  validFrom: Date;          // when this node was first observed
+  invalidatedAt?: Date;     // when this node was marked obsolete
+  lastMentioned: Date;      // most recent conversation reference
+}
+
+interface GraphEdge {
+  from: string;
+  to: string;
+  type: string;
+  attributes: Record<string, unknown>;
+  validFrom: Date;          // when the relationship was established
+  invalidatedAt?: Date;     // when the relationship ended
+  confidence: number;       // 0–1, increases with repeated mentions
+}
+```
+
+When the extraction model detects a contradiction (e.g., _"Raj moved from frontend to platform team"_), the old `MEMBER_OF → Frontend Team` edge is marked with `invalidatedAt` and a new `MEMBER_OF → Platform Team` edge is created. The old data is never deleted — see [Temporal Awareness](/memory/temporal) for details.
+
+By default, `buildContext()` only injects currently-valid nodes and edges. To include historical data:
+
+```typescript
+graph: {
+  store: new Neo4jGraphStore({ ... }),
+  includeInvalidated: true,   // show superseded facts in context
+}
+```
+
+---
+
+## Configuration
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `store` | `GraphStore` | **required** | Backend store (`InMemoryGraphStore`, `Neo4jGraphStore`) |
+| `maxContextNodes` | `number` | `15` | Max nodes injected into system prompt context |
+| `maxDepth` | `number` | `2` | Max traversal depth for context assembly |
+| `edgeTypes` | `string[]` | all | Filter which relationship types to include in context |
+| `includeInvalidated` | `boolean` | `false` | Include temporally invalidated nodes/edges in context |
+| `extractRelationships` | `boolean` | `true` | Auto-extract relationships from conversations |
+| `minConfidence` | `number` | `0.3` | Minimum edge confidence to include in context |
+| `namespace` | `string` | `"global"` | `"global"` \| `"user"` \| custom namespace for graph isolation |
+
+---
+
+## Graph Store Implementations
+
+| Store | Persistence | Best For |
+|-------|------------|----------|
+| `InMemoryGraphStore` | None (session only) | Development, testing |
+| `Neo4jGraphStore` | Durable | Production, large graphs, complex traversals |
+
+Both implement the `GraphStore` interface:
+
+```typescript
+interface GraphStore {
+  addNode(node: GraphNode): Promise<void>;
+  addEdge(edge: GraphEdge): Promise<void>;
+  query(opts: { text: string; maxNodes?: number }): Promise<GraphNode[]>;
+  traverse(opts: { entityName: string; depth?: number; edgeTypes?: string[] }): Promise<GraphNeighborhood>;
+  invalidateNode(name: string): Promise<void>;
+  invalidateEdge(from: string, to: string, type: string): Promise<void>;
+}
+```
+
+---
+
+## Cross-References
+
+- [Temporal Awareness](/memory/temporal) — How facts change over time
+- [Composite Scoring](/memory/scoring) — How graph nodes are ranked for context
+- [Memory Overview](/memory/overview) — Unified memory system
+- [Memory Stores](/memory/stores) — Entity memory (flat) and other store types

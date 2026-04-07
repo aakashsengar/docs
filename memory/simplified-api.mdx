@@ -1,0 +1,238 @@
+---
+title: Simplified API
+description: Three convenience methods for quick memory operations — remember, recall, forget.
+---
+
+# Simplified API
+
+The `MemoryManager` exposes three high-level methods — `remember`, `recall`, and `forget` — that act as a facade over all enabled memory stores. Use them when you want quick, store-agnostic memory operations without reaching into individual stores.
+
+```typescript
+const mm = agent.memory; // MemoryManager
+
+await mm.remember("User prefers weekly digests", { userId: "u-42" });
+
+const results = await mm.recall("digest preferences", { userId: "u-42" });
+
+await mm.forget({ userId: "u-42", factId: "fact-abc" });
+```
+
+---
+
+## remember
+
+Store a piece of information. The method dispatches to the appropriate store based on the options you provide:
+
+| Condition | Target Store |
+|-----------|-------------|
+| `userId` provided and **userFacts** enabled | `UserFacts.addFacts` |
+| **learnings** enabled (no userId or userFacts disabled) | `LearnedKnowledge.saveLearning` |
+| **entities** enabled (fallback) | `EntityMemory.addFact` |
+
+### Signature
+
+```typescript
+async remember(
+  content: string,
+  opts?: {
+    userId?: string;
+    scope?: string;
+    importance?: number;
+  },
+): Promise<void>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `content` | `string` | The information to store |
+| `opts.userId` | `string` | Routes to user-scoped facts when provided |
+| `opts.scope` | `string` | Namespace or context label (used as `namespace` for learnings) |
+| `opts.importance` | `number` | 0–1 importance weight, affects recall ranking |
+
+### Examples
+
+```typescript
+// Store a user-scoped fact
+await mm.remember("Prefers dark mode", {
+  userId: "user-42",
+  importance: 0.8,
+});
+
+// Store a general learning (no userId → goes to LearnedKnowledge)
+await mm.remember(
+  "Refunds for delays over 5 days should be auto-approved per policy",
+  { scope: "support" },
+);
+
+// Fallback to entity memory
+await mm.remember("Project Atlas launched Q1 2025");
+```
+
+---
+
+## recall
+
+Search across **all** enabled stores, apply composite scoring, and return ranked results.
+
+### Signature
+
+```typescript
+async recall(
+  query: string,
+  opts?: {
+    userId?: string;
+    topK?: number;
+    scope?: string;
+  },
+): Promise<ScoredMemory[]>
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `string` | — | Natural-language search query |
+| `opts.userId` | `string` | — | Include user-scoped facts in the search |
+| `opts.topK` | `number` | `10` | Maximum results returned |
+| `opts.scope` | `string` | — | Reserved for future scope filtering |
+
+### Return type
+
+```typescript
+interface ScoredMemory {
+  content: string;
+  score: number;   // 0–1 composite score
+  source: string;  // "userFacts" | "entities" | "learnings" | "graph"
+}
+```
+
+### How recall dispatches
+
+`recall` fans out to every enabled store in parallel, collects candidates, scores each one, then returns the top-K results sorted by score.
+
+| Store | What it searches | Semantic signal |
+|-------|-----------------|-----------------|
+| **UserFacts** | Active facts for the given `userId` | Substring match → 0.8, else 0.2 |
+| **EntityMemory** | All entities by name match | Name hit → 0.9, miss → skipped |
+| **LearnedKnowledge** | Vector similarity search | Embedding distance → 0.7 baseline |
+| **GraphMemory** | Graph node search | Node relevance → 0.75 baseline |
+
+Each candidate is scored with `computeCompositeScore`, which blends:
+
+| Factor | Default Weight | Description |
+|--------|---------------|-------------|
+| Semantic similarity | 0.4 | How well the content matches the query |
+| Recency | 0.3 | Exponential decay with a 30-day half-life |
+| Importance | 0.3 | The `importance` value stored with the item |
+
+### Examples
+
+```typescript
+// Search across all stores for a user
+const results = await mm.recall("shipping preferences", {
+  userId: "user-42",
+  topK: 5,
+});
+
+for (const r of results) {
+  console.log(`[${r.source}] (${r.score.toFixed(2)}) ${r.content}`);
+}
+// [userFacts] (0.87) Prefers express shipping for orders over $100
+// [entities] (0.72) FedEx (carrier): Primary carrier for domestic orders
+// [learnings] (0.65) International shipments need customs pre-clearance
+```
+
+```typescript
+// Search without a userId — only entity, learnings, and graph stores
+const results = await mm.recall("Atlas project status");
+```
+
+---
+
+## forget
+
+Remove memories matching the given criteria. Returns the count of stores cleared.
+
+### Signature
+
+```typescript
+async forget(opts: {
+  userId?: string;
+  factId?: string;
+  entityId?: string;
+  scope?: string;
+}): Promise<number>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `opts.userId` | `string` | Target user for fact/profile deletion |
+| `opts.factId` | `string` | Remove a specific fact (requires `userId`) |
+| `opts.entityId` | `string` | Remove a specific entity |
+| `opts.scope` | `string` | Reserved for future scope-based deletion |
+
+### Deletion behaviour
+
+| Input | What happens |
+|-------|-------------|
+| `userId` + `factId` | Removes that single fact from UserFacts |
+| `entityId` | Removes that entity from EntityMemory |
+| `userId` alone (no factId/entityId) | Clears **all** facts and profile data for the user |
+
+### Examples
+
+```typescript
+// Remove a single fact
+await mm.forget({ userId: "user-42", factId: "fact-abc" });
+
+// Remove an entity
+await mm.forget({ entityId: "entity-xyz" });
+
+// Clear all user data (facts + profile)
+const removed = await mm.forget({ userId: "user-42" });
+console.log(`Cleared ${removed} store(s)`);
+```
+
+---
+
+## Full Example
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    userFacts: true,
+    entities: true,
+  },
+});
+
+const mm = agent.memory!;
+
+// Store
+await mm.remember("Prefers metric units", { userId: "u-1" });
+await mm.remember("Project Orion deadline is March 30");
+
+// Search
+const hits = await mm.recall("units", { userId: "u-1", topK: 3 });
+console.log(hits);
+// [{ content: "Prefers metric units", score: 0.87, source: "userFacts" }]
+
+// Delete
+await mm.forget({ userId: "u-1" });
+```
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — How the full memory system works
+- [Memory Stores](/memory/stores) — Deep dive into each store type
+- [Memory Curator](/memory/curator) — Pruning, dedup, and maintenance

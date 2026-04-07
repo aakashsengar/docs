@@ -1,0 +1,215 @@
+---
+title: Temporal Awareness
+description: How memory tracks fact validity over time and handles contradictions.
+---
+
+# Temporal Awareness
+
+People change jobs. Companies rename products. Projects get cancelled. A memory system that only stores the latest fact loses the history that often matters for context.
+
+RadarOS memory tracks **when** facts became true and **when** they stopped being true, across User Facts, Entity Memory, and Graph Memory. Old facts are never deleted — they're superseded.
+
+---
+
+## The Problem
+
+Consider this sequence of conversations over several months:
+
+1. **January:** _"I just started at Acme Corp as a junior developer."_
+2. **March:** _"I got promoted to senior developer!"_
+3. **June:** _"I left Acme and joined Globex as a tech lead."_
+
+A naive memory system would show: _"Works at Globex as tech lead"_ — losing the history. But that history matters: the agent should know the user has Acme experience, was promoted there, and recently switched roles.
+
+---
+
+## How It Works
+
+Every fact and entity carries two temporal fields:
+
+```typescript
+interface TemporalMetadata {
+  validFrom: Date;          // when this fact was first recorded
+  invalidatedAt?: Date;     // when a newer fact superseded it (undefined = still valid)
+}
+```
+
+When the extraction model detects a new fact that contradicts an existing one, the old fact is **not deleted**. Instead:
+
+1. The old fact gets an `invalidatedAt` timestamp
+2. The new fact is created with a fresh `validFrom`
+3. Both remain in storage
+
+```typescript
+// After January:
+{ fact: "Works at Acme Corp", role: "junior developer", validFrom: "2026-01-15", invalidatedAt: undefined }
+
+// After March (old fact superseded, not deleted):
+{ fact: "Works at Acme Corp", role: "junior developer", validFrom: "2026-01-15", invalidatedAt: "2026-03-10" }
+{ fact: "Works at Acme Corp", role: "senior developer", validFrom: "2026-03-10", invalidatedAt: undefined }
+
+// After June:
+{ fact: "Works at Acme Corp", role: "senior developer", validFrom: "2026-03-10", invalidatedAt: "2026-06-01" }
+{ fact: "Works at Globex",    role: "tech lead",        validFrom: "2026-06-01", invalidatedAt: undefined }
+```
+
+---
+
+## Contradiction Detection
+
+During background extraction, the memory model compares new facts against existing ones. Contradiction detection uses semantic similarity — it doesn't require exact string matches:
+
+```typescript
+// Existing fact: "Lives in Mumbai"
+// New statement: "I just moved to Bangalore"
+
+// The extraction model identifies these as contradictory (both are location facts)
+// Result:
+//   - "Lives in Mumbai" → invalidatedAt: now
+//   - "Lives in Bangalore" → validFrom: now
+```
+
+The extraction model handles nuance:
+- _"I also use Python"_ → **additive** (doesn't contradict existing "Uses TypeScript")
+- _"I switched to Python"_ → **contradictory** (supersedes "Uses TypeScript")
+- _"I'm no longer on the platform team"_ → **negation** (invalidates without a replacement)
+
+---
+
+## What the Agent Sees
+
+By default, `buildContext()` only injects **currently valid** facts (where `invalidatedAt` is undefined). The agent sees a clean, current view:
+
+```
+User Facts:
+- Works at Globex as tech lead
+- Lives in Bangalore
+- Uses Python
+```
+
+### Including History
+
+If your use case benefits from historical awareness, enable it:
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    userFacts: {
+      includeSuperseded: true,   // show invalidated facts with [past] label
+      maxSuperseded: 5,          // limit old facts in context
+    },
+  },
+});
+```
+
+With `includeSuperseded`, the context becomes:
+
+```
+User Facts:
+- Works at Globex as tech lead
+- Lives in Bangalore
+- Uses Python
+- [past, until Mar 2026] Works at Acme Corp as junior developer
+- [past, until Jun 2026] Works at Acme Corp as senior developer
+```
+
+This gives the agent historical awareness — useful for career coaches, medical history, or project timelines.
+
+---
+
+## Viewing Temporal History
+
+Query the full timeline for a user programmatically:
+
+```typescript
+const factStore = agent.memory?.getUserFacts();
+
+const allFacts = await factStore?.getFacts("user-123", {
+  includeInvalidated: true,
+});
+
+// Returns all facts, both current and superseded:
+// [
+//   { fact: "Works at Globex", role: "tech lead", validFrom: "2026-06-01" },
+//   { fact: "Works at Acme Corp", role: "senior developer", validFrom: "2026-03-10", invalidatedAt: "2026-06-01" },
+//   { fact: "Works at Acme Corp", role: "junior developer", validFrom: "2026-01-15", invalidatedAt: "2026-03-10" },
+//   { fact: "Lives in Bangalore", validFrom: "2026-06-01" },
+//   { fact: "Lives in Mumbai", validFrom: "2026-01-15", invalidatedAt: "2026-06-01" },
+// ]
+
+const currentFacts = allFacts?.filter(f => !f.invalidatedAt);
+const historicalFacts = allFacts?.filter(f => f.invalidatedAt);
+```
+
+---
+
+## Works Across Store Types
+
+Temporal awareness is built into multiple memory subsystems:
+
+| Store | Temporal Fields | Contradiction Detection |
+|-------|----------------|------------------------|
+| User Facts | `validFrom`, `invalidatedAt` | Yes — semantic similarity |
+| Entity Memory | `validFrom`, `invalidatedAt` | Yes — same-name entities |
+| Graph Memory (nodes) | `validFrom`, `invalidatedAt`, `lastMentioned` | Yes — same-name nodes |
+| Graph Memory (edges) | `validFrom`, `invalidatedAt`, `confidence` | Yes — same from/to/type |
+| User Profile | `updatedAt` | Overwrites (structured fields) |
+| Decision Log | `createdAt` | No (append-only) |
+
+User Profile is the exception — structured fields like `name` and `timezone` are simply overwritten since there's only one current value. The decision log is append-only by design.
+
+---
+
+## Code Example: Full Lifecycle
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const storage = new MongoDBStorage({ uri: "mongodb://localhost/radaros" });
+
+const agent = new Agent({
+  name: "career-coach",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    userFacts: {
+      includeSuperseded: true,
+      maxSuperseded: 10,
+    },
+    entities: true,
+    graph: {
+      store: new Neo4jGraphStore({ uri: "bolt://localhost:7687" }),
+    },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+// Run 1 (January): "I just started at Acme Corp as a junior developer"
+await agent.run({ userId: "user-42", input: "I just started at Acme Corp as a junior developer." });
+// Memory now contains: Works at Acme Corp, role: junior developer
+
+// Run 2 (March): "I got promoted to senior developer!"
+await agent.run({ userId: "user-42", input: "Great news — I got promoted to senior developer!" });
+// Memory now: old fact superseded, new fact: role: senior developer
+
+// Run 3 (June): "I left Acme and joined Globex as a tech lead"
+await agent.run({ userId: "user-42", input: "I left Acme and joined Globex as a tech lead." });
+// Memory now: Acme facts superseded, new fact: Globex tech lead
+
+// The agent sees:
+// Current: "Works at Globex as tech lead"
+// History: [past] "Works at Acme Corp as senior developer"
+//          [past] "Works at Acme Corp as junior developer"
+```
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — Unified memory system
+- [Graph Memory](/memory/graph-memory) — Knowledge graph with temporal edges
+- [Memory Stores](/memory/stores) — User Facts, Entity Memory, and other stores
+- [Memory Curator](/memory/curator) — Pruning old superseded facts

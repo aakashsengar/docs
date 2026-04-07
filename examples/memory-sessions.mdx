@@ -731,3 +731,576 @@ const agent = new Agent({
   memory: { storage, summaries: true, userFacts: true },
 });
 ```
+
+---
+
+## Graph Memory
+
+Build a knowledge graph of entities and relationships from conversations. The agent can traverse connections to answer questions about how people, companies, and projects relate to each other.
+
+```typescript
+import { Agent, InMemoryStorage, InMemoryGraphStore, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+const graphStore = new InMemoryGraphStore();
+
+const agent = new Agent({
+  name: "org-analyst",
+  model: openai("gpt-4o"),
+  instructions: `You are an organizational analyst. Track people, teams, and projects. 
+Use the knowledge graph to answer questions about relationships and reporting structures.`,
+  memory: {
+    storage,
+    graph: {
+      store: graphStore,
+      autoExtract: true,
+      maxContextNodes: 15,
+    },
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "analyst-1";
+
+// Conversation 1: Org structure
+await agent.run(
+  `Priya Sharma is a Senior Engineer on the Platform team. She reports to Marcus Webb, 
+   the VP of Engineering. The Platform team owns the Auth Service and the API Gateway.`,
+  { sessionId: "org-mapping-1", userId }
+);
+
+// Conversation 2: More relationships
+await agent.run(
+  `Sarah Chen is a Product Manager who works closely with the Platform team. 
+   She's leading Project Atlas, which depends on the Auth Service.`,
+  { sessionId: "org-mapping-2", userId }
+);
+
+// Query relationships — the agent uses the graph for context
+const r = await agent.run(
+  "Who would be affected if we rewrite the Auth Service?",
+  { sessionId: "impact-analysis", userId }
+);
+console.log("Agent:", r.text);
+// → References Priya (owns it), Marcus (her manager), Sarah (Project Atlas depends on it)
+
+// Access the graph store directly
+await graphStore.initialize();
+
+const authNode = (await graphStore.findNodes({ name: "Auth Service" }))[0];
+if (authNode) {
+  const { nodes, edges } = await graphStore.traverse(authNode.id, {
+    maxDepth: 2,
+    includeInvalid: false,
+  });
+
+  console.log("\nAuth Service dependency graph:");
+  for (const node of nodes) {
+    console.log(`  [${node.type}] ${node.name}`);
+  }
+  for (const edge of edges) {
+    const src = nodes.find((n) => n.id === edge.sourceId);
+    const tgt = nodes.find((n) => n.id === edge.targetId);
+    console.log(`  ${src?.name} --[${edge.type}]--> ${tgt?.name}`);
+  }
+  // → [project] Auth Service
+  // → [person] Priya Sharma
+  // → [project] Project Atlas
+  // → Priya Sharma --[owns]--> Auth Service
+  // → Project Atlas --[depends_on]--> Auth Service
+}
+
+// Search the graph by keyword
+const people = await graphStore.search("engineer", { nodeTypes: ["person"], limit: 5 });
+console.log("\nEngineers:", people.map((p) => p.name));
+// → ["Priya Sharma"]
+```
+
+---
+
+## Temporal Facts
+
+When a user changes their mind or updates a preference, the memory system automatically supersedes the old fact. Only the latest version is used for context — older facts are kept for audit but marked as invalidated.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "lifestyle-assistant",
+  model: openai("gpt-4o"),
+  instructions: `You are a lifestyle assistant. Remember user preferences and adapt 
+when they change. Always use the most recent information.`,
+  memory: {
+    storage,
+    userFacts: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const userId = "user-evolving";
+
+// Session 1: Initial preferences
+await agent.run("I'm a vegetarian and I live in San Francisco.", {
+  sessionId: "prefs-1",
+  userId,
+});
+
+// Session 2: Preferences change
+await agent.run("Actually, I've started eating fish recently. Also, I just moved to Austin.", {
+  sessionId: "prefs-2",
+  userId,
+});
+
+// Session 3: Agent should use the updated facts
+const r = await agent.run("Recommend a restaurant for dinner tonight.", {
+  sessionId: "dinner-rec",
+  userId,
+});
+console.log("Agent:", r.text);
+// → Recommends pescatarian restaurants in Austin (not vegetarian in SF)
+
+// Inspect the fact timeline
+const userFacts = agent.memory!.getUserFacts()!;
+const allFacts = await userFacts.getFacts(userId);
+
+console.log("\nFact timeline:");
+for (const fact of allFacts) {
+  const status = fact.invalidatedAt ? "SUPERSEDED" : "ACTIVE";
+  console.log(`  [${status}] ${fact.fact}`);
+  if (fact.invalidatedAt) {
+    console.log(`    invalidated: ${fact.invalidatedAt}`);
+  }
+}
+// → [SUPERSEDED] Vegetarian
+// →   invalidated: 2025-01-15T10:30:00Z
+// → [SUPERSEDED] Lives in San Francisco
+// →   invalidated: 2025-01-15T10:30:00Z
+// → [ACTIVE] Eats fish (pescatarian)
+// → [ACTIVE] Lives in Austin
+
+// Only active facts are injected into agent context
+const activeFacts = await userFacts.getActiveFacts(userId);
+console.log("\nActive facts:", activeFacts.map((f) => f.fact));
+// → ["Eats fish (pescatarian)", "Lives in Austin"]
+```
+
+---
+
+## Simplified API
+
+Use `remember()`, `recall()`, and `forget()` for quick memory operations without configuring individual stores. These convenience methods dispatch to the appropriate store automatically.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "quick-memory-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant with a great memory.",
+  memory: {
+    storage,
+    userFacts: true,
+    entities: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const mm = agent.memory!;
+const userId = "user-quick";
+
+// --- remember(): Store facts directly ---
+await mm.remember("Prefers dark mode in all applications", { userId });
+await mm.remember("Works at Acme Corp as a backend engineer", { userId });
+await mm.remember("Favorite programming language is Rust", { userId });
+await mm.remember("Allergic to peanuts", { userId, importance: 1.0 });
+
+// --- recall(): Search across all stores, get ranked results ---
+const results = await mm.recall("programming preferences", { userId, topK: 5 });
+
+console.log("Recall results:");
+for (const r of results) {
+  console.log(`  [${r.source}] (score: ${r.score.toFixed(2)}) ${r.content}`);
+}
+// → [userFacts] (score: 0.82) Favorite programming language is Rust
+// → [userFacts] (score: 0.45) Works at Acme Corp as a backend engineer
+// → [userFacts] (score: 0.31) Prefers dark mode in all applications
+
+// --- recall() with different queries ---
+const healthResults = await mm.recall("health and dietary restrictions", { userId });
+console.log("\nHealth-related:", healthResults.map((r) => r.content));
+// → ["Allergic to peanuts"]
+
+// --- forget(): Remove specific facts ---
+const facts = await mm.getUserFacts()!.getFacts(userId);
+const darkModeFact = facts.find((f) => f.fact.includes("dark mode"));
+
+if (darkModeFact) {
+  const removed = await mm.forget({ userId, factId: darkModeFact.id });
+  console.log(`\nRemoved ${removed} fact(s)`);
+}
+
+// Verify it's gone
+const afterForget = await mm.recall("dark mode", { userId });
+console.log("After forget:", afterForget.length === 0 ? "No results" : afterForget);
+// → "No results"
+
+// --- forget() all user data ---
+// await mm.forget({ userId });  // Clears everything for this user
+```
+
+---
+
+## Procedural Memory
+
+The agent learns multi-step workflows from successful tool-call sequences and suggests them when similar tasks come up again. This turns one-off actions into reusable procedures.
+
+```typescript
+import { Agent, InMemoryStorage, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const storage = new InMemoryStorage();
+
+const deployTool = defineTool({
+  name: "deploy_service",
+  description: "Deploy a service to the specified environment",
+  parameters: z.object({
+    service: z.string(),
+    environment: z.string(),
+    version: z.string(),
+  }),
+  execute: async (args) => `Deployed ${args.service}@${args.version} to ${args.environment}`,
+});
+
+const runTestsTool = defineTool({
+  name: "run_tests",
+  description: "Run the test suite for a service",
+  parameters: z.object({
+    service: z.string(),
+    suite: z.enum(["unit", "integration", "e2e"]),
+  }),
+  execute: async (args) => `All ${args.suite} tests passed for ${args.service}`,
+});
+
+const notifyTool = defineTool({
+  name: "notify_channel",
+  description: "Send a notification to a Slack channel",
+  parameters: z.object({
+    channel: z.string(),
+    message: z.string(),
+  }),
+  execute: async (args) => `Notified #${args.channel}: ${args.message}`,
+});
+
+const agent = new Agent({
+  name: "deploy-agent",
+  model: openai("gpt-4o"),
+  instructions: `You are a deployment assistant. When deploying services, always:
+1. Run integration tests first
+2. Deploy to the target environment
+3. Notify the team channel`,
+  tools: [deployTool, runTestsTool, notifyTool],
+  memory: {
+    storage,
+    procedures: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+// First deployment — the agent figures out the steps
+await agent.run("Deploy the auth-service v2.3.1 to staging", {
+  sessionId: "deploy-1",
+});
+
+// The procedure is learned from the successful tool-call sequence
+const procMemory = agent.memory!.getProcedureMemory()!;
+const procedures = await procMemory.getProcedures();
+
+console.log("Learned procedures:");
+for (const proc of procedures) {
+  console.log(`  "${proc.trigger}" (used ${proc.successCount}x)`);
+  for (const step of proc.steps) {
+    console.log(`    → ${step.toolName}: ${step.resultSummary}`);
+  }
+}
+// → "Deploy service to staging" (used 1x)
+// →   → run_tests: All integration tests passed for auth-service
+// →   → deploy_service: Deployed auth-service@v2.3.1 to staging
+// →   → notify_channel: Notified #deployments: auth-service v2.3.1 deployed to staging
+
+// Second deployment — the agent reuses the learned procedure
+const r2 = await agent.run("Deploy payment-service v1.8.0 to staging", {
+  sessionId: "deploy-2",
+});
+console.log("\nAgent:", r2.text);
+// → Follows the same test → deploy → notify sequence automatically
+
+// The procedure's success count increments
+const updated = await procMemory.getProcedures();
+console.log("\nUpdated count:", updated[0]?.successCount);
+// → 2
+
+// Suggest a procedure for a new task
+const suggestion = await procMemory.suggestProcedure("deploy user-service to production");
+console.log("\nSuggested procedure:", suggestion?.trigger);
+// → "Deploy service to staging" (closest match)
+```
+
+---
+
+## Team Shared Memory
+
+When agents work together in a `Team`, they can share a single memory configuration. Facts learned by one agent are visible to all team members, enabling cross-agent knowledge sharing.
+
+```typescript
+import { Agent, Team, TeamMode, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const sharedMemory = {
+  storage,
+  userFacts: true,
+  entities: { namespace: "team" },
+  model: openai("gpt-4o-mini"),
+};
+
+const researcher = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  instructions: `You are a research analyst. Gather information about companies, 
+markets, and technologies. Be thorough and factual.`,
+});
+
+const strategist = new Agent({
+  name: "strategist",
+  model: openai("gpt-4o"),
+  instructions: `You are a business strategist. Use research findings to develop 
+actionable recommendations. Reference specific data points.`,
+});
+
+const team = new Team({
+  name: "advisory-team",
+  mode: TeamMode.Coordinate,
+  model: openai("gpt-4o"),
+  members: [researcher, strategist],
+  memory: sharedMemory,
+  instructions: `Coordinate research and strategy tasks. The researcher gathers data, 
+then the strategist develops recommendations based on those findings.`,
+});
+
+const userId = "client-startup";
+
+// Round 1: Researcher gathers information
+const r1 = await team.run(
+  `Research the competitive landscape for AI-powered customer support tools. 
+   Our client is a Series A startup with $5M ARR.`,
+  { sessionId: "advisory-1", userId }
+);
+console.log("Team:", r1.text.slice(0, 200));
+
+// Round 2: Strategist builds on research — shared memory carries facts across agents
+const r2 = await team.run(
+  "Based on the research, what market positioning should our client pursue?",
+  { sessionId: "advisory-2", userId }
+);
+console.log("\nTeam:", r2.text.slice(0, 200));
+// → The strategist references specific findings the researcher stored:
+//   market size, competitor names, client's ARR — all from shared memory
+
+// Both agents contributed to and can read from the same fact store
+const mm = team.memory!;
+const facts = await mm.getUserFacts()!.getActiveFacts(userId);
+
+console.log("\nShared team knowledge:");
+for (const fact of facts) {
+  console.log(`  - ${fact.fact}`);
+}
+// → "Client is a Series A startup"
+// → "Client has $5M ARR"
+// → "Market includes Intercom, Zendesk AI, Ada"
+// → "AI support tools market growing 25% YoY"
+```
+
+---
+
+## Composite Scoring
+
+When recalling memories, results are ranked using a composite score that blends semantic similarity, recency, and importance. More relevant, recent, and important memories surface first.
+
+```typescript
+import {
+  Agent,
+  InMemoryStorage,
+  openai,
+  computeCompositeScore,
+  recencyDecay,
+} from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "scored-memory-bot",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant that prioritizes the most relevant memories.",
+  memory: {
+    storage,
+    userFacts: true,
+    entities: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const mm = agent.memory!;
+const userId = "user-scoring";
+
+// Store facts with varying importance
+await mm.remember("Favorite color is blue", { userId, importance: 0.2 });
+await mm.remember("Allergic to shellfish — carry EpiPen", { userId, importance: 1.0 });
+await mm.remember("Works as a data scientist at Google", { userId, importance: 0.7 });
+await mm.remember("Prefers window seats on flights", { userId, importance: 0.3 });
+await mm.remember("Learning Japanese, currently N3 level", { userId, importance: 0.5 });
+
+// Recall with composite scoring
+const results = await mm.recall("work and career", { userId, topK: 5 });
+
+console.log("Ranked recall for 'work and career':");
+for (const r of results) {
+  console.log(`  score: ${r.score.toFixed(3)} | [${r.source}] ${r.content}`);
+}
+// → Results ranked by composite of semantic match + recency + importance
+// → "Works as a data scientist at Google" ranks highest (strong semantic match + high importance)
+
+// Understand the scoring components individually
+const now = new Date();
+const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+console.log("\n--- Recency decay ---");
+console.log(`  Just now:      ${recencyDecay(now).toFixed(3)}`);
+// → 1.000
+console.log(`  1 week ago:    ${recencyDecay(oneWeekAgo).toFixed(3)}`);
+// → 0.851
+console.log(`  3 months ago:  ${recencyDecay(threeMonthsAgo).toFixed(3)}`);
+// → 0.125
+
+console.log("\n--- Composite scores ---");
+const scenarios = [
+  { label: "High relevance, recent, important", semanticSimilarity: 0.9, createdAt: now, importance: 0.9 },
+  { label: "High relevance, old, important", semanticSimilarity: 0.9, createdAt: threeMonthsAgo, importance: 0.9 },
+  { label: "Low relevance, recent, important", semanticSimilarity: 0.2, createdAt: now, importance: 0.9 },
+  { label: "High relevance, recent, trivial", semanticSimilarity: 0.9, createdAt: now, importance: 0.1 },
+];
+
+for (const s of scenarios) {
+  const score = computeCompositeScore(s);
+  console.log(`  ${s.label}: ${score.toFixed(3)}`);
+}
+// → High relevance, recent, important:  0.930
+// → High relevance, old, important:     0.668
+// → Low relevance, recent, important:   0.650
+// → High relevance, recent, trivial:    0.690
+
+// Custom weights: prioritize importance over recency
+const customScore = computeCompositeScore({
+  semanticSimilarity: 0.5,
+  createdAt: threeMonthsAgo,
+  importance: 1.0,
+  weights: { semantic: 0.2, recency: 0.1, importance: 0.7 },
+});
+console.log(`\nCustom weights (importance-heavy): ${customScore.toFixed(3)}`);
+// → 0.825 — importance dominates despite low recency
+```
+
+---
+
+## Memory Consolidation
+
+Over time, memory stores accumulate redundant or near-duplicate facts. The curator's `consolidate()` method uses an LLM to identify semantically similar facts and merge them into single authoritative entries.
+
+```typescript
+import { Agent, InMemoryStorage, openai } from "@radaros/core";
+
+const storage = new InMemoryStorage();
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  memory: {
+    storage,
+    userFacts: true,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const mm = agent.memory!;
+const userId = "user-consolidate";
+
+// Simulate facts accumulated over many sessions — some are near-duplicates
+await mm.remember("User prefers dark mode", { userId });
+await mm.remember("Likes dark themes in applications", { userId });
+await mm.remember("Always enables dark mode when available", { userId });
+await mm.remember("Based in Mumbai, India", { userId });
+await mm.remember("Lives in Mumbai", { userId });
+await mm.remember("Works as a software engineer", { userId });
+await mm.remember("Is a backend developer", { userId });
+await mm.remember("Enjoys hiking on weekends", { userId });
+await mm.remember("Favorite cuisine is Japanese", { userId });
+
+// Before consolidation
+const beforeFacts = await mm.getUserFacts()!.getActiveFacts(userId);
+console.log(`Before consolidation: ${beforeFacts.length} facts`);
+for (const f of beforeFacts) {
+  console.log(`  - ${f.fact}`);
+}
+// → 9 facts, many overlapping
+
+// Run consolidation — the LLM identifies semantic duplicates and merges them
+const curator = mm.curator;
+const merged = await curator.consolidate({
+  userId,
+  model: openai("gpt-4o-mini"),
+  similarityThreshold: 0.7,
+});
+console.log(`\nConsolidated: ${merged} facts merged`);
+// → Consolidated: 4 facts merged
+
+// After consolidation
+const afterFacts = await mm.getUserFacts()!.getActiveFacts(userId);
+console.log(`\nAfter consolidation: ${afterFacts.length} facts`);
+for (const f of afterFacts) {
+  console.log(`  - ${f.fact}`);
+}
+// → "Prefers dark mode in all applications"  (3 facts → 1)
+// → "Based in Mumbai, India"                 (2 facts → 1)
+// → "Software engineer / backend developer"  (2 facts → 1)
+// → "Enjoys hiking on weekends"              (kept as-is)
+// → "Favorite cuisine is Japanese"           (kept as-is)
+
+// Combine with deduplication for a full maintenance pass
+const deduped = await curator.deduplicate({ userId });
+console.log(`\nDeduplication pass: removed ${deduped} exact duplicates`);
+
+// Schedule both as part of regular maintenance
+async function weeklyMemoryMaintenance(userIds: string[]) {
+  let totalMerged = 0;
+  let totalDeduped = 0;
+
+  for (const uid of userIds) {
+    totalDeduped += await curator.deduplicate({ userId: uid });
+    totalMerged += await curator.consolidate({
+      userId: uid,
+      model: openai("gpt-4o-mini"),
+    });
+  }
+
+  console.log(
+    `Maintenance complete: ${totalDeduped} deduped, ${totalMerged} consolidated`
+  );
+}
+
+await weeklyMemoryMaintenance([userId]);
+```

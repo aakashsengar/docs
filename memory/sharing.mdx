@@ -1,0 +1,172 @@
+---
+title: Cross-Agent Memory Sharing
+description: Share memory across team members for coordinated multi-agent intelligence.
+---
+
+# Cross-Agent Memory Sharing
+
+Agents in a RadarOS team can share a single memory pool so that knowledge discovered by one agent is immediately available to every other agent in the group. This is configured through the `memory` field on `TeamConfig`.
+
+---
+
+## How It Works
+
+When you set `memory` on a team, every member agent that does **not** have its own memory config inherits the shared `MemoryManager`. This means:
+
+- **User facts** extracted by Agent A are visible to Agent B on the very next run.
+- **Entity memory** is pooled — entities discovered in any conversation flow into the same store.
+- **Learnings** from one agent enrich context for all teammates.
+- **Decisions** remain per-agent — each agent's decision log stays scoped to its own name, so audit trails are never mixed.
+
+```
+┌──────────────────────────────────────────────┐
+│  Team: "support-squad"                       │
+│                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Triage   │  │ Billing  │  │ Shipping │   │
+│  │ Agent    │  │ Agent    │  │ Agent    │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
+│       │              │              │         │
+│       └──────────────┼──────────────┘         │
+│                      ▼                        │
+│          ┌───────────────────┐                │
+│          │  Shared Memory    │                │
+│          │  (UserFacts,      │                │
+│          │   Entities,       │                │
+│          │   Learnings)      │                │
+│          └───────────────────┘                │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+## Configuration
+
+Pass a `UnifiedMemoryConfig` to the team's `memory` field. Member agents without their own memory config will use it automatically.
+
+```typescript
+import {
+  Agent,
+  Team,
+  TeamMode,
+  MongoDBStorage,
+  openai,
+} from "@radaros/core";
+
+const sharedStorage = new MongoDBStorage({
+  uri: "mongodb://localhost/radaros",
+});
+
+const triageAgent = new Agent({
+  name: "triage",
+  model: openai("gpt-4o"),
+  instructions: "Classify incoming tickets and extract customer details.",
+});
+
+const billingAgent = new Agent({
+  name: "billing",
+  model: openai("gpt-4o"),
+  instructions: "Handle billing questions. Use stored user facts for context.",
+});
+
+const shippingAgent = new Agent({
+  name: "shipping",
+  model: openai("gpt-4o"),
+  instructions: "Track and resolve shipping issues.",
+});
+
+const team = new Team({
+  name: "support-squad",
+  mode: TeamMode.Route,
+  model: openai("gpt-4o"),
+  members: [triageAgent, billingAgent, shippingAgent],
+  memory: {
+    storage: sharedStorage,
+    userFacts: true,
+    entities: true,
+    decisions: true,
+    learnings: {
+      vectorStore: qdrant({
+        url: "http://localhost:6333",
+        embedding: new OpenAIEmbedding(),
+      }),
+    },
+  },
+});
+```
+
+In this setup:
+- **Triage** extracts user facts and entities during intake.
+- **Billing** and **Shipping** see those facts and entities in their context on subsequent runs.
+- Each agent's decision log is scoped to its own `agentName`, keeping audit trails distinct.
+
+---
+
+## What Is Shared vs. Per-Agent
+
+| Memory Type | Shared? | Notes |
+|-------------|---------|-------|
+| User Facts | Yes | Facts about a user are visible to all team members |
+| User Profile | Yes | Structured profile data is shared |
+| Entity Memory | Yes | Companies, people, projects available team-wide |
+| Learnings | Yes | Vector-backed insights accessible to all |
+| Graph Memory | Yes | Knowledge graph is shared |
+| Summaries | Per-session | Summaries are tied to individual session IDs |
+| Decisions | Per-agent | Decision log is scoped by `agentName` |
+| Procedures | Per-agent | Procedure recordings are agent-specific |
+
+---
+
+## Overriding Memory per Agent
+
+If a member agent has its own `memory` config, it uses that instead of the team's shared memory. This lets you mix shared and private memory:
+
+```typescript
+const billingAgent = new Agent({
+  name: "billing",
+  model: openai("gpt-4o"),
+  instructions: "Handle billing with private decision history.",
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/billing_db" }),
+    decisions: true,
+  },
+});
+
+const team = new Team({
+  name: "support-squad",
+  mode: TeamMode.Route,
+  model: openai("gpt-4o"),
+  members: [triageAgent, billingAgent, shippingAgent],
+  memory: {
+    storage: sharedStorage,
+    userFacts: true,
+    entities: true,
+  },
+});
+// triageAgent and shippingAgent use shared memory.
+// billingAgent uses its own private memory.
+```
+
+---
+
+## Use Cases
+
+### CRM / Sales Teams
+
+A lead-qualification agent extracts company details, deal size, and contact preferences. When the deal is handed off to a closing agent, all context is already in shared memory — no data passed manually.
+
+### Customer Support
+
+A triage bot captures user frustration level, order IDs, and prior interactions. Specialist agents (billing, shipping, returns) all see the same context without re-asking questions.
+
+### Multi-Role Assistants
+
+A research agent gathers facts and stores entities. A writing agent uses those entities and learnings to draft a report. A review agent checks the report against the stored facts.
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — How the full memory system works
+- [Teams](/teams/overview) — Team modes and configuration
+- [Simplified API](/memory/simplified-api) — `remember` / `recall` / `forget`

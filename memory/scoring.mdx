@@ -1,0 +1,227 @@
+---
+title: Composite Scoring
+description: Rank memories by blending semantic relevance, recency, and importance.
+---
+
+# Composite Scoring
+
+When the agent's memory contains hundreds of facts, entities, and learnings, not everything belongs in the context window. Composite scoring ranks each memory item by blending three signals — **semantic relevance**, **recency**, and **importance** — into a single score used to select the most useful context.
+
+---
+
+## The Scoring Formula
+
+```
+compositeScore = (wSemantic × semanticSimilarity)
+               + (wRecency  × recencyScore)
+               + (wImportance × importance)
+```
+
+Each factor produces a value between 0 and 1. The weights control how much each factor matters.
+
+---
+
+## Three Factors
+
+### 1. Semantic Similarity
+
+How closely the memory matches the current conversation context. Computed via cosine similarity between the embedding of the current query/conversation and the stored memory embedding.
+
+- **1.0** = exact semantic match
+- **0.0** = completely unrelated
+
+This is the primary signal — a highly relevant old fact beats a recent irrelevant one.
+
+### 2. Recency Decay
+
+How recently the memory was created or last referenced. Uses an exponential decay function with a configurable half-life:
+
+```typescript
+function recencyScore(memoryDate: Date, now: Date, halfLifeDays: number): number {
+  const ageMs = now.getTime() - memoryDate.getTime();
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return Math.pow(0.5, ageDays / halfLifeDays);
+}
+```
+
+With the default half-life of 14 days:
+- Today → `1.0`
+- 14 days ago → `0.5`
+- 28 days ago → `0.25`
+- 56 days ago → `0.0625`
+
+Old memories aren't excluded — they just need higher semantic relevance to surface.
+
+### 3. Importance
+
+A 0–1 score assigned during LLM extraction that reflects how significant the memory is likely to be. The extraction model assigns importance based on:
+
+- **High (0.8–1.0):** Critical facts — medical conditions, security credentials, business-critical decisions
+- **Medium (0.5–0.7):** Useful preferences — timezone, communication style, project context
+- **Low (0.1–0.4):** Casual mentions — favorite color, small talk topics
+
+Importance acts as a floor — a critical fact from months ago still surfaces if it's important enough.
+
+---
+
+## ScoringWeights Interface
+
+```typescript
+interface ScoringWeights {
+  semantic: number;    // weight for semantic similarity (default: 0.4)
+  recency: number;     // weight for recency decay (default: 0.3)
+  importance: number;  // weight for importance score (default: 0.3)
+}
+```
+
+The defaults (`0.4`, `0.3`, `0.3`) are tuned for general-purpose assistants where relevance matters most but recency and importance both contribute meaningfully.
+
+---
+
+## Configuration
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    userFacts: true,
+    entities: true,
+    learnings: {
+      vectorStore: qdrant({ url: "http://localhost:6333" }),
+    },
+
+    scoring: {
+      weights: { semantic: 0.5, recency: 0.2, importance: 0.3 },
+      recencyHalfLifeDays: 7,     // faster decay — recent context matters more
+    },
+  },
+});
+```
+
+### Tuning for Different Use Cases
+
+```typescript
+// Support agent: relevance is king, recency secondary
+scoring: {
+  weights: { semantic: 0.6, recency: 0.2, importance: 0.2 },
+  recencyHalfLifeDays: 30,
+}
+
+// Personal assistant: recent context matters most
+scoring: {
+  weights: { semantic: 0.3, recency: 0.5, importance: 0.2 },
+  recencyHalfLifeDays: 7,
+}
+
+// Medical/legal: importance dominates (critical facts must always surface)
+scoring: {
+  weights: { semantic: 0.2, recency: 0.1, importance: 0.7 },
+  recencyHalfLifeDays: 365,
+}
+```
+
+---
+
+## Using `computeCompositeScore`
+
+You can compute scores directly for custom ranking logic:
+
+```typescript
+import { computeCompositeScore } from "@radaros/core";
+
+const score = computeCompositeScore({
+  semanticSimilarity: 0.85,
+  memoryDate: new Date("2026-03-15"),
+  importance: 0.7,
+  weights: { semantic: 0.4, recency: 0.3, importance: 0.3 },
+  recencyHalfLifeDays: 14,
+});
+
+console.log(score); // 0.34 + 0.12 + 0.21 = 0.67
+```
+
+This is useful when building custom recall pipelines or debugging why a particular memory did or didn't surface.
+
+---
+
+## How `recall()` Uses Scoring
+
+When `buildContext()` assembles the memory context before a run, it calls `recall()` on each enabled store. Here's the flow:
+
+1. **Candidate retrieval** — each store returns its candidates (facts, entities, learnings)
+2. **Embedding** — the current conversation is embedded for semantic comparison
+3. **Scoring** — each candidate is scored using `computeCompositeScore`
+4. **Ranking** — candidates across all stores are merged and sorted by composite score
+5. **Truncation** — the top-N results are selected to fit the token budget
+
+```typescript
+// Simplified internal flow:
+const candidates = [
+  ...await userFacts.recall(query),
+  ...await entityMemory.recall(query),
+  ...await learnings.recall(query),
+  ...await graphMemory.recall(query),
+];
+
+const scored = candidates.map(c => ({
+  ...c,
+  score: computeCompositeScore({
+    semanticSimilarity: cosineSim(queryEmbedding, c.embedding),
+    memoryDate: c.lastMentioned ?? c.validFrom,
+    importance: c.importance,
+    weights: config.scoring.weights,
+    recencyHalfLifeDays: config.scoring.recencyHalfLifeDays,
+  }),
+}));
+
+const ranked = scored.sort((a, b) => b.score - a.score);
+const context = ranked.slice(0, maxContextItems);
+```
+
+---
+
+## How Importance Is Assigned
+
+During background extraction, the extraction model assigns an importance score to each extracted memory. The prompt instructs the model to consider:
+
+| Signal | Effect on Importance |
+|--------|---------------------|
+| User explicitly says something is important | High (0.8–1.0) |
+| Professional/business context | Medium-high (0.6–0.8) |
+| Preferences and recurring patterns | Medium (0.4–0.6) |
+| Casual, one-off mentions | Low (0.1–0.3) |
+| Contradicts/updates existing fact | Inherits previous fact's importance (minimum) |
+
+You can override importance for specific facts via the curator:
+
+```typescript
+await agent.memory?.getUserFacts()?.updateImportance("fact-id-123", 0.95);
+```
+
+---
+
+## Scoring Configuration Reference
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `weights.semantic` | `number` | `0.4` | Weight for semantic similarity (0–1) |
+| `weights.recency` | `number` | `0.3` | Weight for recency decay score (0–1) |
+| `weights.importance` | `number` | `0.3` | Weight for importance score (0–1) |
+| `recencyHalfLifeDays` | `number` | `14` | Days until recency score drops to 0.5 |
+| `maxContextItems` | `number` | `20` | Max scored items injected into context |
+| `minScore` | `number` | `0.1` | Minimum composite score to include in context |
+
+Weights should sum to 1.0. If they don't, they're normalized internally.
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — Unified memory system
+- [Temporal Awareness](/memory/temporal) — How `validFrom` and `invalidatedAt` affect scoring
+- [Graph Memory](/memory/graph-memory) — Scoring applies to graph node/edge retrieval too
+- [Memory Curator](/memory/curator) — Override importance scores

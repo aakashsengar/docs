@@ -50,6 +50,13 @@
             "pages": [
               "memory/overview",
               "memory/stores",
+              "memory/graph-memory",
+              "memory/temporal",
+              "memory/scoring",
+              "memory/procedures",
+              "memory/simplified-api",
+              "memory/sharing",
+              "memory/budgeting",
               "memory/curator"
             ]
           },

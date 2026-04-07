@@ -1,0 +1,194 @@
+---
+title: Context Budget
+description: Token-aware budget allocation for memory context injection.
+---
+
+# Context Budget
+
+When multiple memory stores are enabled, the combined context string injected into the system prompt can grow large. The **context budget** system caps the total token count and distributes the budget proportionally across memory sections so the most important context always makes it in.
+
+---
+
+## The Problem
+
+A fully-loaded memory config (summaries, user facts, entities, learnings, graph, decisions, procedures) can produce thousands of tokens of context. Without a budget, all of it is injected — potentially blowing past the model's context window or crowding out the actual conversation.
+
+```
+Without budget:
+  Summaries        1,200 tokens
+  User Profile       300 tokens
+  User Facts         400 tokens
+  Entities           800 tokens
+  Graph              600 tokens
+  Decisions          500 tokens
+  Learnings          350 tokens
+  Procedures         250 tokens
+  ─────────────────────────────
+  Total            4,400 tokens  ← may exceed what you want to spend on memory
+```
+
+---
+
+## Configuration
+
+Add `contextBudget` to your memory config:
+
+```typescript
+import { Agent, MongoDBStorage, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  memory: {
+    storage: new MongoDBStorage({ uri: "mongodb://localhost/radaros" }),
+    summaries: true,
+    userFacts: true,
+    entities: true,
+    decisions: true,
+    contextBudget: {
+      maxTokens: 2000,
+    },
+  },
+});
+```
+
+When `maxTokens` is set, `buildContext()` allocates tokens to each section based on its priority weight. Sections that exceed their allocation are trimmed line-by-line; sections that fit are included in full.
+
+---
+
+## Default Priorities
+
+Each memory section has a default priority that determines what share of the budget it receives. Higher values get more tokens.
+
+| Section | Default Priority | Purpose |
+|---------|:---------------:|---------|
+| `summaries` | 0.25 | Conversation history summaries |
+| `userProfile` | 0.15 | Structured user data |
+| `userFacts` | 0.15 | Discrete user preferences and facts |
+| `entities` | 0.15 | Companies, people, projects |
+| `graph` | 0.10 | Knowledge graph nodes |
+| `decisions` | 0.10 | Recent agent decision audit trail |
+| `learnings` | 0.05 | Vector-backed insights |
+| `procedures` | 0.05 | Recorded tool-call workflows |
+
+Priorities are **relative** — they are normalized against the sum of all active sections. If you only enable summaries (0.25) and userFacts (0.15), summaries receive 62.5% of the budget and userFacts receive 37.5%.
+
+---
+
+## How Budget Allocation Works
+
+`buildContext()` follows these steps:
+
+1. **Gather** — Fetch context strings from every enabled store.
+2. **Measure** — Count the tokens in each section.
+3. **Check** — If total tokens are under `maxTokens`, return everything as-is.
+4. **Allocate** — Assign each section a token budget proportional to its priority weight.
+5. **Trim** — Sort sections by priority (lowest first). Starting from the highest priority, include sections that fit. If a section exceeds its remaining budget, trim it line-by-line until it fits. Sections below the cutoff are dropped entirely.
+6. **Assemble** — Join the surviving sections in priority order (highest first).
+
+```
+With maxTokens: 2000
+
+  Section        Tokens  Priority  Budget   Result
+  ─────────────  ──────  ────────  ──────   ──────
+  Summaries      1,200   0.25      500      Trimmed to 500
+  User Profile     300   0.15      300      Included (fits)
+  User Facts       400   0.15      300      Trimmed to 300
+  Entities         800   0.15      300      Trimmed to 300
+  Graph            600   0.10      200      Trimmed to 200
+  Decisions        500   0.10      200      Trimmed to 200
+  Learnings        350   0.05      100      Trimmed to 100
+  Procedures       250   0.05      100      Trimmed to 100
+```
+
+Lower-priority sections (learnings, procedures) are trimmed or dropped first, ensuring summaries and user context survive.
+
+---
+
+## Custom Priorities
+
+Override any priority to shift the budget toward what matters most for your use case:
+
+```typescript
+memory: {
+  storage,
+  summaries: true,
+  userFacts: true,
+  entities: true,
+  learnings: { vectorStore },
+  decisions: true,
+  contextBudget: {
+    maxTokens: 3000,
+    priorities: {
+      summaries: 0.10,    // Reduce summaries share
+      learnings: 0.30,    // Boost learnings (knowledge-heavy agent)
+      decisions: 0.20,    // Boost decisions (audit-focused agent)
+    },
+  },
+}
+```
+
+Only the keys you specify are overridden; unmentioned sections keep their defaults.
+
+### Priority presets by use case
+
+| Use Case | Boost | Reduce |
+|----------|-------|--------|
+| Knowledge-heavy (research, RAG) | `learnings: 0.30` | `summaries: 0.10` |
+| Audit-focused (compliance, finance) | `decisions: 0.30` | `learnings: 0.05` |
+| CRM / relationship | `userFacts: 0.25`, `entities: 0.25` | `procedures: 0.02` |
+| Long conversations | `summaries: 0.40` | `graph: 0.05` |
+
+---
+
+## Inspecting Token Usage
+
+Call `buildContext()` directly and measure the result to see exactly how many tokens are being used:
+
+```typescript
+import { countTokens } from "@radaros/core";
+
+const mm = agent.memory!;
+const ctx = await mm.buildContext("session-abc", "user-42", "current input", "assistant");
+
+console.log("Memory context length:", ctx.length, "chars");
+console.log("Memory context tokens:", countTokens(ctx));
+console.log("---");
+console.log(ctx);
+```
+
+This is useful for tuning `maxTokens` — start with a generous budget, inspect the output, then tighten it based on what you actually see.
+
+---
+
+## Without a Budget
+
+If you omit `contextBudget`, all sections are concatenated without any trimming. This is fine when memory stores are small or the model has a large context window, but you should add a budget once context grows beyond a few thousand tokens.
+
+```typescript
+// No budget — everything included
+memory: {
+  storage,
+  summaries: true,
+  userFacts: true,
+  entities: true,
+}
+
+// With budget — controlled injection
+memory: {
+  storage,
+  summaries: true,
+  userFacts: true,
+  entities: true,
+  contextBudget: { maxTokens: 2000 },
+}
+```
+
+---
+
+## Cross-References
+
+- [Memory Overview](/memory/overview) — How the full memory system works
+- [Memory Stores](/memory/stores) — Deep dive into each store type
+- [Simplified API](/memory/simplified-api) — `remember` / `recall` / `forget`
+- [Cost Tracking](/cost/overview) — Monitor token spend across memory extraction
