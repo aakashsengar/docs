@@ -1,0 +1,62 @@
+---
+title: Followup Suggestions
+description: Auto-generate actionable followup prompts after agent responses
+---
+
+## Overview
+
+Followup suggestions automatically generate contextual prompt suggestions after each agent response, helping users discover what to ask next.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  generateFollowups: true,
+});
+
+const output = await agent.run("Tell me about TypeScript");
+console.log(output.followupSuggestions);
+// ["How does TypeScript compare to JavaScript?",
+//  "What are TypeScript generics?",
+//  "How do I set up a TypeScript project?"]
+```
+
+## Configuration
+
+```typescript
+const agent = new Agent({
+  name: "assistant",
+  model: openai("gpt-4o"),
+  generateFollowups: {
+    count: 5,                    // number of suggestions (default: 3)
+    model: openai("gpt-4o-mini"), // cheap model for generation
+  },
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `count` | `number` | `3` | Number of followup suggestions to generate |
+| `model` | `ModelProvider` | Agent's model | Model used for generating suggestions |
+
+## Output Format
+
+Followup suggestions appear on the `RunOutput` object:
+
+```typescript
+interface RunOutput {
+  text: string;
+  followupSuggestions?: string[];  // new field
+  // ... other fields
+}
+```
+
+## Best Practices
+
+- Use a cheap model (e.g. `gpt-4o-mini`) for followup generation to minimize cost
+- Followup generation is best-effort — if it fails, `followupSuggestions` will be an empty array
+- Suggestions are generated after output guardrails, so they won't trigger re-validation

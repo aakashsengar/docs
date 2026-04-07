@@ -1,0 +1,41 @@
+---
+title: MySQL Storage
+description: MySQL-backed storage driver for sessions, memory, and culture
+---
+
+## Setup
+
+```bash
+npm install mysql2
+```
+
+```typescript
+import { MySQLStorage } from "@radaros/core";
+
+const storage = new MySQLStorage({
+  host: "localhost",
+  port: 3306,
+  user: "root",
+  password: "password",
+  database: "radaros",
+});
+
+// Or use a connection string
+const storage = new MySQLStorage({
+  connectionString: "mysql://root:password@localhost:3306/radaros",
+});
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `host` | `string` | `"localhost"` | MySQL host |
+| `port` | `number` | `3306` | MySQL port |
+| `user` | `string` | `"root"` | Username |
+| `password` | `string` | `""` | Password |
+| `database` | `string` | `"radaros"` | Database name |
+| `connectionString` | `string` | — | Full connection string |
+| `tableName` | `string` | `"kv_store"` | Table name |
+
+The table is auto-created on first use with schema: `(namespace VARCHAR(255), key VARCHAR(255), value JSON, PRIMARY KEY(namespace, key))`.

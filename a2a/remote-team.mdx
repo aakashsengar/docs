@@ -1,0 +1,45 @@
+---
+title: Remote Teams
+description: Call remote team endpoints as local team objects
+---
+
+## Overview
+
+`A2ARemoteTeam` wraps a remote team endpoint behind the standard Team interface, enabling seamless integration with local orchestration.
+
+## Quick Start
+
+```typescript
+import { A2ARemoteTeam } from "@radaros/core";
+
+const remoteTeam = new A2ARemoteTeam({
+  url: "https://api.example.com",
+  name: "research-team",
+  headers: { Authorization: "Bearer token" },
+});
+
+const output = await remoteTeam.run("Analyze market trends");
+console.log(output.text);
+```
+
+## Streaming
+
+```typescript
+for await (const chunk of remoteTeam.stream("Research competitors")) {
+  if (chunk.type === "text") process.stdout.write(chunk.text);
+}
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `url` | `string` | required | Base URL of the remote server |
+| `name` | `string` | `"remote-team"` | Team name (used in URL path) |
+| `headers` | `Record<string, string>` | — | Custom headers (e.g. auth) |
+| `timeoutMs` | `number` | `120000` | Request timeout |
+
+## URL Mapping
+
+- `run()` → `POST {url}/teams/{name}/run`
+- `stream()` → `POST {url}/teams/{name}/stream` (SSE)

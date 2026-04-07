@@ -1,0 +1,60 @@
+---
+title: Team Scheduling
+description: Schedule and queue team runs alongside agents and workflows
+---
+
+## Overview
+
+The queue system now supports team job types, allowing you to schedule and enqueue team runs alongside agent and workflow jobs.
+
+## Enqueue a Team Run
+
+```typescript
+import { AgentQueue } from "@radaros/queue";
+
+const queue = new AgentQueue({
+  connection: { host: "localhost", port: 6379 },
+});
+
+const { jobId } = await queue.enqueueTeamRun({
+  teamName: "research-team",
+  input: "Analyze Q4 results",
+  sessionId: "session-123",
+  priority: 1,
+});
+```
+
+## Schedule a Recurring Team Run
+
+```typescript
+await queue.schedule({
+  id: "daily-analysis",
+  cron: "0 9 * * *",
+  timezone: "America/New_York",
+  team: {
+    name: "research-team",
+    input: "Generate daily market report",
+  },
+});
+```
+
+## Worker Setup
+
+```typescript
+import { AgentWorker } from "@radaros/queue";
+
+const worker = new AgentWorker({
+  connection: { host: "localhost", port: 6379 },
+  agentRegistry: { analyst: analystAgent },
+  teamRegistry: { "research-team": researchTeam },  // new!
+  workflowRegistry: { pipeline: dataPipeline },
+});
+```
+
+## Job Types
+
+| Type | Payload | Handler |
+|------|---------|---------|
+| `agent` | `AgentJobPayload` | `agent.run(input, opts)` |
+| `team` | `TeamJobPayload` | `team.run(input, opts)` |
+| `workflow` | `WorkflowJobPayload` | `workflow.run(opts)` |

@@ -38,7 +38,11 @@
               "agents/logging",
               "agents/memory",
               "agents/sessions",
-              "agents/user-memory"
+              "agents/user-memory",
+              "agents/dependencies",
+              "agents/followups",
+              "agents/cancellation",
+              "agents/serialization"
             ]
           },
           {
@@ -77,7 +81,17 @@
           {
             "group": "Eval Framework",
             "pages": [
-              "eval/overview"
+              "eval/overview",
+              "eval/accuracy",
+              "eval/agent-judge",
+              "eval/performance",
+              "eval/reliability"
+            ]
+          },
+          {
+            "group": "Culture System",
+            "pages": [
+              "culture/overview"
             ]
           },
           {
@@ -164,7 +178,10 @@
               "storage/in-memory",
               "storage/sqlite",
               "storage/postgres",
-              "storage/mongodb"
+              "storage/mongodb",
+              "storage/mysql",
+              "storage/redis",
+              "storage/dynamodb"
             ]
           },
           {
@@ -225,7 +242,10 @@
             "pages": [
               "a2a/overview",
               "a2a/server",
-              "a2a/client"
+              "a2a/client",
+              "a2a/remote-team",
+              "a2a/remote-workflow",
+              "a2a/gateway"
             ]
           },
           {
@@ -249,7 +269,8 @@
               "transport/swagger",
               "transport/file-upload",
               "transport/socketio",
-              "transport/api-keys"
+              "transport/api-keys",
+              "transport/jwt-rbac"
             ]
           },
           {
@@ -257,7 +278,8 @@
             "pages": [
               "queue/overview",
               "queue/producer",
-              "queue/worker"
+              "queue/worker",
+              "queue/teams"
             ]
           },
           {
@@ -277,7 +299,8 @@
               "features/metrics-export",
               "features/discovery-cards",
               "features/pii-guard",
-              "features/checkpointing"
+              "features/checkpointing",
+              "features/compression"
             ]
           }
         ]

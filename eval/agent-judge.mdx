@@ -1,0 +1,39 @@
+---
+title: Agent Judge Evaluation
+description: Custom quality criteria evaluation with LLM judges
+---
+
+## Overview
+
+`AgentJudgeEval` evaluates agent responses against multiple custom criteria using an LLM judge. Supports both numeric scoring (0.0–1.0) and binary (PASS/FAIL) modes.
+
+## Quick Start
+
+```typescript
+import { AgentJudgeEval } from "@radaros/eval";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({ name: "writer", model: openai("gpt-4o") });
+
+const eval = new AgentJudgeEval({
+  name: "writing-quality",
+  agent,
+  judge: openai("gpt-4o-mini"),
+  criteria: [
+    "Response is grammatically correct",
+    "Response is concise (under 200 words)",
+    "Response directly answers the question",
+  ],
+  scoringMode: "numeric",
+  cases: [
+    { name: "explain-recursion", input: "Explain recursion in simple terms" },
+  ],
+});
+
+const result = await eval.run();
+```
+
+## Scoring Modes
+
+- **`numeric`** (default): Each criterion scored 0.0–1.0
+- **`binary`**: Each criterion scored PASS (1.0) or FAIL (0.0)

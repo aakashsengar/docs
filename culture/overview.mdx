@@ -1,0 +1,70 @@
+---
+title: Culture System
+description: Shared organizational knowledge that compounds over time
+---
+
+## Overview
+
+The Culture System provides a shared knowledge layer across agents. Knowledge is stored persistently and can be automatically injected into agent instructions, creating organizational memory that compounds over time.
+
+## Quick Start
+
+```typescript
+import { Agent, CultureManager, openai, SqliteStorage } from "@radaros/core";
+
+const storage = new SqliteStorage("./culture.db");
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  culture: {
+    storage,
+    addToContext: true,   // inject knowledge into system prompt
+    autoUpdate: true,     // auto-extract insights after each run
+    model: openai("gpt-4o-mini"), // cheap model for reflection
+  },
+});
+```
+
+## Manual Knowledge Management
+
+```typescript
+const cultureManager = new CultureManager({
+  storage: new SqliteStorage("./culture.db"),
+  model: openai("gpt-4o-mini"),
+});
+
+await cultureManager.add({
+  id: "tone-guide",
+  name: "Communication Tone",
+  content: "Always be professional but friendly. Use simple language.",
+  categories: ["communication", "style"],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
+const all = await cultureManager.getAll();
+const context = await cultureManager.buildContext();
+```
+
+## Auto-Reflection
+
+When `autoUpdate` is enabled, after each agent run the system:
+
+1. Sends the input/output pair to a cheap model
+2. Asks: "What universal principle can we learn from this?"
+3. If a meaningful insight is found, stores it automatically
+4. This is fire-and-forget — it never blocks the response
+
+## CulturalKnowledge Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique identifier |
+| `name` | `string` | Knowledge name/title |
+| `content` | `string` | The actual knowledge content |
+| `summary` | `string?` | Optional short summary |
+| `categories` | `string[]?` | Categorization tags |
+| `notes` | `string?` | Additional notes |
+| `metadata` | `Record?` | Arbitrary metadata |
+| `agentId` | `string?` | Source agent identifier |

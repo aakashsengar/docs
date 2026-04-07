@@ -1,0 +1,42 @@
+---
+title: Accuracy Evaluation
+description: Measure how accurately your agent answers questions
+---
+
+## Overview
+
+`AccuracyEval` uses an LLM judge to score agent responses against expected answers on a 0.0–1.0 scale.
+
+## Quick Start
+
+```typescript
+import { AccuracyEval } from "@radaros/eval";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({ name: "qa-bot", model: openai("gpt-4o") });
+
+const eval = new AccuracyEval({
+  name: "qa-accuracy",
+  agent,
+  judge: openai("gpt-4o-mini"),
+  cases: [
+    { name: "capital", input: "What is the capital of France?", expected: "Paris" },
+    { name: "math", input: "What is 2+2?", expected: "4" },
+  ],
+  threshold: 0.8,
+});
+
+const result = await eval.run();
+console.log(`Passed: ${result.passed}/${result.total}, Avg: ${result.averageScore}`);
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | `string` | required | Name of the evaluation |
+| `agent` | `Agent` | required | Agent to evaluate |
+| `judge` | `ModelProvider` | required | Model used for scoring |
+| `cases` | `EvalCase[]` | required | Test cases with input/expected |
+| `threshold` | `number` | `0.7` | Minimum score to pass |
+| `timeoutMs` | `number` | `30000` | Timeout per case |

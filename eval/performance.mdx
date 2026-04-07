@@ -1,0 +1,40 @@
+---
+title: Performance Evaluation
+description: Measure agent latency, token usage, and memory consumption
+---
+
+## Overview
+
+`PerformanceEval` measures runtime performance metrics against configurable limits.
+
+## Quick Start
+
+```typescript
+import { PerformanceEval } from "@radaros/eval";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({ name: "fast-bot", model: openai("gpt-4o-mini") });
+
+const eval = new PerformanceEval({
+  name: "latency-test",
+  agent,
+  maxDurationMs: 5000,
+  maxTimeToFirstTokenMs: 1000,
+  maxTokens: 500,
+  cases: [
+    { name: "greeting", input: "Hello!" },
+    { name: "complex", input: "Explain quantum computing" },
+  ],
+});
+
+const result = await eval.run();
+```
+
+## Metrics Tracked
+
+| Metric | Config | Description |
+|--------|--------|-------------|
+| Duration | `maxDurationMs` | Total wall-clock time |
+| TTFT | `maxTimeToFirstTokenMs` | Time to first token |
+| Tokens | `maxTokens` | Total token consumption |
+| Memory | — | Heap memory delta (always tracked) |

@@ -1,0 +1,31 @@
+---
+title: Remote Workflows
+description: Execute remote workflow endpoints
+---
+
+## Overview
+
+`A2ARemoteWorkflow` wraps a remote workflow endpoint, making it callable like a local workflow.
+
+## Quick Start
+
+```typescript
+import { A2ARemoteWorkflow } from "@radaros/core";
+
+const remoteWorkflow = new A2ARemoteWorkflow({
+  url: "https://api.example.com",
+  name: "data-pipeline",
+});
+
+const result = await remoteWorkflow.run({ startDate: "2024-01-01" });
+console.log(result);
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `url` | `string` | required | Base URL of the remote server |
+| `name` | `string` | `"remote-workflow"` | Workflow name |
+| `headers` | `Record<string, string>` | — | Custom headers |
+| `timeoutMs` | `number` | `120000` | Request timeout |

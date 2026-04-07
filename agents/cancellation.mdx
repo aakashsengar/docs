@@ -1,0 +1,79 @@
+---
+title: Run Cancellation
+description: Abort running agents mid-execution with AbortSignal
+---
+
+## Overview
+
+Run cancellation lets you abort an agent mid-execution using the standard `AbortSignal` API. The signal is checked at the start of each LLM roundtrip and before tool execution.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "researcher",
+  model: openai("gpt-4o"),
+  tools: [searchTool, analyzeTool],
+});
+
+const controller = new AbortController();
+
+// Cancel after 10 seconds
+setTimeout(() => controller.abort(), 10_000);
+
+const output = await agent.run("Research quantum computing advances", {
+  signal: controller.signal,
+});
+
+if (output.status === "cancelled") {
+  console.log("Run was cancelled");
+}
+```
+
+## Cancellation Points
+
+The signal is checked at three points in the execution loop:
+
+1. **Before each LLM call** — prevents starting a new API request
+2. **Before tool execution** — prevents running tools after cancellation
+3. **At run start** — immediately returns if already aborted
+
+## Output on Cancellation
+
+When a run is cancelled, it returns a `RunOutput` with:
+
+```typescript
+{
+  text: "",
+  toolCalls: [],
+  usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  status: "cancelled",
+  runId: "...",
+  agentName: "researcher",
+  durationMs: 5023,
+}
+```
+
+## Events
+
+The `run.cancelled` event is emitted on cancellation:
+
+```typescript
+agent.eventBus.on("run.cancelled", ({ runId, agentName }) => {
+  console.log(`Run ${runId} of ${agentName} was cancelled`);
+});
+```
+
+## Error Class
+
+You can import `RunCancelledError` for custom handling:
+
+```typescript
+import { RunCancelledError } from "@radaros/core";
+```
+
+## HTTP API Cancellation
+
+When using the transport layer, you can implement cancellation via request timeouts or client disconnects by wiring `AbortSignal` in your middleware.

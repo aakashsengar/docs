@@ -1,0 +1,37 @@
+---
+title: Redis Storage
+description: Redis-backed storage driver with optional TTL
+---
+
+## Setup
+
+```bash
+npm install ioredis
+```
+
+```typescript
+import { RedisStorage } from "@radaros/core";
+
+const storage = new RedisStorage({
+  host: "localhost",
+  port: 6379,
+  ttl: 86400,  // 24 hour TTL (optional)
+});
+
+// Or use a URL
+const storage = new RedisStorage({ url: "redis://localhost:6379" });
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `host` | `string` | `"localhost"` | Redis host |
+| `port` | `number` | `6379` | Redis port |
+| `password` | `string` | — | Redis password |
+| `db` | `number` | `0` | Redis database number |
+| `url` | `string` | — | Full Redis URL |
+| `keyPrefix` | `string` | `"radaros"` | Key prefix for namespacing |
+| `ttl` | `number` | — | TTL in seconds (optional) |
+
+Keys are stored as `{prefix}:{namespace}:{key}` with JSON-serialized values.

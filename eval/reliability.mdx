@@ -1,0 +1,54 @@
+---
+title: Reliability Evaluation
+description: Verify tool usage, error handling, and response completeness
+---
+
+## Overview
+
+`ReliabilityEval` asserts that agents call expected tools, handle errors correctly, and produce non-empty responses.
+
+## Quick Start
+
+```typescript
+import { ReliabilityEval } from "@radaros/eval";
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "tool-agent",
+  model: openai("gpt-4o"),
+  tools: [searchTool, calcTool],
+});
+
+const eval = new ReliabilityEval({
+  name: "tool-reliability",
+  agent,
+  cases: [
+    { name: "uses-search", input: "Search for latest news", expectedTools: ["search"] },
+    { name: "handles-error", input: "Divide by zero", shouldError: true },
+  ],
+});
+
+const result = await eval.run();
+```
+
+## Case Options
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `expectedTools` | `string[]` | Tool names that should be called |
+| `shouldError` | `boolean` | Whether the case should throw an error |
+
+## Tool Call Match Scorer
+
+Use `toolCallMatch` as a standalone scorer:
+
+```typescript
+import { EvalSuite, toolCallMatch } from "@radaros/eval";
+
+const suite = new EvalSuite({
+  name: "tools-test",
+  agent,
+  scorers: [toolCallMatch(["search", "calculate"])],
+  cases: [{ name: "test", input: "Search and calculate" }],
+});
+```

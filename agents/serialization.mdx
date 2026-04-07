@@ -1,0 +1,70 @@
+---
+title: Agent Serialization
+description: Save and load agent configurations to/from JSON
+---
+
+## Overview
+
+Agent serialization lets you save agent configurations as JSON and reconstruct them later. Useful for persisting agent configs in databases, transferring between services, or version-controlling agent definitions.
+
+## Serialize
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "my-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant",
+  temperature: 0.7,
+});
+
+const json = agent.toJSON();
+// {
+//   name: "my-agent",
+//   modelId: "gpt-4o",
+//   providerId: "openai",
+//   instructions: "You are a helpful assistant",
+//   toolNames: [],
+//   temperature: 0.7,
+// }
+```
+
+## Deserialize
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const registry = {
+  models: {
+    "gpt-4o": openai("gpt-4o"),
+    "gpt-4o-mini": openai("gpt-4o-mini"),
+  },
+  tools: {
+    search: searchTool,
+    calculate: calcTool,
+  },
+};
+
+const agent = Agent.fromJSON(savedJson, registry);
+const output = await agent.run("Hello!");
+```
+
+## SerializedAgent Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Agent name |
+| `modelId` | `string` | Model identifier |
+| `providerId` | `string` | Provider identifier |
+| `instructions` | `string?` | System instructions |
+| `toolNames` | `string[]` | Tool names (resolved from registry) |
+| `temperature` | `number?` | Temperature setting |
+| `maxTokens` | `number?` | Max output tokens |
+| `reasoning` | `object?` | Reasoning configuration |
+
+## Notes
+
+- Function-based instructions are not serializable (only string instructions are saved)
+- Runtime objects (EventBus, storage) are stripped during serialization
+- Deserialized agents have `register: false` by default to avoid auto-registration

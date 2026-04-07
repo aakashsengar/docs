@@ -1,0 +1,36 @@
+---
+title: DynamoDB Storage
+description: AWS DynamoDB storage driver with on-demand billing
+---
+
+## Setup
+
+```bash
+npm install @aws-sdk/client-dynamodb
+```
+
+```typescript
+import { DynamoDBStorage } from "@radaros/core";
+
+const storage = new DynamoDBStorage({
+  region: "us-east-1",
+  tableName: "radaros_kv",
+});
+
+// Local development
+const storage = new DynamoDBStorage({
+  endpoint: "http://localhost:8000",
+  region: "local",
+});
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tableName` | `string` | `"radaros_kv"` | DynamoDB table name |
+| `region` | `string` | — | AWS region |
+| `endpoint` | `string` | — | Custom endpoint (for local dev) |
+| `credentials` | `object` | — | AWS credentials override |
+
+The table is auto-created on first `initialize()` with partition key `namespace` and sort key `key`, using PAY_PER_REQUEST billing.

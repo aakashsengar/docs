@@ -1,0 +1,73 @@
+---
+title: Dependencies & Runtime Injection
+description: Inject runtime variables into agent instructions and messages
+---
+
+## Overview
+
+Dependencies let you inject runtime variables into your agent's instructions and user messages using `{template}` syntax. Values can be static, synchronous functions, or async functions — all resolved at the start of each run.
+
+## Quick Start
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "support-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a support agent for {company}. Today is {date}. The user's plan is {plan}.",
+  dependencies: {
+    company: "Acme Corp",
+    date: () => new Date().toLocaleDateString(),
+    plan: async () => {
+      // fetch from database
+      return "Enterprise";
+    },
+  },
+});
+
+const output = await agent.run("What features do I have access to?");
+```
+
+## Per-Run Overrides
+
+```typescript
+const output = await agent.run("Help me with billing", {
+  dependencies: {
+    plan: "Pro",       // override the default
+    locale: "en-US",   // add a new dependency
+  },
+});
+```
+
+## Accessing in Tools
+
+Resolved dependencies are available in `RunContext`:
+
+```typescript
+import { defineTool } from "@radaros/core";
+
+const lookupTool = defineTool({
+  name: "lookup_account",
+  description: "Look up the user's account",
+  parameters: z.object({}),
+  execute: async (args, ctx) => {
+    const company = ctx.dependencies.company;
+    const plan = ctx.dependencies.plan;
+    return `Account: ${company}, Plan: ${plan}`;
+  },
+});
+```
+
+## Template Syntax
+
+- `{key}` — replaced with the resolved value
+- Unknown keys are left as-is (e.g. `{unknown}` stays `{unknown}`)
+- Templates work in both `instructions` and string `input`
+
+## Resolution Order
+
+1. Agent-level `dependencies` from config
+2. Per-run `dependencies` from `RunOpts` (overrides agent-level)
+3. All callable values are invoked and awaited
+4. Results are flattened to `Record<string, string>`

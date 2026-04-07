@@ -1,0 +1,63 @@
+---
+title: Context Compression
+description: Auto-compress verbose tool results to stay within context windows
+---
+
+## Overview
+
+The `CompressionManager` automatically compresses verbose tool results when the context grows too large, keeping your agent within its context window limits while preserving key information.
+
+## Quick Start
+
+```typescript
+import { Agent, CompressionManager, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "research-agent",
+  model: openai("gpt-4o"),
+  compressToolResults: true, // enable with defaults
+});
+```
+
+## Custom Configuration
+
+```typescript
+import { Agent, CompressionManager, openai } from "@radaros/core";
+
+const compressionManager = new CompressionManager({
+  compressAfter: 5,        // compress after 5 tool results
+  tokenLimit: 50000,       // or when context exceeds 50K tokens
+  model: openai("gpt-4o-mini"), // cheap model for compression
+  instructions: "Summarize preserving all numbers and dates",
+});
+
+const agent = new Agent({
+  name: "data-agent",
+  model: openai("gpt-4o"),
+  compressionManager,
+});
+```
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `compressAfter` | `number` | `3` | Compress after N uncompressed tool results |
+| `tokenLimit` | `number` | — | Compress when total context exceeds this token count |
+| `model` | `ModelProvider` | Agent's model | Model used for compression summaries |
+| `instructions` | `string` | Built-in prompt | Custom compression prompt |
+
+## How It Works
+
+1. **Threshold Detection**: After each tool result, the manager checks if compression is needed (count-based or token-based)
+2. **Selective Compression**: Only tool results over 200 characters are compressed — short results pass through unchanged
+3. **Parallel Compression**: Multiple tool results are compressed concurrently for speed
+4. **Fact Preservation**: The built-in prompt preserves numbers, dates, IDs, URLs, and proper nouns
+
+## Integration with Loop Hooks
+
+CompressionManager integrates via the `beforeLLMCall` loop hook. It runs before the existing `ContextCompactor`, giving you layered context management:
+
+1. **Compression** (summarize individual tool results)
+2. **Compaction** (trim overall context if still too large)
+3. **User hooks** (custom transformations)

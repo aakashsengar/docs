@@ -1,0 +1,73 @@
+---
+title: JWT & RBAC Middleware
+description: Plug-and-play authentication and role-based access control
+---
+
+## Overview
+
+RadarOS provides built-in JWT authentication and RBAC middleware for the Express transport layer. Both are plug-and-play — just add config to `RouterOptions`.
+
+## Quick Start
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+
+const router = createAgentRouter({
+  jwt: {
+    secret: process.env.JWT_SECRET!,
+    algorithm: "HS256",
+  },
+  rbac: {
+    agentScopes: {
+      "admin-agent": ["admin:*"],
+    },
+  },
+  cors: true,
+});
+```
+
+## JWT Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `secret` | `string` | required | JWT signing secret |
+| `algorithm` | `string` | — | Algorithm (HS256, RS256, etc.) |
+| `issuer` | `string` | — | Expected token issuer |
+| `audience` | `string` | — | Expected token audience |
+| `extractFrom` | `"header" \| "cookie"` | `"header"` | Where to find the token |
+| `cookieName` | `string` | `"token"` | Cookie name (when extractFrom is "cookie") |
+
+**Requires:** `npm install jsonwebtoken`
+
+## RBAC Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `scopeField` | `string` | `"scopes"` | JWT payload field containing scopes |
+| `defaultScopes` | `Record<string, string[]>` | Built-in map | Route-to-scope mapping |
+| `agentScopes` | `Record<string, string[]>` | — | Per-agent scope requirements |
+
+## Built-in Scope Map
+
+| Route | Required Scopes |
+|-------|----------------|
+| `POST /agents/:name/run` | `agents:run` |
+| `POST /agents/:name/stream` | `agents:run` |
+| `GET /agents` | `agents:read` |
+| `POST /teams/:name/run` | `teams:run` |
+| `GET /teams` | `teams:read` |
+| `POST /workflows/:name/run` | `workflows:run` |
+| `GET/POST/DELETE /admin/*` | `admin:*` |
+
+## Token Format
+
+```json
+{
+  "sub": "user-123",
+  "scopes": ["agents:run", "agents:read", "teams:run"],
+  "iat": 1700000000,
+  "exp": 1700003600
+}
+```
+
+The wildcard scope `*` or `admin:*` grants access to all routes.

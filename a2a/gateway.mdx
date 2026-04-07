@@ -1,0 +1,73 @@
+---
+title: API Gateway
+description: Merge local and remote endpoints under a single API surface
+---
+
+## Overview
+
+The Gateway router creates a unified API surface that merges local and remote agent/team/workflow endpoints. It proxies requests to remote servers and includes health checking.
+
+## Quick Start
+
+```typescript
+import { createAgentRouter } from "@radaros/transport";
+import { createGatewayRouter } from "@radaros/transport";
+import express from "express";
+
+const app = express();
+app.use(express.json());
+
+// Local agents are served normally
+app.use("/api", createAgentRouter({ cors: true }));
+
+// Gateway routes to remote endpoints
+app.use("/api", createGatewayRouter({
+  remotes: [
+    {
+      baseUrl: "https://us-east.api.example.com",
+      agents: ["analyst", "researcher"],
+      teams: ["research-team"],
+    },
+    {
+      baseUrl: "https://eu-west.api.example.com",
+      agents: ["translator"],
+      workflows: ["translation-pipeline"],
+      headers: { Authorization: "Bearer eu-token" },
+    },
+  ],
+  healthCheckIntervalMs: 30_000,
+}));
+
+app.listen(3000);
+```
+
+## Health Monitoring
+
+```bash
+GET /gateway/health
+```
+
+Returns:
+```json
+{
+  "remotes": {
+    "https://us-east.api.example.com": true,
+    "https://eu-west.api.example.com": false
+  }
+}
+```
+
+## Remote Endpoint Configuration
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `baseUrl` | `string` | Base URL of the remote server |
+| `agents` | `string[]` | Agent names to proxy |
+| `teams` | `string[]` | Team names to proxy |
+| `workflows` | `string[]` | Workflow names to proxy |
+| `headers` | `Record<string, string>` | Auth headers for this remote |
+| `healthPath` | `string` | Custom health check path (default: `/agents`) |
+
+## SSE Streaming
+
+The gateway transparently proxies SSE streams — `POST /agents/:name/stream` calls are forwarded with event stream passthrough.
