@@ -1,0 +1,421 @@
+---
+title: "Agent Lifecycle & Advanced"
+description: "Hooks, cancellation, follow-up suggestions, serialization, checkpointing, dynamic tools, event bus, context compaction, dependencies, and compression examples."
+---
+
+## Agent Hooks
+
+Lifecycle hooks let you tap into key moments of an agent run — log inputs, audit tool calls, and handle errors.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "hooked-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  hooks: {
+    beforeRun: async (ctx, input) => {
+      console.log(`[beforeRun] input: ${input.slice(0, 80)}`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(`[afterRun] tokens: ${output.usage.totalTokens}, cost: $${output.usage.totalCost}`);
+    },
+    onToolCall: async (ctx, toolName, args) => {
+      console.log(`[onToolCall] ${toolName}(${JSON.stringify(args)})`);
+    },
+    onError: async (ctx, error) => {
+      console.error(`[onError] ${error.message}`);
+    },
+  },
+});
+
+const result = await agent.run("Summarize the latest news.");
+console.log(result.text);
+```
+
+## Loop Hooks
+
+Loop hooks fire on every LLM roundtrip inside the agent loop. Use them to track tokens, log messages, and auto-stop when costs get too high.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const fetchData = defineTool({
+  name: "fetch_data",
+  description: "Fetch data from a source",
+  parameters: z.object({ source: z.string() }),
+  execute: async ({ source }) => `Data from ${source}: 1500 rows`,
+});
+
+const agent = new Agent({
+  name: "cost-aware-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a data analyst.",
+  tools: [fetchData],
+  maxToolRoundtrips: 20,
+  loopHooks: {
+    beforeLLMCall: async (messages, roundtrip) => {
+      console.log(`[loop] Roundtrip ${roundtrip}: sending ${messages.length} messages`);
+    },
+    afterLLMCall: async (response, roundtrip) => {
+      console.log(`[loop] Roundtrip ${roundtrip}: ${response.usage.totalTokens} tokens used`);
+    },
+    onRoundtripComplete: async (roundtrip, tokensSoFar) => {
+      console.log(`[loop] Total after roundtrip ${roundtrip}: ${tokensSoFar.totalTokens} tokens`);
+      if (tokensSoFar.totalTokens > 50_000) {
+        console.log("[loop] 50K token budget exceeded — stopping early.");
+        return { stop: true };
+      }
+    },
+  },
+});
+
+await agent.run("Analyze all five regional datasets and produce a summary.");
+```
+
+## Cancellation
+
+Use a standard `AbortController` to cancel a running agent. This is useful for enforcing hard timeouts on long-running runs.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "cancellable-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a research assistant.",
+});
+
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 30_000);
+
+try {
+  const result = await agent.run("Research quantum computing breakthroughs.", {
+    signal: controller.signal,
+  });
+  console.log(result.text);
+} catch (err) {
+  if (err.name === "AbortError") {
+    console.log("Agent run cancelled after 30s timeout.");
+  } else {
+    throw err;
+  }
+}
+```
+
+## Follow-up Suggestions
+
+Generate suggested follow-up prompts after an agent run. Pass `true` for defaults, or customize the count and model.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+// Default follow-ups (3 suggestions using the agent's own model)
+const agent = new Agent({
+  name: "suggestion-agent",
+  model: openai("gpt-4o"),
+  instructions: "You answer questions about machine learning.",
+  generateFollowups: true,
+});
+
+const result = await agent.run("Explain gradient descent.");
+console.log("Answer:", result.text);
+console.log("Follow-ups:", result.followupSuggestions);
+// ["How does learning rate affect gradient descent?", "What is stochastic gradient descent?", ...]
+
+// Custom follow-up config
+const customAgent = new Agent({
+  name: "custom-followup-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a coding tutor.",
+  generateFollowups: {
+    count: 3,
+    model: openai("gpt-4o-mini"),
+  },
+});
+
+const r = await customAgent.run("How do async/await work in TypeScript?");
+console.log("Suggestions:", r.followupSuggestions);
+```
+
+## Agent Serialization
+
+Save an agent's configuration to JSON and restore it later — useful for persistence, versioning, and sharing configs across services.
+
+```typescript
+import { Agent, openai, serializeAgent, buildAgentConfigFromSerialized } from "@radaros/core";
+
+const agent = new Agent({
+  name: "serializable-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a customer support agent.",
+  maxToolRoundtrips: 5,
+  generateFollowups: true,
+});
+
+// Serialize to JSON
+const json = serializeAgent(agent);
+console.log("Serialized:", JSON.stringify(json, null, 2));
+
+// Persist to disk or database
+const fs = await import("fs/promises");
+await fs.writeFile("agent-config.json", JSON.stringify(json));
+
+// Later — restore from JSON
+const raw = JSON.parse(await fs.readFile("agent-config.json", "utf-8"));
+const config = buildAgentConfigFromSerialized(raw);
+const restoredAgent = new Agent(config);
+
+const result = await restoredAgent.run("What is your return policy?");
+console.log(result.text);
+```
+
+## Checkpointing
+
+Enable checkpointing to save agent state after each tool roundtrip. Supports crash recovery and rollback.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const step = defineTool({
+  name: "pipeline_step",
+  description: "Run a pipeline step",
+  parameters: z.object({ step: z.number() }),
+  execute: async ({ step }) => `Step ${step} completed successfully.`,
+});
+
+// Simple — uses in-memory storage
+const agent = new Agent({
+  name: "checkpointed-agent",
+  model: openai("gpt-4o"),
+  instructions: "Execute all pipeline steps in order.",
+  tools: [step],
+  checkpointing: true,
+});
+
+await agent.run("Run steps 1 through 5.");
+```
+
+With persistent storage for production use:
+
+```typescript
+import { Agent, openai, CheckpointManager, SqliteStorage, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const step = defineTool({
+  name: "pipeline_step",
+  description: "Run a pipeline step",
+  parameters: z.object({ step: z.number() }),
+  execute: async ({ step }) => `Step ${step} completed.`,
+});
+
+const checkpoints = new CheckpointManager(
+  new SqliteStorage({ path: "./checkpoints.db" }),
+);
+
+const agent = new Agent({
+  name: "persistent-checkpoint-agent",
+  model: openai("gpt-4o"),
+  instructions: "Execute the pipeline.",
+  tools: [step],
+  checkpointing: { manager: checkpoints },
+});
+
+await agent.run("Run the full pipeline.", { runId: "run-abc" });
+
+// List and rollback
+const history = await checkpoints.list("run-abc");
+console.log("Checkpoints:", history.length);
+const restored = await checkpoints.rollback(history[2].id);
+console.log("Rolled back to roundtrip:", restored?.roundtrip);
+```
+
+## Dependencies & Runtime Injection
+
+Inject static values or async resolvers into the agent context. Use `{key}` template syntax in instructions for dynamic interpolation, and override per-run.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "injected-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a support agent for {companyName}. Current user tier: {userTier}.",
+  dependencies: {
+    companyName: "Acme Corp",
+    userTier: async (ctx) => {
+      const res = await fetch(`https://api.acme.com/users/${ctx.userId}/tier`);
+      return (await res.json()).tier;
+    },
+    supportHours: "9 AM - 5 PM EST",
+  },
+});
+
+// Default dependencies
+await agent.run("What are your support hours?", { userId: "u-100" });
+
+// Override per-run
+await agent.run("Help me with billing.", {
+  userId: "u-200",
+  dependencies: { userTier: "enterprise" },
+});
+```
+
+## Context Compaction
+
+Automatically compress conversation history when it approaches the model's context limit. Choose trim, summarize, or hybrid strategies.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "long-running-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant for extended conversations.",
+  contextCompactor: {
+    maxContextTokens: 32_000,
+    strategy: "hybrid",
+    summarizeModel: openai("gpt-4o-mini"),
+    priorityOrder: ["system", "recentHistory", "memory", "tools"],
+  },
+});
+
+for (let i = 0; i < 200; i++) {
+  await agent.run(`Message ${i}: tell me something new.`, { sessionId: "long-session" });
+}
+```
+
+The three strategies:
+
+- **`trim`** — drops oldest non-system messages to fit the token budget
+- **`summarize`** — condenses older messages into a summary using a cheaper model
+- **`hybrid`** — trims first, then summarizes the remaining middle section if still over budget
+
+## Dynamic Tools
+
+Resolve tools at runtime based on user context, or mutate the tool set programmatically at any point.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import type { RunContext } from "@radaros/core";
+import { z } from "zod";
+
+const readTool = defineTool({
+  name: "read_record",
+  description: "Read a record",
+  parameters: z.object({ id: z.string() }),
+  execute: async ({ id }) => `Record ${id}: { status: "active" }`,
+});
+
+const writeTool = defineTool({
+  name: "write_record",
+  description: "Write a record",
+  parameters: z.object({ id: z.string(), data: z.string() }),
+  execute: async ({ id, data }) => `Updated ${id}: ${data}`,
+});
+
+const deleteTool = defineTool({
+  name: "delete_record",
+  description: "Delete a record (admin only)",
+  parameters: z.object({ id: z.string() }),
+  execute: async ({ id }) => `Deleted ${id}`,
+});
+
+const agent = new Agent({
+  name: "role-aware-agent",
+  model: openai("gpt-4o"),
+  instructions: "You manage database records.",
+  toolResolver: async (ctx: RunContext) => {
+    const role = ctx.metadata?.role ?? "viewer";
+    if (role === "admin") return [readTool, writeTool, deleteTool];
+    if (role === "editor") return [readTool, writeTool];
+    return [readTool];
+  },
+});
+
+await agent.run("Delete record r-42", { metadata: { role: "admin" } });
+await agent.run("Show record r-42", { metadata: { role: "viewer" } });
+```
+
+Programmatic tool management:
+
+```typescript
+agent.addTool(writeTool);
+agent.removeTool("delete_record");
+agent.setTools([readTool, writeTool]);
+console.log("Active tools:", agent.listTools().map((t) => t.name));
+```
+
+## Event Bus
+
+Subscribe to lifecycle events across agents. Useful for logging, metrics, cost tracking, and custom integrations.
+
+```typescript
+import { Agent, EventBus, openai } from "@radaros/core";
+
+const eventBus = new EventBus();
+
+eventBus.on("run.start", (event) => {
+  console.log(`[start] Agent "${event.agentName}" started run ${event.runId}`);
+});
+
+eventBus.on("run.complete", (event) => {
+  console.log(`[done] ${event.agentName}: ${event.tokens} tokens, $${event.cost.toFixed(4)}`);
+});
+
+eventBus.on("tool.call", (event) => {
+  console.log(`[tool] ${event.toolName}(${JSON.stringify(event.args)})`);
+});
+
+eventBus.on("run.error", (event) => {
+  console.error(`[error] ${event.agentName}: ${event.error.message}`);
+});
+
+eventBus.on("cost.tracked", (event) => {
+  console.log(`[cost] Run ${event.runId}: $${event.totalCost.toFixed(4)}`);
+});
+
+const agent = new Agent({
+  name: "observable-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+  eventBus,
+});
+
+await agent.run("Hello, world!");
+```
+
+## Compression
+
+Enable automatic compression of verbose tool results to reduce token usage and cost. The agent still receives the full semantic content, but large payloads are summarized before being added to the context window.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const queryDatabase = defineTool({
+  name: "query_db",
+  description: "Run a SQL query and return results",
+  parameters: z.object({ sql: z.string() }),
+  execute: async ({ sql }) => JSON.stringify({
+    query: sql,
+    rows: Array.from({ length: 500 }, (_, i) => ({ id: i, value: Math.random() })),
+    rowCount: 500,
+    executionTimeMs: 42,
+  }),
+});
+
+const agent = new Agent({
+  name: "compressed-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a database analyst. Query data and summarize findings.",
+  tools: [queryDatabase],
+  compressToolResults: true,
+});
+
+const result = await agent.run("How many records have a value above 0.9?");
+console.log(result.text);
+```

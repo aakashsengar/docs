@@ -1,0 +1,439 @@
+---
+title: "Security & Authentication"
+description: "JWT authentication, API key management, PII guard, input/output guardrails, sandbox execution, and human-in-the-loop approval examples"
+---
+
+## JWT & RBAC
+
+Protect agent endpoints with JWT authentication and role-based access control. The `jwtAuth` middleware verifies tokens and attaches the decoded payload to `req.user`, while role checks ensure only authorized users can invoke specific agents.
+
+```typescript
+import express from "express";
+import { Agent, openai } from "@radaros/core";
+import { createAgentRouter, jwtAuth } from "@radaros/transport";
+
+const agent = new Agent({
+  name: "finance-assistant",
+  model: openai("gpt-4o"),
+  instructions: "You help with financial analysis. Only share data the user is authorized to see.",
+});
+
+const app = express();
+app.use(express.json());
+
+const auth = jwtAuth({
+  secret: process.env.JWT_SECRET!,
+  algorithms: ["HS256"],
+});
+
+const requireRole = (...roles: string[]) =>
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = (req as any).user;
+    if (!roles.includes(user?.role)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    next();
+  };
+
+app.use(
+  "/api",
+  auth,
+  requireRole("analyst", "admin"),
+  createAgentRouter({ agents: { "finance-assistant": agent } }),
+);
+
+app.listen(3000, () => console.log("Secure server on :3000"));
+// curl -H "Authorization: Bearer <token>" -X POST /api/agents/finance-assistant/run
+```
+
+---
+
+## API Key Authentication
+
+Pass API keys per request using `RunOpts.apiKey`. This lets each tenant or caller supply their own model provider credentials at runtime without hardcoding them in the agent.
+
+```typescript
+import { Agent, openai } from "@radaros/core";
+
+const agent = new Agent({
+  name: "multi-tenant",
+  model: openai("gpt-4o"),
+  instructions: "You are a helpful assistant.",
+});
+
+const tenants = [
+  { name: "Acme Corp", apiKey: process.env.ACME_OPENAI_KEY! },
+  { name: "Globex Inc", apiKey: process.env.GLOBEX_OPENAI_KEY! },
+];
+
+for (const tenant of tenants) {
+  const result = await agent.run(`Summarize today's news for ${tenant.name}.`, {
+    apiKey: tenant.apiKey,
+  });
+  console.log(`[${tenant.name}]`, result.text);
+}
+```
+
+---
+
+## PII Guard
+
+Scrub sensitive data from messages before they reach the LLM. `PiiGuard` detects SSNs, emails, phone numbers, credit cards, and IP addresses, replacing them with typed placeholders or redacting entirely.
+
+```typescript
+import { PiiGuard } from "@radaros/core";
+
+const guard = new PiiGuard({ mode: "redact" });
+
+const scrubbed = guard.scrub(
+  "My SSN is 123-45-6789 and email is john@example.com",
+);
+console.log(scrubbed);
+// "My SSN is [SSN] and email is [EMAIL]"
+```
+
+Integrate the guard into an agent so all LLM-bound messages are automatically sanitized:
+
+```typescript
+import { Agent, PiiGuard, openai } from "@radaros/core";
+
+const piiGuard = new PiiGuard({
+  builtIn: ["email", "phone", "ssn", "creditCard"],
+  action: "placeholder",
+  rehydrate: true,
+});
+
+const agent = new Agent({
+  name: "support-safe",
+  model: openai("gpt-4o"),
+  instructions: "Handle customer inquiries without exposing raw PII.",
+  loopHooks: {
+    beforeLLMCall: piiGuard.toBeforeLLMCallHook(),
+    afterToolExec: piiGuard.toAfterToolExecHook(),
+  },
+  guardrails: {
+    input: [piiGuard.toInputGuardrail()],
+  },
+});
+
+const result = await agent.run(
+  "My card is 4111-1111-1111-1111 and email is alice@acme.com",
+);
+console.log("Response:", result.text);
+console.log("Rehydrated:", piiGuard.rehydrate(result.text));
+```
+
+---
+
+## Input Guardrails
+
+Block dangerous or off-topic input before the agent processes it. Input guardrails run synchronously before the first LLM call and can reject the request with a descriptive error.
+
+```typescript
+import { Agent, openai, InputGuardrail } from "@radaros/core";
+
+const sqlInjectionGuard: InputGuardrail = {
+  name: "sql-injection-detector",
+  execute: async (input) => {
+    const patterns = [
+      /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b.*\b(FROM|INTO|TABLE|SET)\b)/i,
+      /(--|;)\s*(DROP|DELETE|UPDATE)/i,
+      /'\s*(OR|AND)\s*'?\s*\d*\s*=\s*\d*/i,
+    ];
+    const isSqlInjection = patterns.some((p) => p.test(input));
+    return {
+      passed: !isSqlInjection,
+      reason: isSqlInjection ? "Input contains potential SQL injection" : undefined,
+    };
+  },
+};
+
+const topicGuard: InputGuardrail = {
+  name: "topic-filter",
+  execute: async (input) => {
+    const blocked = ["cryptocurrency", "gambling", "weapons"];
+    const lower = input.toLowerCase();
+    const match = blocked.find((t) => lower.includes(t));
+    return {
+      passed: !match,
+      reason: match ? `Off-topic request detected: ${match}` : undefined,
+    };
+  },
+};
+
+const agent = new Agent({
+  name: "guarded-agent",
+  model: openai("gpt-4o"),
+  instructions: "You are a customer support agent for a SaaS product.",
+  guardrails: {
+    input: [sqlInjectionGuard, topicGuard],
+  },
+});
+
+try {
+  await agent.run("'; DROP TABLE users; --");
+} catch (err) {
+  console.error("Blocked:", (err as Error).message);
+  // "Blocked: Input contains potential SQL injection"
+}
+```
+
+---
+
+## Output Guardrails
+
+Inspect and filter agent responses before they reach the end user. Output guardrails catch PII leakage, profanity, or policy violations in the model's response.
+
+```typescript
+import { Agent, openai, OutputGuardrail } from "@radaros/core";
+
+const piiLeakageGuard: OutputGuardrail = {
+  name: "pii-leakage-detector",
+  execute: async (output) => {
+    const piiPatterns = [
+      { type: "SSN", regex: /\b\d{3}-\d{2}-\d{4}\b/ },
+      { type: "Email", regex: /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/ },
+      { type: "Phone", regex: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/ },
+      { type: "CreditCard", regex: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/ },
+    ];
+
+    const violations = piiPatterns
+      .filter((p) => p.regex.test(output))
+      .map((p) => p.type);
+
+    return {
+      passed: violations.length === 0,
+      reason: violations.length > 0
+        ? `Response contains PII: ${violations.join(", ")}`
+        : undefined,
+      sanitized: violations.length > 0
+        ? output.replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[REDACTED-SSN]")
+               .replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, "[REDACTED-EMAIL]")
+               .replace(/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, "[REDACTED-PHONE]")
+        : undefined,
+    };
+  },
+};
+
+const agent = new Agent({
+  name: "safe-responder",
+  model: openai("gpt-4o"),
+  instructions: "Answer questions about user accounts.",
+  guardrails: {
+    output: [piiLeakageGuard],
+    outputAction: "sanitize",
+  },
+});
+
+const result = await agent.run("What is the email for user 42?");
+console.log(result.text);
+// Any PII in the response is automatically redacted
+```
+
+---
+
+## Human-in-the-Loop Approval
+
+Pause agent execution and wait for a human to approve or deny high-risk tool calls. Configure which tools require approval, set timeouts, and handle the approval callback.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+import * as readline from "readline";
+
+const refundPayment = defineTool({
+  name: "refund_payment",
+  description: "Issue a refund to a customer",
+  parameters: z.object({
+    orderId: z.string(),
+    amount: z.number(),
+    reason: z.string(),
+  }),
+  execute: async ({ orderId, amount }) =>
+    `Refund of $${amount} issued for order ${orderId}`,
+});
+
+const lookupAccount = defineTool({
+  name: "lookup_account",
+  description: "Look up customer account details",
+  parameters: z.object({ customerId: z.string() }),
+  execute: async ({ customerId }) =>
+    `Account ${customerId}: active, balance $1,234.56`,
+});
+
+const promptUser = (question: string): Promise<string> => {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => rl.question(question, (ans) => { rl.close(); resolve(ans); }));
+};
+
+const agent = new Agent({
+  name: "billing-agent",
+  model: openai("gpt-4o"),
+  instructions: "You handle billing inquiries and refunds.",
+  tools: [refundPayment, lookupAccount],
+  approval: {
+    policy: ["refund_payment"],
+    timeout: 120_000,
+    timeoutAction: "deny",
+    onApproval: async (request) => {
+      console.log(`\nApproval required for "${request.toolName}":`);
+      console.log("Arguments:", JSON.stringify(request.args, null, 2));
+      const answer = await promptUser("Approve? (y/n): ");
+      return {
+        approved: answer.toLowerCase() === "y",
+        reason: answer.toLowerCase() === "y" ? "Manager approved" : "Manager denied",
+      };
+    },
+  },
+});
+
+await agent.run("Refund $50 for order ORD-9876 due to late delivery.");
+```
+
+---
+
+## Sandbox Execution
+
+Run untrusted code in an isolated sandbox with resource limits. Restrict memory, CPU time, network access, and filesystem paths to prevent malicious or runaway code from affecting the host.
+
+```typescript
+import { Agent, openai, defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const executeCode = defineTool({
+  name: "execute_code",
+  description: "Run user-provided JavaScript code",
+  parameters: z.object({
+    code: z.string(),
+    language: z.enum(["javascript", "typescript", "python"]),
+  }),
+  execute: async ({ code, language }) => `Executed ${language}: ${code.slice(0, 50)}...`,
+  sandbox: {
+    timeout: 10_000,
+    maxMemoryMB: 128,
+    allowNetwork: false,
+    allowFS: {
+      read: ["/tmp/sandbox/data"],
+      write: ["/tmp/sandbox/output"],
+    },
+  },
+});
+
+const agent = new Agent({
+  name: "code-runner",
+  model: openai("gpt-4o"),
+  instructions: [
+    "You help users write and test code.",
+    "Always run code in the sandbox. Never execute code that attempts network access.",
+  ].join(" "),
+  tools: [executeCode],
+});
+
+const result = await agent.run(
+  "Write a function that sorts an array of numbers and run it with [3, 1, 4, 1, 5, 9].",
+);
+console.log(result.text);
+```
+
+---
+
+## Combined Security Example
+
+A production-hardened agent that layers multiple security controls: input/output guardrails, PII scrubbing, human approval for sensitive operations, sandboxed code execution, retry logic, and structured logging.
+
+```typescript
+import {
+  Agent,
+  openai,
+  defineTool,
+  PiiGuard,
+  InputGuardrail,
+  OutputGuardrail,
+  EventBus,
+} from "@radaros/core";
+import { z } from "zod";
+
+const eventBus = new EventBus();
+eventBus.on("agent.*", (event) => {
+  console.log(`[audit] ${event.type}:`, JSON.stringify(event.data));
+});
+
+const piiGuard = new PiiGuard({
+  builtIn: ["email", "phone", "ssn", "creditCard"],
+  action: "placeholder",
+  rehydrate: true,
+});
+
+const injectionGuard: InputGuardrail = {
+  name: "injection-blocker",
+  execute: async (input) => {
+    const suspicious = /(DROP\s+TABLE|DELETE\s+FROM|<script>)/i.test(input);
+    return { passed: !suspicious, reason: suspicious ? "Blocked: injection attempt" : undefined };
+  },
+};
+
+const outputPiiGuard: OutputGuardrail = {
+  name: "output-pii-filter",
+  execute: async (output) => {
+    const hasSSN = /\b\d{3}-\d{2}-\d{4}\b/.test(output);
+    return {
+      passed: !hasSSN,
+      reason: hasSSN ? "Response contains SSN" : undefined,
+      sanitized: hasSSN ? output.replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[REDACTED]") : undefined,
+    };
+  },
+};
+
+const deleteRecord = defineTool({
+  name: "delete_record",
+  description: "Delete a database record",
+  parameters: z.object({ table: z.string(), id: z.string() }),
+  execute: async ({ table, id }) => `Deleted ${table}/${id}`,
+});
+
+const runQuery = defineTool({
+  name: "run_query",
+  description: "Run a read-only SQL query",
+  parameters: z.object({ sql: z.string() }),
+  execute: async ({ sql }) => `Query result for: ${sql.slice(0, 40)}`,
+  sandbox: {
+    timeout: 5_000,
+    maxMemoryMB: 64,
+    allowNetwork: false,
+    allowFS: { read: ["/data/readonly"] },
+  },
+});
+
+const agent = new Agent({
+  name: "hardened-ops",
+  model: openai("gpt-4o"),
+  instructions: "You are an operations assistant with strict security controls.",
+  tools: [deleteRecord, runQuery],
+  eventBus,
+  retry: { maxRetries: 3, initialDelayMs: 500, backoffMultiplier: 2 },
+  loopHooks: {
+    beforeLLMCall: piiGuard.toBeforeLLMCallHook(),
+    afterToolExec: piiGuard.toAfterToolExecHook(),
+  },
+  guardrails: {
+    input: [injectionGuard, piiGuard.toInputGuardrail()],
+    output: [outputPiiGuard],
+    outputAction: "sanitize",
+  },
+  approval: {
+    policy: ["delete_record"],
+    timeout: 60_000,
+    timeoutAction: "deny",
+    onApproval: async (request) => {
+      console.log(`[approval] ${request.toolName}:`, request.args);
+      return { approved: true, reason: "Auto-approved in staging" };
+    },
+  },
+});
+
+const result = await agent.run(
+  "Look up all orders for alice@acme.com and delete any cancelled ones.",
+);
+console.log("Final:", result.text);
+console.log("Rehydrated:", piiGuard.rehydrate(result.text));
+```

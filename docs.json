@@ -46,7 +46,8 @@
               "agents/reflection",
               "agents/versioning",
               "agents/context-curation",
-              "agents/progress"
+              "agents/progress",
+              "agents/types-reference"
             ]
           },
           {
@@ -154,6 +155,7 @@
               "models/overview",
               "models/fallback",
               "models/router",
+              "models/types-reference",
               "models/openai",
               "models/anthropic",
               "models/google",
@@ -338,7 +340,9 @@
               "examples/agents",
               "examples/memory-sessions",
               "examples/tools-toolkits",
+              "examples/toolkits-extended",
               "examples/models",
+              "examples/all-providers",
               "examples/storage"
             ]
           },
@@ -374,6 +378,8 @@
             "group": "Advanced & Integrations",
             "pages": [
               "examples/advanced-features",
+              "examples/agent-lifecycle",
+              "examples/security-auth",
               "examples/integrations",
               "examples/production-features"
             ]

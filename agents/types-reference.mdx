@@ -1,0 +1,667 @@
+---
+title: "Types Reference"
+description: "Complete reference for every TypeScript interface used across RadarOS — RunContext, ChatMessage, ModelResponse, StreamChunk, TokenUsage, and more."
+---
+
+## RunContext
+
+The `RunContext` object is available inside tool `execute` functions, hooks, guardrails, and dynamic instructions. It carries everything about the current run.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `runId` | `string` | Unique identifier for this run (auto-generated UUID) |
+| `sessionId` | `string` | Session identifier for multi-turn conversations |
+| `userId` | `string?` | User identifier (from `RunOpts` or agent config) |
+| `tenantId` | `string?` | Tenant identifier for multi-tenant isolation |
+| `metadata` | `Record<string, unknown>` | Arbitrary metadata passed via `RunOpts` |
+| `eventBus` | `EventBus` | The agent's event bus for emitting/subscribing to events |
+| `sessionState` | `Record<string, unknown>` | Mutable key-value state bag persisted across turns in the session |
+| `signal` | `AbortSignal?` | Signal for cancelling the run mid-execution |
+| `dependencies` | `Record<string, string>` | Resolved runtime dependencies (from `AgentConfig.dependencies`) |
+
+### Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `getState` | `getState<T>(key: string): T \| undefined` | Read a value from session state |
+| `setState` | `setState(key: string, value: unknown): void` | Write a value to session state |
+
+### Example: Using RunContext in a tool
+
+```typescript
+import { defineTool } from "@radaros/core";
+import { z } from "zod";
+
+const greetTool = defineTool({
+  name: "greet",
+  description: "Greet the user by name",
+  parameters: z.object({ greeting: z.string() }),
+  execute: async (args, ctx) => {
+    // Access session info
+    console.log("Run ID:", ctx.runId);
+    console.log("User:", ctx.userId);
+    console.log("Tenant:", ctx.tenantId);
+
+    // Read/write session state
+    const visitCount = (ctx.getState<number>("visits") ?? 0) + 1;
+    ctx.setState("visits", visitCount);
+
+    // Access metadata
+    const source = ctx.metadata.source ?? "unknown";
+
+    // Access dependencies
+    const apiUrl = ctx.dependencies.API_URL;
+
+    return `${args.greeting}! Visit #${visitCount} from ${source}`;
+  },
+});
+```
+
+### Example: Using RunContext in dynamic instructions
+
+```typescript
+const agent = new Agent({
+  name: "support-bot",
+  model: openai("gpt-4o"),
+  instructions: (ctx) => {
+    const lang = ctx.metadata?.language ?? "English";
+    const role = ctx.metadata?.role ?? "customer";
+    return `You are a support agent. Respond in ${lang}. User role: ${role}.`;
+  },
+});
+
+const result = await agent.run("Help me", {
+  metadata: { language: "Spanish", role: "admin" },
+});
+```
+
+---
+
+## ChatMessage
+
+Represents a single message in a conversation.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `role` | `"system" \| "user" \| "assistant" \| "tool"` | Yes | Who sent the message |
+| `content` | `string \| ContentPart[] \| null` | Yes | Message body. `null` for tool-call-only assistant messages |
+| `toolCalls` | `ToolCall[]?` | No | Tool calls requested by the assistant |
+| `toolCallId` | `string?` | No | ID of the tool call this message responds to (when `role` is `"tool"`) |
+| `name` | `string?` | No | Tool name or participant name |
+
+### Content formats
+
+**Plain text** — most common:
+
+```typescript
+{ role: "user", content: "What is the weather in Tokyo?" }
+```
+
+**Multi-modal** — images, audio, files:
+
+```typescript
+{
+  role: "user",
+  content: [
+    { type: "text", text: "What's in this image?" },
+    { type: "image", data: "https://example.com/photo.jpg" },
+  ]
+}
+```
+
+**Tool result** — response to a tool call:
+
+```typescript
+{ role: "tool", content: "Tokyo: 22°C, sunny", toolCallId: "call_abc123" }
+```
+
+---
+
+## ContentPart
+
+Multi-modal content is an array of `ContentPart` objects. Each part has a `type` discriminant.
+
+### TextPart
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `"text"` | Always `"text"` |
+| `text` | `string` | The text content |
+
+### ImagePart
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `"image"` | Yes | Always `"image"` |
+| `data` | `string` | Yes | Base64-encoded image data OR a URL |
+| `mimeType` | `"image/png" \| "image/jpeg" \| "image/gif" \| "image/webp"` | No | Image format |
+
+### AudioPart
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `"audio"` | Yes | Always `"audio"` |
+| `data` | `string` | Yes | Base64-encoded audio data |
+| `mimeType` | `"audio/mp3" \| "audio/wav" \| "audio/ogg" \| "audio/webm"` | No | Audio format |
+
+### FilePart
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `"file"` | Yes | Always `"file"` |
+| `data` | `string` | Yes | Base64-encoded file data OR a URL |
+| `mimeType` | `string` | Yes | Any MIME type (e.g. `"application/pdf"`) |
+| `filename` | `string?` | No | Original filename |
+
+---
+
+## ModelResponse
+
+Returned by `ModelProvider.generate()`. Contains the full LLM response.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `ChatMessage` | The assistant's response message |
+| `usage` | `TokenUsage` | Token consumption breakdown |
+| `finishReason` | `"stop" \| "tool_calls" \| "length" \| "content_filter"` | Why the model stopped generating |
+| `raw` | `unknown` | The raw, unmodified response from the provider SDK |
+
+### finishReason values
+
+| Value | Meaning |
+|-------|---------|
+| `"stop"` | The model completed its response naturally |
+| `"tool_calls"` | The model wants to call one or more tools |
+| `"length"` | The response was cut off because it hit `maxTokens` |
+| `"content_filter"` | The response was blocked by the provider's content filter |
+
+---
+
+## StreamChunk
+
+Yielded by `ModelProvider.stream()` and `agent.stream()`. A discriminated union — check the `type` field.
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `"text"` | `text: string` | A chunk of streamed text |
+| `"thinking"` | `text: string` | A chunk of reasoning/thinking content (when reasoning is enabled) |
+| `"tool_call_start"` | `toolCall: { id: string; name: string }` | A new tool call is starting |
+| `"tool_call_delta"` | `toolCallId: string; argumentsDelta: string` | Incremental JSON argument data for a tool call |
+| `"tool_call_end"` | `toolCallId: string` | A tool call's arguments are complete |
+| `"finish"` | `finishReason: string; usage?: TokenUsage` | Stream is complete |
+
+### Example: Processing a stream
+
+```typescript
+for await (const chunk of agent.stream("Tell me a story")) {
+  switch (chunk.type) {
+    case "text":
+      process.stdout.write(chunk.text);
+      break;
+    case "thinking":
+      console.log("[thinking]", chunk.text);
+      break;
+    case "tool_call_start":
+      console.log(`Calling tool: ${chunk.toolCall.name}`);
+      break;
+    case "finish":
+      console.log(`\nDone. Tokens: ${chunk.usage?.totalTokens}`);
+      break;
+  }
+}
+```
+
+---
+
+## TokenUsage
+
+Token consumption breakdown from an LLM call.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `promptTokens` | `number` | Yes | Input tokens consumed (your messages + system prompt + tools) |
+| `completionTokens` | `number` | Yes | Output tokens generated by the model |
+| `totalTokens` | `number` | Yes | `promptTokens + completionTokens` |
+| `reasoningTokens` | `number?` | No | Tokens used for internal reasoning (OpenAI o-series, Anthropic thinking) |
+| `cachedTokens` | `number?` | No | Tokens served from provider cache (reduces cost) |
+| `audioInputTokens` | `number?` | No | Tokens from audio input (voice agents) |
+| `audioOutputTokens` | `number?` | No | Tokens for audio output (voice agents) |
+| `providerMetrics` | `Record<string, unknown>?` | No | Raw usage object from the provider SDK, unmodified. Useful for provider-specific fields like `thoughtsTokenCount` (Gemini), `prompt_tokens_details` (OpenAI), or `cache_read_input_tokens` (Anthropic) |
+
+---
+
+## RunOutput
+
+The object returned by `agent.run()`.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `text` | `string` | The assistant's text response |
+| `toolCalls` | `ToolCallResult[]` | All tool calls executed during the run |
+| `usage` | `TokenUsage` | Aggregated token usage |
+| `structured` | `unknown?` | Parsed structured output (when `structuredOutput` Zod schema is set) |
+| `thinking` | `string?` | Model's internal reasoning (when `reasoning.enabled` is true) |
+| `durationMs` | `number?` | Total run duration in milliseconds |
+| `runId` | `string?` | Unique run identifier (UUID) |
+| `agentName` | `string?` | Name of the agent |
+| `sessionId` | `string?` | Session identifier |
+| `userId` | `string?` | User identifier |
+| `model` | `string?` | Model ID used (e.g. `"gpt-4o"`) |
+| `modelProvider` | `string?` | Provider ID (e.g. `"openai"`) |
+| `status` | `"completed" \| "error" \| "stopped" \| "cancelled"` | Run completion status |
+| `createdAt` | `number?` | Unix timestamp (ms) when the run started |
+| `metrics` | `RunMetrics?` | Enhanced timing and token breakdown |
+| `messages` | `ChatMessage[]?` | Full message history sent to the LLM |
+| `responseId` | `string?` | Provider-specific response ID (e.g. OpenAI's `chatcmpl-xxx`) |
+| `followupSuggestions` | `string[]?` | Auto-generated followup prompts (when `generateFollowups` is enabled) |
+
+---
+
+## RunOpts
+
+Per-run options passed to `agent.run()` or `agent.stream()`. All fields are optional.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `sessionId` | `string` | Auto-generated UUID | Session identifier for multi-turn conversations |
+| `userId` | `string` | `undefined` | User identifier |
+| `tenantId` | `string` | `undefined` | Tenant identifier for multi-tenant isolation |
+| `metadata` | `Record<string, unknown>` | `{}` | Arbitrary metadata — available in `RunContext.metadata` |
+| `apiKey` | `string` | `undefined` | Per-request API key override. Passed to the model provider, overriding the provider-level key |
+| `signal` | `AbortSignal` | `undefined` | AbortSignal to cancel the run mid-execution |
+| `dependencies` | `Record<string, unknown>` | `undefined` | Per-run dependency overrides (merged with agent-level `dependencies`) |
+
+### Example
+
+```typescript
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 30_000); // 30s timeout
+
+const result = await agent.run("Summarize this document", {
+  sessionId: "session-abc",
+  userId: "user-123",
+  tenantId: "tenant-acme",
+  metadata: { source: "web", priority: "high" },
+  apiKey: "sk-user-specific-key",
+  signal: controller.signal,
+  dependencies: { REPORT_DATE: "2026-02-28" },
+});
+```
+
+---
+
+## AgentHooks
+
+Lifecycle hooks called during an agent run.
+
+| Hook | Signature | When |
+|------|-----------|------|
+| `beforeRun` | `(ctx: RunContext) => Promise<void>` | Before the LLM loop starts |
+| `afterRun` | `(ctx: RunContext, output: RunOutput) => Promise<void>` | After the run completes successfully |
+| `onToolCall` | `(ctx: RunContext, toolName: string, args: unknown) => Promise<void>` | When a tool is about to be called |
+| `onError` | `(ctx: RunContext, error: Error) => Promise<void>` | When an error occurs |
+
+### Example
+
+```typescript
+const agent = new Agent({
+  name: "tracked-agent",
+  model: openai("gpt-4o"),
+  hooks: {
+    beforeRun: async (ctx) => {
+      console.log(`[${ctx.runId}] Run starting for session ${ctx.sessionId}`);
+    },
+    afterRun: async (ctx, output) => {
+      console.log(`[${ctx.runId}] Done in ${output.durationMs}ms, ${output.usage.totalTokens} tokens`);
+    },
+    onToolCall: async (ctx, toolName, args) => {
+      console.log(`[${ctx.runId}] Calling ${toolName} with`, args);
+    },
+    onError: async (ctx, error) => {
+      console.error(`[${ctx.runId}] Error:`, error.message);
+    },
+  },
+});
+```
+
+---
+
+## LoopHooks
+
+Per-roundtrip hooks for fine-grained control over the LLM loop. More granular than `AgentHooks`.
+
+| Hook | Signature | When |
+|------|-----------|------|
+| `beforeLLMCall` | `(messages: ChatMessage[], roundtrip: number) => Promise<ChatMessage[] \| void>` | Before each LLM API call. Return modified messages to override |
+| `afterLLMCall` | `(response: { finishReason: string; usage: TokenUsage }, roundtrip: number) => Promise<void>` | After each LLM API response |
+| `beforeToolExec` | `(toolName: string, args: unknown) => Promise<{ skip?: boolean; result?: string } \| void>` | Before each tool execution. Return `{ skip: true, result }` to mock the result |
+| `afterToolExec` | `(toolName: string, result: string) => Promise<string \| void>` | After each tool execution. Return a string to replace the result |
+| `onRoundtripComplete` | `(roundtrip: number, tokensSoFar: TokenUsage) => Promise<{ stop?: boolean } \| void>` | After all tools in a roundtrip. Return `{ stop: true }` to break the loop |
+
+### Example: Cost auto-stop
+
+```typescript
+const agent = new Agent({
+  name: "budget-agent",
+  model: openai("gpt-4o"),
+  loopHooks: {
+    onRoundtripComplete: async (roundtrip, usage) => {
+      if (usage.totalTokens > 50_000) {
+        console.log("Token budget exceeded, stopping loop");
+        return { stop: true };
+      }
+    },
+  },
+});
+```
+
+---
+
+## Guardrails
+
+### InputGuardrail
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Guardrail identifier (for logging/debugging) |
+| `validate` | `(input: MessageContent, ctx: RunContext) => Promise<GuardrailResult>` | Validation function |
+
+### OutputGuardrail
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | Guardrail identifier |
+| `validate` | `(output: RunOutput, ctx: RunContext) => Promise<GuardrailResult>` | Validation function |
+
+### GuardrailResult
+
+A discriminated union:
+
+```typescript
+// Pass — input/output is allowed
+{ pass: true }
+
+// Fail — input/output is blocked
+{ pass: false, reason: "Contains prohibited content" }
+```
+
+### Example
+
+```typescript
+const agent = new Agent({
+  name: "safe-agent",
+  model: openai("gpt-4o"),
+  guardrails: {
+    input: [
+      {
+        name: "no-sql-injection",
+        validate: async (input) => {
+          const text = typeof input === "string" ? input : "";
+          if (/DROP\s+TABLE|DELETE\s+FROM/i.test(text)) {
+            return { pass: false, reason: "SQL injection detected" };
+          }
+          return { pass: true };
+        },
+      },
+    ],
+    output: [
+      {
+        name: "no-pii-leak",
+        validate: async (output) => {
+          if (/\b\d{3}-\d{2}-\d{4}\b/.test(output.text)) {
+            return { pass: false, reason: "Output contains SSN" };
+          }
+          return { pass: true };
+        },
+      },
+    ],
+  },
+});
+```
+
+---
+
+## RetryConfig
+
+Configuration for automatic retries on transient LLM API failures.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxRetries` | `number` | `3` | Maximum retry attempts |
+| `initialDelayMs` | `number` | `500` | First retry delay in milliseconds |
+| `maxDelayMs` | `number` | `10000` | Maximum backoff delay (exponential backoff caps at this) |
+| `retryableErrors` | `(error: unknown) => boolean` | Built-in | Custom predicate for which errors to retry |
+
+Default retryable errors: HTTP 429 (rate limit), 5xx (server errors), `ECONNRESET`, `ETIMEDOUT`, `ENOTFOUND`, and messages containing "rate limit" or "overloaded".
+
+```typescript
+const agent = new Agent({
+  name: "resilient-agent",
+  model: openai("gpt-4o"),
+  retry: {
+    maxRetries: 5,
+    initialDelayMs: 1000,
+    maxDelayMs: 30_000,
+  },
+});
+```
+
+---
+
+## ApprovalConfig
+
+Human-in-the-loop approval for tool calls.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `policy` | `"none" \| "all" \| string[]` | `"none"` | Which tools need approval. `"all"` = every tool, or pass an array of tool names |
+| `onApproval` | `(request: ApprovalRequest) => Promise<ApprovalDecision>` | `undefined` | Callback invoked when approval is needed |
+| `timeout` | `number` | `300000` (5 min) | How long to wait for a human response (ms) |
+| `timeoutAction` | `"approve" \| "deny" \| "throw"` | `"deny"` | What happens when the timeout expires |
+
+```typescript
+const agent = new Agent({
+  name: "careful-agent",
+  model: openai("gpt-4o"),
+  tools: [deleteTool, readTool],
+  approval: {
+    policy: ["delete_record"],  // Only require approval for delete
+    timeout: 60_000,            // 1 minute
+    timeoutAction: "deny",
+    onApproval: async (request) => {
+      console.log(`Approve ${request.toolName}(${JSON.stringify(request.args)})?`);
+      // Your UI/CLI logic here
+      return { approved: true };
+    },
+  },
+});
+```
+
+---
+
+## SandboxConfig
+
+Run tools in isolated subprocesses with resource limits.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `enabled` | `boolean` | `true` (when config object provided) | Explicit on/off toggle |
+| `timeout` | `number` | `30000` (30s) | Execution timeout in milliseconds |
+| `maxMemoryMB` | `number` | `256` | Maximum heap memory in MB |
+| `allowNetwork` | `boolean` | `false` | Allow outbound network requests |
+| `allowFS` | `boolean \| { readOnly?: string[]; readWrite?: string[] }` | `false` | Allow filesystem access. Pass an object for granular path control |
+| `env` | `Record<string, string>` | `undefined` | Environment variables forwarded to the sandbox |
+
+```typescript
+const agent = new Agent({
+  name: "sandboxed-agent",
+  model: openai("gpt-4o"),
+  sandbox: {
+    timeout: 10_000,
+    maxMemoryMB: 128,
+    allowNetwork: false,
+    allowFS: { readOnly: ["/data"], readWrite: ["/tmp"] },
+    env: { API_KEY: process.env.API_KEY! },
+  },
+});
+```
+
+---
+
+## ToolDef
+
+The tool definition interface. Created with `defineTool()`.
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | — | Tool name (must be unique within an agent) |
+| `description` | `string` | Yes | — | Human-readable description sent to the LLM for tool selection |
+| `parameters` | `z.ZodObject` | Yes | — | Zod schema defining the input parameters |
+| `execute` | `(args, ctx) => Promise<string \| ToolResult>` | Yes | — | Execution function. Receives parsed args and `RunContext` |
+| `cache` | `{ ttl: number }` | No | Off | Cache results for `ttl` milliseconds |
+| `sandbox` | `boolean \| SandboxConfig` | No | Off | Run in sandboxed subprocess |
+| `requiresApproval` | `boolean \| ((args) => boolean)` | No | `false` | Require human approval. Pass a function for conditional approval |
+| `strict` | `boolean` | No | `false` | Enable OpenAI Structured Outputs strict mode for tool calls |
+| `rawJsonSchema` | `Record<string, unknown>` | No | — | Raw JSON Schema bypassing Zod conversion (used by MCP tools) |
+
+---
+
+## EventBus
+
+Typed publish/subscribe event system for agent lifecycle events.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `on` | `on(event, handler): this` | Subscribe to an event. Handler called every time |
+| `once` | `once(event, handler): this` | Subscribe to an event. Handler called only once, then removed |
+| `off` | `off(event, handler): this` | Unsubscribe a specific handler |
+| `emit` | `emit(event, data): boolean` | Emit an event to all subscribers |
+| `removeAllListeners` | `removeAllListeners(event?): this` | Remove all handlers for an event (or all events) |
+
+### Example
+
+```typescript
+import { EventBus } from "@radaros/core";
+
+const eventBus = new EventBus();
+
+eventBus.on("run.start", ({ runId, agentName, input }) => {
+  console.log(`[${agentName}] Run ${runId} started: "${input}"`);
+});
+
+eventBus.on("tool.call", ({ runId, toolName, args }) => {
+  console.log(`[${runId}] Tool: ${toolName}(${JSON.stringify(args)})`);
+});
+
+eventBus.on("run.complete", ({ runId, output }) => {
+  console.log(`[${runId}] Done: ${output.text.slice(0, 100)}`);
+});
+
+eventBus.on("run.error", ({ runId, error }) => {
+  console.error(`[${runId}] Error: ${error.message}`);
+});
+
+const agent = new Agent({
+  name: "my-agent",
+  model: openai("gpt-4o"),
+  eventBus,
+});
+```
+
+### Common events
+
+| Event | Payload | When |
+|-------|---------|------|
+| `run.start` | `{ runId, agentName, input }` | Run begins |
+| `run.complete` | `{ runId, output }` | Run finishes successfully |
+| `run.error` | `{ runId, error }` | Run fails |
+| `tool.call` | `{ runId, toolName, args }` | Tool is called |
+| `tool.result` | `{ runId, toolName, result }` | Tool returns a result |
+| `run.stream.chunk` | `{ runId, chunk }` | Text chunk streamed |
+| `cost.tracked` | `{ runId, agentName, modelId, usage }` | Token usage recorded |
+| `memory.stored` | `{ store, key, agentName }` | Memory written |
+| `handoff.transfer` | `{ runId, fromAgent, toAgent, reason }` | Agent handoff |
+
+See the full event list in the [Events types source](https://github.com/xhipment/radar-os/blob/main/packages/core/src/events/types.ts).
+
+---
+
+## ReasoningConfig
+
+Enable extended thinking / chain-of-thought for models that support it.
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `enabled` | `boolean` | Yes | — | Turn reasoning on/off |
+| `effort` | `"low" \| "medium" \| "high"` | No | `undefined` | Reasoning effort level (OpenAI o-series models only) |
+| `budgetTokens` | `number` | No | `undefined` | Token budget for thinking (Anthropic and Gemini models) |
+
+```typescript
+// OpenAI o-series
+const agent = new Agent({
+  model: openai("o3"),
+  reasoning: { enabled: true, effort: "high" },
+});
+
+// Anthropic
+const agent2 = new Agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  reasoning: { enabled: true, budgetTokens: 4000 },
+});
+
+// Google Gemini
+const agent3 = new Agent({
+  model: google("gemini-2.5-flash"),
+  reasoning: { enabled: true, budgetTokens: 8000 },
+});
+```
+
+---
+
+## ContextCompactorConfig
+
+Automatic context compaction to prevent context window overflow.
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `maxContextTokens` | `number` | Yes | — | Maximum tokens allowed in the context |
+| `reserveTokens` | `number` | No | `undefined` | Tokens to reserve for the model's response |
+| `strategy` | `"trim" \| "summarize" \| "hybrid"` | Yes | — | `"trim"` = drop oldest messages, `"summarize"` = LLM-summarize dropped messages, `"hybrid"` = trim first then summarize |
+| `summarizeModel` | `ModelProvider` | No | Agent's model | Cheaper model for summarization |
+| `priorityOrder` | `string[]` | No | `undefined` | Which sections to keep vs. trim: `"system"`, `"recentHistory"`, `"memory"`, `"tools"` |
+
+```typescript
+const agent = new Agent({
+  model: openai("gpt-4o"),
+  contextCompactor: {
+    maxContextTokens: 100_000,
+    reserveTokens: 4000,
+    strategy: "hybrid",
+    summarizeModel: openai("gpt-4o-mini"),
+    priorityOrder: ["system", "tools", "recentHistory", "memory"],
+  },
+});
+```
+
+---
+
+## ToolResultLimitConfig
+
+Prevent prompt token explosion from large tool results.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxChars` | `number` | `20000` (~5K tokens) | Max characters before the strategy kicks in |
+| `strategy` | `"truncate" \| "summarize"` | `"truncate"` | `"truncate"` = smart JSON truncation (arrays sliced, remainder noted). `"summarize"` = send to cheap model for summarization |
+| `model` | `ModelProvider` | — | Model for summarization (required when strategy is `"summarize"`) |
+
+```typescript
+const agent = new Agent({
+  model: openai("gpt-4o"),
+  toolResultLimit: {
+    maxChars: 20_000,
+    strategy: "summarize",
+    model: openai("gpt-4o-mini"),
+  },
+});
+```

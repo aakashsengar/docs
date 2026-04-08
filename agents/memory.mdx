@@ -1,159 +1,439 @@
 ---
-title: Memory
-description: Long-term conversation memory with LLM-powered summarization. Kicks in when session history overflows.
+title: "Memory"
+description: "Complete guide to RadarOS unified memory — sessions, summaries, user facts, profiles, entities, decisions, graph, procedures, and context budgeting."
 ---
 
-# Memory
+## Overview
 
-Memory in RadarOS provides **long-term conversation context** through LLM-powered summarization. When a session's message history grows beyond a configured limit, the oldest messages overflow into Memory, where they are summarized and stored. These summaries are injected into the system prompt on future runs, giving the agent context from earlier in the conversation.
+Memory gives agents the ability to remember. Without it, every `agent.run()` is a blank slate. With it, agents maintain conversation history, learn user preferences, track entities, remember decisions, and build knowledge graphs.
 
-<Note>
-Memory does **not** store raw messages — that's [Session's](/agents/sessions) job. Memory only stores summaries of overflowed messages. See [how they work together](#how-session-and-memory-work-together) below.
-</Note>
-
----
+All memory features share a single `storage` backend and are configured through the `memory` field on `AgentConfig`.
 
 ## Quick Start
 
 ```typescript
-import { Agent, Memory, openai } from "@radaros/core";
-
-const memory = new Memory({
-  model: openai("gpt-4o-mini"),  // used for summarization
-  maxSummaries: 20,
-});
+import { Agent, openai, InMemoryStorage } from "@radaros/core";
 
 const agent = new Agent({
   name: "assistant",
   model: openai("gpt-4o"),
-  instructions: "You are a helpful assistant.",
-  memory,
-  numHistoryRuns: 25,  // keep last 25 exchanges in session, overflow goes to Memory
+  memory: {
+    storage: new InMemoryStorage(),
+  },
 });
+
+// First conversation
+await agent.run("My name is Alex", { sessionId: "s1", userId: "u1" });
+
+// Later — the agent remembers
+const result = await agent.run("What's my name?", { sessionId: "s1", userId: "u1" });
+// "Your name is Alex."
 ```
 
+## UnifiedMemoryConfig
+
+The complete memory configuration. Only `storage` is required — everything else is opt-in.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `storage` | `StorageDriver` | **Required** | Storage backend shared by all memory subsystems. See [Storage](/storage/overview) |
+| `maxMessages` | `number` | `50` | Maximum messages kept in session history. Oldest are trimmed first when exceeded |
+| `maxTokens` | `number` | `undefined` | Token-based history trimming. When set, history is trimmed to fit within this token count (instead of message count) |
+| `summaries` | `boolean \| SummaryConfig` | `true` (ON) | Long-term conversation summaries. Auto-summarizes overflow messages. Pass `false` to disable |
+| `userFacts` | `boolean \| UserFactsConfig` | `false` (OFF) | Extract and store facts about the user (preferences, location, interests). Pass `true` for defaults |
+| `userProfile` | `boolean \| UserProfileConfig` | `false` (OFF) | Structured user profile (name, role, timezone, language). Pass `true` for defaults |
+| `entities` | `boolean \| EntityConfig` | `false` (OFF) | Entity memory — companies, people, projects extracted from conversations |
+| `decisions` | `boolean \| DecisionConfig` | `false` (OFF) | Decision audit trail — what the agent decided and why |
+| `learnings` | `LearningsConfig` | `undefined` (OFF) | Vector-backed learned insights from interactions. Requires a `vectorStore` |
+| `graph` | `GraphMemoryConfig` | `undefined` (OFF) | Knowledge graph — entity-relationship graph with temporal awareness. Requires a `GraphStore` |
+| `procedures` | `boolean \| ProceduresConfig` | `false` (OFF) | Procedural memory — records successful tool-call workflows for reuse |
+| `contextBudget` | `ContextBudgetConfig` | `undefined` | Token budget allocation for how memory context is distributed |
+| `model` | `ModelProvider` | Agent's primary model | Separate (cheaper) model used for background extraction (summaries, facts, entities, etc.) |
+
 ---
 
-## How It Works
+## Sessions and History
 
-<Steps>
-  <Step title="Session stores messages">
-    Every `run()` or `stream()` call saves the user/assistant exchange to the session (via `SessionManager`).
-  </Step>
-  <Step title="History overflows">
-    When session messages exceed the limit (set by `numHistoryRuns` × 2), the oldest messages are trimmed.
-  </Step>
-  <Step title="Memory summarizes overflow">
-    The trimmed messages are sent to Memory, which uses an LLM to generate a concise summary and stores it.
-  </Step>
-  <Step title="Summaries are injected">
-    On the next run, Memory's summaries are injected into the system prompt via `getContextString()`, giving the agent context from earlier parts of the conversation.
-  </Step>
-</Steps>
-
----
-
-## Constructor
+Sessions are the foundation. Every `agent.run()` with a `sessionId` appends messages to a persistent history.
 
 ```typescript
-const memory = new Memory(config?: MemoryConfig);
+memory: {
+  storage: new SqliteStorage("app.db"),
+  maxMessages: 30,    // Keep last 30 messages (15 turns)
+}
 ```
 
-<ParamField path="storage" type="StorageDriver" required={false}>
-  Storage driver for persisting summaries. Defaults to `InMemoryStorage`. Use `MongoDBStorage`, `PostgresStorage`, or `SqliteStorage` for persistence across restarts.
-</ParamField>
+**What happens when `maxMessages` is exceeded**: The oldest messages are removed from the session. If `summaries` is enabled (the default), those removed messages are first summarized so the context isn't lost entirely.
 
-<ParamField path="model" type="ModelProvider" required={false}>
-  LLM used to generate conversation summaries from overflow messages. If not provided, falls back to basic text concatenation (truncated to 500 chars). **Recommended:** set this for meaningful summaries.
-</ParamField>
-
-<ParamField path="maxSummaries" type="number" required={false} default="20">
-  Maximum number of summaries stored per session. When exceeded, the oldest summaries are dropped.
-</ParamField>
-
----
-
-## Methods
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `summarize(sessionId, messages, fallbackModel?)` | `Promise<void>` | Summarize messages via LLM and store the summary |
-| `getSummaries(sessionId)` | `Promise<string[]>` | Get all stored summaries for a session, sorted chronologically |
-| `getContextString(sessionId)` | `Promise<string>` | Formatted summary string for system prompt injection |
-| `clear(sessionId)` | `Promise<void>` | Clear all summaries for a session |
-
----
-
-## How Session and Memory Work Together
-
-Session and Memory serve distinct roles with **no duplication**:
-
-<CardGroup cols={2}>
-  <Card title="Session" icon="clock">
-    Stores **raw messages** (user + assistant). Replayed as conversation history to the LLM on each run. Think of it as short-term / working memory.
-  </Card>
-  <Card title="Memory" icon="brain">
-    Stores **LLM-generated summaries** of overflowed messages. Injected into the system prompt as context. Think of it as long-term memory.
-  </Card>
-</CardGroup>
-
-The flow for a long conversation:
-
-```
-Run 1-25:  Session stores all messages. Memory is idle.
-Run 26:    Session overflows → oldest messages are trimmed.
-           Trimmed messages are sent to Memory → LLM summary is generated and stored.
-Run 27+:   LLM receives:
-             - System prompt + Memory summaries (what happened in runs 1-X)
-             - Session history (recent runs)
-             - Current user input
-```
-
-This gives the agent a complete picture: detailed recent context from Session + summarized older context from Memory.
-
----
-
-## With MongoDB Persistence
+**Token-based trimming**: Instead of counting messages, you can limit by tokens:
 
 ```typescript
-import { Agent, Memory, MongoDBStorage, openai } from "@radaros/core";
-
-const storage = new MongoDBStorage(
-  "mongodb://localhost:27017",
-  "myapp",
-  "agent_data"
-);
-
-const memory = new Memory({
+memory: {
   storage,
-  model: openai("gpt-4o-mini"),
-  maxSummaries: 20,
-});
-
-const agent = new Agent({
-  name: "assistant",
-  model: openai("gpt-4o"),
-  instructions: "You are a helpful assistant.",
-  storage,          // Session persistence
-  memory,           // Long-term summarization
-  numHistoryRuns: 25,
-});
-
-await agent.run("Hello!", { sessionId: "conv-1" });
+  maxTokens: 8000,   // Keep history within ~8K tokens
+}
 ```
 
 ---
 
-## Three Memory Layers
+## Summaries
 
-RadarOS has three complementary memory layers:
+**Default: ON.** When session history overflows `maxMessages`, the overflow messages are summarized by the LLM and stored. These summaries are injected into the system prompt on future runs so the agent remembers older context.
 
-| Layer | Class | Keyed by | Stores | When it writes | When it reads |
-|-------|-------|----------|--------|----------------|---------------|
-| **Session** | `SessionManager` | `sessionId` | Raw messages + state | Every run | Every run (history replay) |
-| **Memory** | `Memory` | `sessionId` | LLM summaries | When session overflows | Every run (system prompt) |
-| **User Memory** | `UserMemory` | `userId` | Personal facts | After each run (auto-extract) | Every run (system prompt) |
+### SummaryConfig
 
-<Note>
-All three can be used together. Session provides immediate context, Memory provides long-term conversation context, and User Memory provides cross-session personalization.
-</Note>
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxCount` | `number` | `10` | Maximum summaries stored per session. Oldest pruned first |
+| `maxTokens` | `number` | `2000` | Token budget for summary text injected into system prompt |
+
+```typescript
+// Default behavior (summaries ON)
+memory: { storage }
+
+// Explicit configuration
+memory: {
+  storage,
+  summaries: { maxCount: 5, maxTokens: 1000 },
+}
+
+// Disable summaries
+memory: {
+  storage,
+  summaries: false,
+}
+```
+
+---
+
+## User Facts
+
+**Default: OFF.** Automatically extracts persistent facts about the user from conversations: preferences, location, profession, interests, communication style.
+
+Facts are stored per `userId` and injected into the system prompt on every run for that user, across all sessions.
+
+### UserFactsConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxFacts` | `number` | `100` | Maximum facts stored per user. Oldest pruned when exceeded |
+
+```typescript
+memory: {
+  storage,
+  userFacts: true,   // Enable with defaults (max 100 facts)
+}
+
+// With custom limit
+memory: {
+  storage,
+  userFacts: { maxFacts: 50 },
+}
+```
+
+**What gets extracted**: The LLM analyzes each conversation and extracts concrete facts like:
+- "User prefers dark mode"
+- "User is a software engineer in Mumbai"
+- "User's favorite language is TypeScript"
+
+**Contradiction handling**: If a new fact contradicts an old one (e.g., user moved from Mumbai to Berlin), the old fact is marked with `invalidatedAt` and the new one takes over.
+
+---
+
+## User Profile
+
+**Default: OFF.** A structured profile object with built-in fields (name, role, timezone, language) plus custom fields. More structured than user facts.
+
+### UserProfileConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `customFields` | `string[]` | `[]` | Additional fields to track beyond the built-ins |
+
+```typescript
+memory: {
+  storage,
+  userProfile: true,  // Track name, role, timezone, language
+}
+
+// With custom fields
+memory: {
+  storage,
+  userProfile: { customFields: ["company", "department", "plan"] },
+}
+```
+
+---
+
+## Entity Memory
+
+**Default: OFF.** Extracts companies, people, projects, and products mentioned in conversations. Each entity has facts, events, and relationships.
+
+### EntityConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `namespace` | `string` | `"global"` | Namespace for scoping entities. Supports hierarchical paths like `"org/team/project"` |
+
+```typescript
+memory: {
+  storage,
+  entities: true,
+}
+
+// With namespace scoping
+memory: {
+  storage,
+  entities: { namespace: "acme/engineering" },
+}
+```
+
+**What gets extracted**: After each conversation, the LLM identifies entities and stores structured data:
+- Entity: "Stripe" (type: company) — facts: ["Payment processor", "Used for billing"]
+- Entity: "Raj" (type: person) — facts: ["Frontend engineer", "Works on checkout"]
+
+---
+
+## Decision Log
+
+**Default: OFF.** Records what the agent decided and why. Useful for auditing and learning from past decisions.
+
+### DecisionConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxContextDecisions` | `number` | `5` | How many recent decisions are injected into the system prompt |
+
+```typescript
+memory: {
+  storage,
+  decisions: true,
+}
+
+// Inject more decisions into context
+memory: {
+  storage,
+  decisions: { maxContextDecisions: 10 },
+}
+```
+
+When enabled, the agent gets `log_decision`, `record_outcome`, and `search_decisions` tools automatically.
+
+---
+
+## Learned Knowledge
+
+**Default: OFF.** Vector-backed insights that the agent learns over time. Requires a vector store for semantic search.
+
+### LearningsConfig
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `vectorStore` | `VectorStore` | **Yes** | — | Vector store for semantic search over learnings |
+| `collection` | `string` | No | `"radaros_learnings"` | Collection name in the vector store |
+| `topK` | `number` | No | `3` | Number of relevant learnings injected into context |
+
+```typescript
+import { InMemoryVectorStore, OpenAIEmbeddings } from "@radaros/core";
+
+memory: {
+  storage,
+  learnings: {
+    vectorStore: new InMemoryVectorStore(new OpenAIEmbeddings()),
+    topK: 5,
+  },
+}
+```
+
+---
+
+## Graph Memory
+
+**Default: OFF.** A knowledge graph where entities are connected by typed, directed relationships. Enables the agent to answer questions that require traversing relationships (e.g., "Who works with Raj?").
+
+### GraphMemoryConfig
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `store` | `GraphStore` | **Yes** | — | Graph store backend (`InMemoryGraphStore` or `Neo4jGraphStore`) |
+| `autoExtract` | `boolean` | No | `true` | Automatically extract entities and relationships from conversations |
+| `maxContextNodes` | `number` | No | `10` | Maximum graph nodes injected into context |
+
+```typescript
+import { InMemoryGraphStore } from "@radaros/core";
+
+memory: {
+  storage,
+  graph: {
+    store: new InMemoryGraphStore(),
+    maxContextNodes: 15,
+  },
+}
+```
+
+See [Graph Memory](/memory/graph-memory) for traversal, Neo4j setup, and temporal awareness.
+
+---
+
+## Procedural Memory
+
+**Default: OFF.** Records successful multi-step tool workflows and suggests them when similar tasks arise.
+
+### ProceduresConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxProcedures` | `number` | `50` | Maximum stored procedures |
+
+```typescript
+memory: {
+  storage,
+  procedures: true,
+}
+
+// With custom limit
+memory: {
+  storage,
+  procedures: { maxProcedures: 100 },
+}
+```
+
+See [Procedural Memory](/memory/procedures) for details.
+
+---
+
+## Context Budget
+
+Controls how the memory context string is distributed across sections when injected into the system prompt.
+
+### ContextBudgetConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxTokens` | `number` | `undefined` | Maximum total tokens for the entire memory context |
+| `priorities` | `Record<string, number>` | `undefined` | Weight for each section (higher = more budget). Keys: `"summaries"`, `"userFacts"`, `"userProfile"`, `"entities"`, `"decisions"`, `"graph"`, `"procedures"` |
+
+```typescript
+memory: {
+  storage,
+  userFacts: true,
+  entities: true,
+  summaries: true,
+  contextBudget: {
+    maxTokens: 4000,
+    priorities: {
+      summaries: 3,    // highest priority
+      userFacts: 2,
+      entities: 1,     // lowest priority
+    },
+  },
+}
+```
+
+---
+
+## Using a Cheaper Model for Extraction
+
+All background extraction (summaries, facts, entities, profiles) uses the agent's primary model by default. This can be expensive. Set `model` to use a cheaper model:
+
+```typescript
+memory: {
+  storage,
+  summaries: true,
+  userFacts: true,
+  entities: true,
+  model: openai("gpt-4o-mini"), // 10x cheaper for background work
+}
+```
+
+---
+
+## Full-Featured Example
+
+Every option enabled:
+
+```typescript
+import {
+  Agent, openai, MongoDBStorage,
+  InMemoryVectorStore, OpenAIEmbeddings, InMemoryGraphStore,
+} from "@radaros/core";
+
+const storage = new MongoDBStorage("mongodb://localhost:27017/myapp");
+await storage.initialize();
+
+const agent = new Agent({
+  name: "full-memory-agent",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    maxMessages: 30,
+    summaries: { maxCount: 10, maxTokens: 2000 },
+    userFacts: { maxFacts: 100 },
+    userProfile: { customFields: ["company", "plan"] },
+    entities: { namespace: "global" },
+    decisions: { maxContextDecisions: 5 },
+    learnings: {
+      vectorStore: new InMemoryVectorStore(new OpenAIEmbeddings()),
+      topK: 3,
+    },
+    graph: {
+      store: new InMemoryGraphStore(),
+      maxContextNodes: 10,
+    },
+    procedures: { maxProcedures: 50 },
+    contextBudget: {
+      maxTokens: 5000,
+      priorities: { summaries: 3, userFacts: 2, entities: 1 },
+    },
+    model: openai("gpt-4o-mini"),
+  },
+});
+```
+
+---
+
+## When to Enable What
+
+| Feature | Enable When | Cost Impact |
+|---------|------------|-------------|
+| **Sessions + Summaries** | Always (default) | Low — 1 LLM call per overflow |
+| **User Facts** | You need cross-session personalization | Low — 1 LLM call per run for extraction |
+| **User Profile** | You need structured user data (name, role, timezone) | Low |
+| **Entities** | Your conversations reference companies, people, projects | Medium — extraction call per run |
+| **Decisions** | You need audit trails or want the agent to learn from past choices | Negligible — no LLM calls, just storage |
+| **Learnings** | You want vector-search over accumulated knowledge | Medium — requires a vector store |
+| **Graph** | You need relationship traversal ("who works with whom") | Higher — extraction + graph storage |
+| **Procedures** | Your agent repeats similar multi-tool workflows | Low |
+
+---
+
+## Storage Options
+
+The `storage` field accepts any `StorageDriver`. Choose based on your needs:
+
+| Driver | Persistence | Best For |
+|--------|------------|----------|
+| `InMemoryStorage` | None (lost on restart) | Development, testing |
+| `SqliteStorage` | File-based | Prototypes, single-server apps |
+| `PostgresStorage` | Durable | Production |
+| `MongoDBStorage` | Durable | Production |
+| `MySQLStorage` | Durable | Production |
+| `RedisStorage` | In-memory with persistence | High-throughput, caching |
+| `DynamoDBStorage` | Durable | AWS-native, serverless |
+
+```typescript
+import { SqliteStorage } from "@radaros/core";
+memory: { storage: new SqliteStorage("app.db") }
+
+import { PostgresStorage } from "@radaros/core";
+const storage = new PostgresStorage("postgresql://user:pass@localhost/db");
+await storage.initialize();
+memory: { storage }
+
+import { MongoDBStorage } from "@radaros/core";
+const storage = new MongoDBStorage("mongodb://localhost:27017/myapp");
+await storage.initialize();
+memory: { storage }
+```
+
+See [Storage Overview](/storage/overview) for setup details for each driver.

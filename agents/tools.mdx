@@ -435,3 +435,165 @@ const agent = new Agent({
 <Note>
   `toolResultLimit` only affects text results sent back to the LLM. It does not modify the `ToolCallResult` stored in `RunOutput.toolCalls` — your application still has access to the original full result.
 </Note>
+
+---
+
+## Using RunContext in Tools
+
+The `execute` function receives two arguments: `args` (the parsed parameters) and `ctx` (the `RunContext`). Use `ctx` to access session info, metadata, state, and dependencies.
+
+```typescript
+const orderTool = defineTool({
+  name: "lookup_order",
+  description: "Look up an order by ID",
+  parameters: z.object({ orderId: z.string() }),
+  execute: async (args, ctx) => {
+    // Session and user info
+    const userId = ctx.userId;
+    const sessionId = ctx.sessionId;
+    const tenantId = ctx.tenantId;
+
+    // Metadata passed via RunOpts
+    const region = ctx.metadata.region as string;
+
+    // Read/write session state (persists across turns)
+    const lastOrder = ctx.getState<string>("lastOrderId");
+    ctx.setState("lastOrderId", args.orderId);
+
+    // Injected dependencies
+    const apiUrl = ctx.dependencies.ORDER_API_URL;
+
+    // Check cancellation
+    if (ctx.signal?.aborted) return "Request cancelled";
+
+    return `Order ${args.orderId} for user ${userId} in ${region}`;
+  },
+});
+```
+
+### RunContext properties available in tools
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `ctx.runId` | `string` | Current run's unique ID |
+| `ctx.sessionId` | `string` | Session ID |
+| `ctx.userId` | `string?` | User ID |
+| `ctx.tenantId` | `string?` | Tenant ID |
+| `ctx.metadata` | `Record<string, unknown>` | Arbitrary metadata from `RunOpts` |
+| `ctx.sessionState` | `Record<string, unknown>` | Mutable key-value state bag |
+| `ctx.dependencies` | `Record<string, string>` | Resolved dependency variables |
+| `ctx.signal` | `AbortSignal?` | Cancellation signal |
+| `ctx.eventBus` | `EventBus` | Event bus for emitting events |
+
+See [Types Reference](/agents/types-reference) for the full RunContext specification.
+
+---
+
+## Sandbox Configuration
+
+Run tools in isolated subprocesses with resource limits. Set at the agent level (applies to all tools) or per-tool.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `enabled` | `boolean` | `true` (when config provided) | Explicit on/off |
+| `timeout` | `number` | `30000` (30s) | Execution timeout in ms |
+| `maxMemoryMB` | `number` | `256` | Max heap memory in MB |
+| `allowNetwork` | `boolean` | `false` | Allow outbound network |
+| `allowFS` | `boolean \| { readOnly?: string[]; readWrite?: string[] }` | `false` | Filesystem access. Pass object for granular paths |
+| `env` | `Record<string, string>` | `undefined` | Environment variables forwarded to the sandbox |
+
+```typescript
+// Agent-level sandbox (applies to all tools)
+const agent = new Agent({
+  model: openai("gpt-4o"),
+  sandbox: {
+    timeout: 10_000,
+    maxMemoryMB: 128,
+    allowFS: { readOnly: ["/data"] },
+  },
+  tools: [safeTool, riskyTool],
+});
+
+// Per-tool sandbox (overrides agent-level)
+const riskyTool = defineTool({
+  name: "run_code",
+  description: "Execute arbitrary code",
+  parameters: z.object({ code: z.string() }),
+  sandbox: {
+    timeout: 5000,
+    maxMemoryMB: 64,
+    allowNetwork: false,
+    allowFS: false,
+  },
+  execute: async (args) => eval(args.code),
+});
+```
+
+---
+
+## Conditional Approval
+
+`requiresApproval` can be a function that decides approval based on the arguments:
+
+```typescript
+const deleteTool = defineTool({
+  name: "delete_record",
+  description: "Delete a database record",
+  parameters: z.object({
+    table: z.string(),
+    id: z.string(),
+  }),
+  requiresApproval: (args) => {
+    // Only require approval for production tables
+    return args.table === "users" || args.table === "orders";
+  },
+  execute: async (args) => {
+    await db.delete(args.table, args.id);
+    return `Deleted ${args.id} from ${args.table}`;
+  },
+});
+```
+
+---
+
+## Runtime Tool Mutation
+
+Add, remove, and replace tools on a running agent:
+
+```typescript
+const agent = new Agent({
+  name: "flexible-agent",
+  model: openai("gpt-4o"),
+  tools: [searchTool],
+});
+
+// Add a tool at runtime
+agent.addTool(calculatorTool);
+
+// Remove a tool
+agent.removeTool("search");
+
+// Replace all tools
+agent.setTools([newTool1, newTool2]);
+
+// List current tools
+const tools = agent.listTools();
+// ["newTool1", "newTool2"]
+```
+
+### Dynamic Tool Resolver
+
+For context-dependent tools that change per run, use `toolResolver`:
+
+```typescript
+const agent = new Agent({
+  model: openai("gpt-4o"),
+  toolResolver: async (ctx) => {
+    const role = ctx.metadata.role as string;
+    if (role === "admin") {
+      return [readTool, writeTool, deleteTool];
+    }
+    return [readTool]; // Regular users only get read access
+  },
+});
+```

@@ -1,0 +1,319 @@
+---
+title: "Models Type Reference"
+description: "Complete reference for ModelProvider, ModelConfig, factory function configs, and all provider-specific options."
+---
+
+## ModelProvider Interface
+
+Every model in RadarOS implements this interface. You never implement it directly — use factory functions like `openai()`, `anthropic()`, `google()`.
+
+| Property/Method | Type | Description |
+|----------------|------|-------------|
+| `providerId` | `string` (readonly) | Provider identifier (e.g. `"openai"`, `"anthropic"`, `"google"`) |
+| `modelId` | `string` (readonly) | Model identifier (e.g. `"gpt-4o"`, `"claude-sonnet-4-20250514"`) |
+| `generate(messages, options?)` | `Promise<ModelResponse>` | Send messages, get a complete response |
+| `stream(messages, options?)` | `AsyncGenerator<StreamChunk>` | Send messages, get a streaming response |
+
+---
+
+## ModelConfig
+
+Options passed to `generate()` and `stream()`. Also used as per-request overrides on the agent.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `temperature` | `number` | Provider default (usually 1.0) | Sampling temperature. 0 = deterministic, 2 = very creative |
+| `maxTokens` | `number` | Provider default | Maximum tokens in the response |
+| `topP` | `number` | `undefined` | Nucleus sampling. Alternative to temperature |
+| `stop` | `string[]` | `undefined` | Stop sequences — model stops generating when it produces any of these |
+| `responseFormat` | `"text" \| "json" \| { type: "json_schema"; schema: object; name?: string }` | `"text"` | `"text"` = plain text, `"json"` = JSON mode, or a JSON schema for structured output |
+| `apiKey` | `string` | Provider-level key | Per-request API key override |
+| `reasoning` | `ReasoningConfig` | `undefined` | Enable extended thinking |
+
+---
+
+## Factory Functions and Provider Configs
+
+Each provider has a factory function that creates a `ModelProvider`. Here are the config options for every provider.
+
+### openai(modelId, config?)
+
+```typescript
+import { openai } from "@radaros/core";
+const model = openai("gpt-4o", { apiKey: "sk-..." });
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `OPENAI_API_KEY` env var | OpenAI API key |
+| `baseURL` | `string` | `"https://api.openai.com/v1"` | Custom base URL. Use this for OpenAI-compatible APIs (Together, Groq, etc.) |
+
+**Common models**: `gpt-4o`, `gpt-4o-mini`, `o3`, `o3-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
+
+### anthropic(modelId, config?)
+
+```typescript
+import { anthropic } from "@radaros/core";
+const model = anthropic("claude-sonnet-4-20250514", { apiKey: "sk-ant-..." });
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `ANTHROPIC_API_KEY` env var | Anthropic API key |
+
+**Common models**: `claude-sonnet-4-20250514`, `claude-haiku-4-5-20251001`, `claude-opus-4-20250514`
+
+### google(modelId, config?)
+
+```typescript
+import { google } from "@radaros/core";
+const model = google("gemini-2.5-flash", { apiKey: "AI..." });
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `GOOGLE_API_KEY` env var | Google AI Studio API key |
+
+**Common models**: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash`
+
+### vertex(modelId, config?)
+
+```typescript
+import { vertex } from "@radaros/core";
+const model = vertex("gemini-2.5-flash", {
+  project: "my-gcp-project",
+  location: "us-central1",
+});
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `project` | `string` | `GOOGLE_CLOUD_PROJECT` env var | GCP project ID |
+| `location` | `string` | `"us-central1"` | GCP region |
+| `credentials` | `string` | Application Default Credentials | Path to a service account JSON key file, OR the JSON string itself |
+
+### ollama(modelId, config?)
+
+```typescript
+import { ollama } from "@radaros/core";
+const model = ollama("llama3.2", { host: "http://localhost:11434" });
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `host` | `string` | `"http://localhost:11434"` | Ollama server URL |
+
+**Common models**: `llama3.2`, `llama3.1`, `codellama`, `mistral`, `phi3`, `gemma2`
+
+### deepseek(modelId, config?)
+
+```typescript
+import { deepseek } from "@radaros/core";
+const model = deepseek("deepseek-chat");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `DEEPSEEK_API_KEY` env var | DeepSeek API key |
+
+**Common models**: `deepseek-chat`, `deepseek-reasoner`
+
+### mistral(modelId, config?)
+
+```typescript
+import { mistral } from "@radaros/core";
+const model = mistral("mistral-large-latest");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `MISTRAL_API_KEY` env var | Mistral API key |
+
+**Common models**: `mistral-large-latest`, `mistral-medium-latest`, `codestral-latest`, `pixtral-large-latest`
+
+### xai(modelId, config?)
+
+```typescript
+import { xai } from "@radaros/core";
+const model = xai("grok-3");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `XAI_API_KEY` env var | xAI API key |
+
+**Common models**: `grok-3`, `grok-3-mini`, `grok-2`
+
+### perplexity(modelId, config?)
+
+```typescript
+import { perplexity } from "@radaros/core";
+const model = perplexity("sonar-pro");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `PERPLEXITY_API_KEY` env var | Perplexity API key |
+
+**Common models**: `sonar-pro`, `sonar`, `sonar-reasoning-pro`
+
+### cohere(modelId, config?)
+
+```typescript
+import { cohere } from "@radaros/core";
+const model = cohere("command-r-plus");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `COHERE_API_KEY` env var | Cohere API key |
+
+**Common models**: `command-r-plus`, `command-r`, `command-light`
+
+### meta(modelId, config?)
+
+```typescript
+import { meta } from "@radaros/core";
+const model = meta("Llama-4-Maverick-17B-128E-Instruct-FP8");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `META_API_KEY` env var | Meta Llama API key |
+
+### awsBedrock(modelId, config?)
+
+```typescript
+import { awsBedrock } from "@radaros/core";
+const model = awsBedrock("amazon.nova-pro-v1:0", {
+  region: "us-east-1",
+});
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `region` | `string` | `AWS_REGION` env var | AWS region |
+| `accessKeyId` | `string` | AWS credential chain | AWS access key |
+| `secretAccessKey` | `string` | AWS credential chain | AWS secret key |
+| `sessionToken` | `string` | `undefined` | AWS session token (for temporary credentials) |
+| `profile` | `string` | `undefined` | AWS credentials profile name |
+
+### awsClaude(modelId, config?)
+
+```typescript
+import { awsClaude } from "@radaros/core";
+const model = awsClaude("claude-sonnet-4-20250514", {
+  region: "us-east-1",
+});
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `region` | `string` | `AWS_REGION` env var | AWS region |
+| `accessKeyId` | `string` | AWS credential chain | AWS access key |
+| `secretAccessKey` | `string` | AWS credential chain | AWS secret key |
+
+### azureOpenai(modelId, config?)
+
+```typescript
+import { azureOpenai } from "@radaros/core";
+const model = azureOpenai("gpt-4o", {
+  resourceName: "my-resource",
+  deploymentName: "my-deployment",
+  apiKey: "...",
+});
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `resourceName` | `string` | Required | Azure OpenAI resource name |
+| `deploymentName` | `string` | Required | Deployment name |
+| `apiKey` | `string` | `AZURE_OPENAI_API_KEY` env var | Azure API key |
+| `apiVersion` | `string` | `"2024-12-01-preview"` | Azure API version |
+
+### azureFoundry(modelId, config?)
+
+```typescript
+import { azureFoundry } from "@radaros/core";
+const model = azureFoundry("Phi-4", {
+  endpoint: "https://my-endpoint.inference.ai.azure.com",
+  apiKey: "...",
+});
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `endpoint` | `string` | Required | Azure AI Foundry inference endpoint |
+| `apiKey` | `string` | `AZURE_FOUNDRY_API_KEY` env var | Azure API key |
+
+### vercel(modelId, config?)
+
+```typescript
+import { vercel } from "@radaros/core";
+const model = vercel("v0-1.0-md");
+```
+
+| Config Property | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `apiKey` | `string` | `VERCEL_API_KEY` env var | Vercel API key |
+
+---
+
+## OpenAI-Compatible Providers
+
+Any API that follows the OpenAI API format can be used with the `openai()` factory by setting `baseURL`:
+
+```typescript
+// Together AI
+const together = openai("meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", {
+  apiKey: process.env.TOGETHER_API_KEY,
+  baseURL: "https://api.together.xyz/v1",
+});
+
+// Groq
+const groq = openai("llama-3.3-70b-versatile", {
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
+
+// Fireworks AI
+const fireworks = openai("accounts/fireworks/models/llama-v3p1-70b-instruct", {
+  apiKey: process.env.FIREWORKS_API_KEY,
+  baseURL: "https://api.fireworks.ai/inference/v1",
+});
+
+// OpenRouter
+const openrouter = openai("anthropic/claude-sonnet-4-20250514", {
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
+
+// LM Studio (local)
+const lmstudio = openai("local-model", {
+  baseURL: "http://localhost:1234/v1",
+});
+```
+
+---
+
+## Environment Variables
+
+Quick reference for all provider environment variables:
+
+| Provider | Env Variable | Factory |
+|----------|-------------|---------|
+| OpenAI | `OPENAI_API_KEY` | `openai()` |
+| Anthropic | `ANTHROPIC_API_KEY` | `anthropic()` |
+| Google | `GOOGLE_API_KEY` | `google()` |
+| Vertex AI | `GOOGLE_CLOUD_PROJECT` | `vertex()` |
+| Ollama | — (no key needed) | `ollama()` |
+| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek()` |
+| Mistral | `MISTRAL_API_KEY` | `mistral()` |
+| xAI | `XAI_API_KEY` | `xai()` |
+| Perplexity | `PERPLEXITY_API_KEY` | `perplexity()` |
+| Cohere | `COHERE_API_KEY` | `cohere()` |
+| Meta | `META_API_KEY` | `meta()` |
+| AWS | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `awsBedrock()`, `awsClaude()` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` | `azureOpenai()` |
+| Azure Foundry | `AZURE_FOUNDRY_API_KEY` | `azureFoundry()` |
+| Vercel | `VERCEL_API_KEY` | `vercel()` |

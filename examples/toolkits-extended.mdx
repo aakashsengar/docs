@@ -1,0 +1,507 @@
+---
+title: "All Toolkits"
+description: "Complete examples for every toolkit available in RadarOS, showing how to import, configure, and use each one with an agent."
+---
+
+## SlackToolkit
+
+Send messages and read channels in Slack workspaces.
+
+```typescript
+import { Agent, SlackToolkit } from "@radaros/core";
+
+const slack = new SlackToolkit({
+  botToken: process.env.SLACK_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "slack-bot",
+  instructions: "You help teams communicate via Slack.",
+  toolkits: [slack],
+});
+
+await agent.run("Send 'Deploy complete' to #engineering and read the last 5 messages from #alerts");
+```
+
+## DiscordToolkit
+
+Send messages and manage channels in Discord servers.
+
+```typescript
+import { Agent, DiscordToolkit } from "@radaros/core";
+
+const discord = new DiscordToolkit({
+  botToken: process.env.DISCORD_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "discord-bot",
+  instructions: "You manage community engagement on Discord.",
+  toolkits: [discord],
+});
+
+await agent.run("List all channels and send a welcome message to #general");
+```
+
+## TelegramToolkit
+
+Send messages and media through Telegram bots.
+
+```typescript
+import { Agent, TelegramToolkit } from "@radaros/core";
+
+const telegram = new TelegramToolkit({
+  botToken: process.env.TELEGRAM_BOT_TOKEN,
+});
+
+const agent = new Agent({
+  name: "telegram-bot",
+  instructions: "You send updates and photos via Telegram.",
+  toolkits: [telegram],
+});
+
+await agent.run("Send 'Server healthy' to chat 123456 and send the status screenshot photo from /tmp/status.png");
+```
+
+## NotionToolkit
+
+Search, read, and create pages in Notion workspaces.
+
+```typescript
+import { Agent, NotionToolkit } from "@radaros/core";
+
+const notion = new NotionToolkit({
+  apiKey: process.env.NOTION_API_KEY,
+});
+
+const agent = new Agent({
+  name: "notion-assistant",
+  instructions: "You organize knowledge in Notion.",
+  toolkits: [notion],
+});
+
+await agent.run("Search for pages about 'Q4 roadmap', read the first result, and create a summary page in the Planning database");
+```
+
+## JiraToolkit
+
+Search and create issues in Jira projects.
+
+```typescript
+import { Agent, JiraToolkit } from "@radaros/core";
+
+const jira = new JiraToolkit({
+  host: "https://myteam.atlassian.net",
+  email: process.env.JIRA_EMAIL,
+  apiToken: process.env.JIRA_API_TOKEN,
+});
+
+const agent = new Agent({
+  name: "jira-assistant",
+  instructions: "You manage project issues in Jira.",
+  toolkits: [jira],
+});
+
+await agent.run("Search for open bugs in the CORE project and create a new issue titled 'Fix login timeout' with high priority");
+```
+
+## GitHubToolkit
+
+Interact with GitHub repositories, issues, and file contents.
+
+```typescript
+import { Agent, GitHubToolkit } from "@radaros/core";
+
+const github = new GitHubToolkit({
+  token: process.env.GITHUB_TOKEN,
+});
+
+const agent = new Agent({
+  name: "github-assistant",
+  instructions: "You help manage GitHub repositories.",
+  toolkits: [github],
+});
+
+await agent.run("List my repos, read the README.md from radaros/core, and create an issue titled 'Add retry logic' in that repo");
+```
+
+## StripeToolkit
+
+Query charges and customer data from Stripe.
+
+```typescript
+import { Agent, StripeToolkit } from "@radaros/core";
+
+const stripe = new StripeToolkit({
+  apiKey: process.env.STRIPE_SECRET_KEY,
+});
+
+const agent = new Agent({
+  name: "billing-assistant",
+  instructions: "You help with billing inquiries using Stripe data.",
+  toolkits: [stripe],
+});
+
+await agent.run("List the last 10 charges and get details for customer cus_abc123");
+```
+
+## S3Toolkit
+
+Upload, download, and list objects in Amazon S3 buckets.
+
+```typescript
+import { Agent, S3Toolkit } from "@radaros/core";
+
+const s3 = new S3Toolkit({
+  region: "us-east-1",
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  bucket: "my-data-bucket",
+});
+
+const agent = new Agent({
+  name: "storage-assistant",
+  instructions: "You manage files in S3.",
+  toolkits: [s3],
+});
+
+await agent.run("List all files in the reports/ prefix, then download the latest CSV");
+```
+
+## SqlToolkit
+
+Run queries and inspect schemas on SQLite or PostgreSQL databases.
+
+```typescript
+import { Agent, SqlToolkit } from "@radaros/core";
+
+const sqlLite = new SqlToolkit({
+  type: "sqlite",
+  database: "./data/app.db",
+});
+
+const sqlPostgres = new SqlToolkit({
+  type: "postgres",
+  connectionString: process.env.DATABASE_URL,
+});
+
+const agent = new Agent({
+  name: "data-analyst",
+  instructions: "You answer questions by querying the database.",
+  toolkits: [sqlPostgres],
+});
+
+await agent.run("Show me the schema for the users table, then find the top 10 users by order count");
+```
+
+## RedisToolkit
+
+Get, set, delete, and list keys in a Redis store.
+
+```typescript
+import { Agent, RedisToolkit } from "@radaros/core";
+
+const redis = new RedisToolkit({
+  url: process.env.REDIS_URL,
+});
+
+const agent = new Agent({
+  name: "cache-manager",
+  instructions: "You manage cached data in Redis.",
+  toolkits: [redis],
+});
+
+await agent.run("List all keys matching 'session:*', get the value of 'session:user42', and delete expired keys");
+```
+
+## FilesystemToolkit
+
+Read, write, and list files within a sandboxed directory.
+
+```typescript
+import { Agent, FilesystemToolkit } from "@radaros/core";
+
+const fs = new FilesystemToolkit({
+  basePath: "./workspace",
+});
+
+const agent = new Agent({
+  name: "file-manager",
+  instructions: "You organize and manage local files.",
+  toolkits: [fs],
+});
+
+await agent.run("List all .json files, read config.json, and write a backup to config.backup.json");
+```
+
+## ShellToolkit
+
+Execute shell commands with configurable timeouts and allowlists.
+
+```typescript
+import { Agent, ShellToolkit } from "@radaros/core";
+
+const shell = new ShellToolkit({
+  timeout: 30000,
+  allowedCommands: ["ls", "cat", "grep", "wc", "echo"],
+});
+
+const agent = new Agent({
+  name: "devops-assistant",
+  instructions: "You run safe shell commands to inspect the system.",
+  toolkits: [shell],
+});
+
+await agent.run("Count the number of lines in all TypeScript files under src/");
+```
+
+## GitToolkit
+
+Check status, view diffs, and browse commit history of a Git repository.
+
+```typescript
+import { Agent, GitToolkit } from "@radaros/core";
+
+const git = new GitToolkit({
+  repoPath: "/home/user/project",
+});
+
+const agent = new Agent({
+  name: "code-reviewer",
+  instructions: "You review recent changes in the repository.",
+  toolkits: [git],
+});
+
+await agent.run("Show the current git status, the diff of staged files, and the last 5 commit messages");
+```
+
+## WebSearchToolkit
+
+Search the web using Tavily for real-time information.
+
+```typescript
+import { Agent, WebSearchToolkit } from "@radaros/core";
+
+const search = new WebSearchToolkit({
+  provider: "tavily",
+  apiKey: process.env.TAVILY_API_KEY,
+});
+
+const agent = new Agent({
+  name: "researcher",
+  instructions: "You find up-to-date information from the web.",
+  toolkits: [search],
+});
+
+await agent.run("Search for the latest Node.js LTS release and summarize the changelog");
+```
+
+## DuckDuckGoToolkit
+
+Search the web and browse news without any API keys.
+
+```typescript
+import { Agent, DuckDuckGoToolkit } from "@radaros/core";
+
+const ddg = new DuckDuckGoToolkit();
+
+const agent = new Agent({
+  name: "news-assistant",
+  instructions: "You find news and web results using DuckDuckGo.",
+  toolkits: [ddg],
+});
+
+await agent.run("Search for recent AI startup funding news and summarize the top 3 results");
+```
+
+## ScraperToolkit
+
+Extract text content from any URL.
+
+```typescript
+import { Agent, ScraperToolkit } from "@radaros/core";
+
+const scraper = new ScraperToolkit();
+
+const agent = new Agent({
+  name: "content-extractor",
+  instructions: "You extract and summarize text from web pages.",
+  toolkits: [scraper],
+});
+
+await agent.run("Extract the main text from https://example.com/blog/post-1 and give me a 3-sentence summary");
+```
+
+## CodeInterpreterToolkit
+
+Execute JavaScript or Python code in a sandboxed environment.
+
+```typescript
+import { Agent, CodeInterpreterToolkit } from "@radaros/core";
+
+const interpreter = new CodeInterpreterToolkit({
+  languages: ["javascript", "python"],
+});
+
+const agent = new Agent({
+  name: "code-runner",
+  instructions: "You solve problems by writing and executing code.",
+  toolkits: [interpreter],
+});
+
+await agent.run("Write a Python script that generates the first 20 Fibonacci numbers and prints them as a formatted table");
+```
+
+## ImageGenerationToolkit
+
+Generate images using DALL-E from text descriptions.
+
+```typescript
+import { Agent, ImageGenerationToolkit } from "@radaros/core";
+
+const imageGen = new ImageGenerationToolkit({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const agent = new Agent({
+  name: "designer",
+  instructions: "You create images based on user descriptions.",
+  toolkits: [imageGen],
+});
+
+await agent.run("Generate a minimalist logo for a cloud infrastructure startup called 'NimbusOps'");
+```
+
+## PdfToolkit
+
+Extract text and metadata from PDF documents.
+
+```typescript
+import { Agent, PdfToolkit } from "@radaros/core";
+
+const pdf = new PdfToolkit();
+
+const agent = new Agent({
+  name: "document-reader",
+  instructions: "You read and summarize PDF documents.",
+  toolkits: [pdf],
+});
+
+await agent.run("Extract text from ./reports/q4-financials.pdf and summarize the key metrics");
+```
+
+## YouTubeToolkit
+
+Search videos and retrieve transcripts from YouTube.
+
+```typescript
+import { Agent, YouTubeToolkit } from "@radaros/core";
+
+const youtube = new YouTubeToolkit({
+  apiKey: process.env.YOUTUBE_API_KEY,
+});
+
+const agent = new Agent({
+  name: "video-researcher",
+  instructions: "You find and summarize YouTube video content.",
+  toolkits: [youtube],
+});
+
+await agent.run("Search for 'TypeScript 5.0 features' and get the transcript of the top result");
+```
+
+## WikipediaToolkit
+
+Search and read Wikipedia articles.
+
+```typescript
+import { Agent, WikipediaToolkit } from "@radaros/core";
+
+const wiki = new WikipediaToolkit();
+
+const agent = new Agent({
+  name: "knowledge-assistant",
+  instructions: "You answer questions using Wikipedia.",
+  toolkits: [wiki],
+});
+
+await agent.run("Search for 'Large Language Models' and read the full article, then explain it in simple terms");
+```
+
+## GoogleSheetsToolkit
+
+Read, write, and append data in Google Sheets.
+
+```typescript
+import { Agent, GoogleSheetsToolkit } from "@radaros/core";
+
+const sheets = new GoogleSheetsToolkit({
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+});
+
+const agent = new Agent({
+  name: "spreadsheet-assistant",
+  instructions: "You manage data in Google Sheets.",
+  toolkits: [sheets],
+});
+
+await agent.run("Read all rows from the 'Sales' sheet, calculate totals, and append a summary row");
+```
+
+## CalendarToolkit
+
+List and create events in Google Calendar.
+
+```typescript
+import { Agent, CalendarToolkit } from "@radaros/core";
+
+const calendar = new CalendarToolkit({
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+});
+
+const agent = new Agent({
+  name: "scheduling-assistant",
+  instructions: "You manage calendar events and scheduling.",
+  toolkits: [calendar],
+});
+
+await agent.run("List all events for next Monday and create a 30-minute team standup at 9am");
+```
+
+## HttpToolkit
+
+Make HTTP GET and POST requests with custom headers.
+
+```typescript
+import { Agent, HttpToolkit } from "@radaros/core";
+
+const http = new HttpToolkit();
+
+const agent = new Agent({
+  name: "api-tester",
+  instructions: "You interact with REST APIs via HTTP requests.",
+  toolkits: [http],
+});
+
+await agent.run("GET https://api.example.com/health, then POST a test payload to https://api.example.com/echo");
+```
+
+## PageIndexToolkit
+
+Upload PDFs, build tree indices, and perform reasoning-based retrieval.
+
+```typescript
+import { Agent, PageIndexToolkit } from "@radaros/core";
+
+const pageIndex = new PageIndexToolkit({
+  apiKey: process.env.PAGEINDEX_API_KEY,
+});
+
+const agent = new Agent({
+  name: "document-analyst",
+  instructions: "You analyze documents using indexed retrieval and reasoning.",
+  toolkits: [pageIndex],
+});
+
+await agent.run("Upload ./docs/whitepaper.pdf, build a tree index, and answer: what are the three main contributions?");
+```

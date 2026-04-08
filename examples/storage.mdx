@@ -391,3 +391,104 @@ const result = await agent.run("Remember: my project deadline is March 15.", {
 });
 console.log(result.text);
 ```
+
+## DynamoDB Storage
+
+AWS-native serverless storage. Pay-per-request pricing, no server management.
+
+```typescript
+import { Agent, openai, DynamoDBStorage } from "@radaros/core";
+
+// Requires: npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
+// Env vars: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+const storage = new DynamoDBStorage({
+  region: process.env.AWS_REGION ?? "us-east-1",
+  tableName: "radaros-data",
+});
+await storage.initialize(); // Creates the table if it doesn't exist
+
+const agent = new Agent({
+  name: "serverless-agent",
+  model: openai("gpt-4o"),
+  memory: { storage, summaries: true, userFacts: true },
+});
+
+const result = await agent.run("I'm a data scientist working on NLP", {
+  sessionId: "s1",
+  userId: "u1",
+});
+console.log(result.text);
+
+// DynamoDB CRUD
+await storage.set("my-namespace", "key-1", { data: "hello" });
+const value = await storage.get("my-namespace", "key-1");
+const items = await storage.list("my-namespace");
+await storage.delete("my-namespace", "key-1");
+
+await storage.close();
+```
+
+## MySQL Storage
+
+MySQL-backed persistence for teams already running MySQL infrastructure.
+
+```typescript
+import { Agent, openai, MySQLStorage } from "@radaros/core";
+
+// Requires: npm install mysql2
+const storage = new MySQLStorage({
+  host: "localhost",
+  port: 3306,
+  user: "root",
+  password: process.env.MYSQL_PASSWORD,
+  database: "radaros",
+});
+await storage.initialize(); // Creates the kv table if needed
+
+const agent = new Agent({
+  name: "mysql-agent",
+  model: openai("gpt-4o"),
+  memory: {
+    storage,
+    summaries: true,
+    userFacts: true,
+    entities: true,
+  },
+});
+
+const result = await agent.run("Tell me about quantum computing", {
+  sessionId: "session-1",
+  userId: "user-1",
+});
+console.log(result.text);
+
+await storage.close();
+```
+
+## Redis Storage
+
+In-memory storage with optional persistence. Best for high-throughput caching and ephemeral sessions.
+
+```typescript
+import { Agent, openai, RedisStorage } from "@radaros/core";
+
+// Requires: npm install ioredis
+const storage = new RedisStorage(process.env.REDIS_URL ?? "redis://localhost:6379");
+await storage.initialize();
+
+const agent = new Agent({
+  name: "redis-agent",
+  model: openai("gpt-4o"),
+  memory: { storage, summaries: true },
+});
+
+// Redis is great for short-lived, high-frequency sessions
+for (let i = 0; i < 5; i++) {
+  const result = await agent.run(`Message ${i + 1}: Tell me a fact`, {
+    sessionId: "fast-session",
+  });
+  console.log(`Turn ${i + 1}: ${result.text.slice(0, 80)}...`);
+}
+
+await storage.close();
+```
